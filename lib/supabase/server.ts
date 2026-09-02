@@ -9,10 +9,15 @@ import { getSupabaseEnv } from './env'
  *
  * 关于 setAll 的 try/catch：Server Component 里 cookie 是只读的，
  * 写入会抛错，这里静默忽略。session 刷新统一由 middleware 负责（见 P0-0-3）。
+ *
+ * ⚠️ 关于调用顺序：cookies() 必须先于 getSupabaseEnv() 执行。
+ * Next.js 靠「渲染期间是否读过 cookies()」来判定路由是否依赖请求上下文。
+ * 顺序反了的话，env 缺失时会在 cookies() 之前就抛错，Next 看不到 cookies()
+ * → 误判为静态页 → build 期预渲染崩溃（Vercel P0-0-6 部署实测踩坑）。
  */
 export async function createClient() {
-  const { url, anonKey } = getSupabaseEnv()
   const cookieStore = await cookies()
+  const { url, anonKey } = getSupabaseEnv()
 
   return createServerClient(url, anonKey, {
     cookies: {

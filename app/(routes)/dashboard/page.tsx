@@ -8,6 +8,11 @@ export const metadata = {
   title: '总览 · Tempo',
 }
 
+// 依赖用户 session，绝不能被静态预渲染。
+// 虽然 createClient() 里的 cookies() 已能让 Next 识别为动态路由，
+// 但这里显式声明，避免将来有人调整调用顺序时又退化成静态页。
+export const dynamic = 'force-dynamic'
+
 export default async function DashboardPage() {
   const supabase = await createClient()
   const {
