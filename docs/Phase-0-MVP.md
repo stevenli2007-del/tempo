@@ -29,12 +29,11 @@
 
 ## 当前进度指针
 
-**当前 task**：`P0-0-3` Supabase Auth（代码已完成，**待 Steven 跑 `npm run dev` 实测验收**）｜ **下一步**：P0-0-4 数据库迁移
+**当前 task**：`P0-0-4` 数据库迁移（迁移文件已写好，**待 Steven 在 SQL Editor 执行**）｜ **下一步**：P0-0-5 RLS 策略
 
 > 📌 **现状（2026-09-02 核实）**：
-> - P0-0-1 脚手架 ✅、P0-0-2a（Steven 建项目 + `.env.local`）✅、P0-0-2b（client 分离）✅。
-> - P0-0-3 代码已完成并通过 `build` / `lint` / `tsc`，**但注册→登录→登出这条交互链路 Bud 跑不了 `next dev`（WorkBuddy 环境拦截 `.next` 缓存），必须由 Steven 在本地终端实测验收。**
-> - 验收通过后，标记 P0-0-3 ✅ 并进入 P0-0-4（建表）。
+> - P0-0-1 脚手架 ✅、P0-0-2a（Supabase 项目 + `.env.local`）✅、P0-0-2b（client 分离）✅、**P0-0-3（Auth）✅ 已由 Steven 实测通过**。
+> - P0-0-4 迁移文件 `supabase/migrations/20260902003000_initial_schema.sql` 已写好（13 表 + 外键 + 触发器 + 8 索引）。**沙箱无 Supabase CLI，无法代跑，需 Steven 在 Dashboard → SQL Editor 粘贴执行。**
 
 ---
 
@@ -47,8 +46,8 @@
 | **P0-0-1** | 项目脚手架：Next.js 16.3.4 App Router + TS + Tailwind v4 + shadcn/ui 初始化，目录结构按 `CodingRules.md` | Bud | — | 本地 `dev` 可跑，访问首页看到占位页；TS 无报错 | ✅ |
 | **P0-0-2a** | **【Steven 手动】** 在 Supabase 建项目 + 拿 Project URL / anon key + `cp .env.example .env.local` 填两个值 | **Steven** | P0-0-1 | `.env.local` 已填两个值；`npm run dev` 不报"缺少环境变量"错误 | ✅ |
 | **P0-0-2b** | 前后端 client 分离（`lib/supabase/server.ts` / `browser.ts` 分开，不混用）+ `.env.example` 模板 + env 缺失即抛错校验 | Bud | P0-0-1 | `lib/supabase/{server,browser,env}.ts` 就位；service key 不进前端 | ✅ |
-| **P0-0-3** | Supabase Auth：邮箱 + 密码注册/登录 + proxy 保护路由 | Bud | P0-0-2a | 可注册、登录、登出；未登录访问受保护页面被重定向 | 🔵 待实测 |
-| **P0-0-4** | 数据库迁移：建表（按 `Database.md` 全部表 + 索引 + 外键） | Bud | P0-0-2a | 迁移脚本可重复执行；表结构与 `Database.md` 一致 | ⚪ |
+| **P0-0-3** | Supabase Auth：邮箱 + 密码注册/登录 + proxy 保护路由 | Bud | P0-0-2a | 可注册、登录、登出；未登录访问受保护页面被重定向 | ✅ |
+| **P0-0-4** | 数据库迁移：建表（按 `Database.md` 全部表 + 索引 + 外键） | 共担 | P0-0-2a | 迁移脚本可重复执行；表结构与 `Database.md` 一致 | 🔵 待执行 |
 | **P0-0-5** | RLS 策略：用户只能访问自己的数据 | Bud | P0-0-4 | 用两个测试账号交叉验证，看不到对方任何数据 | ⚪ |
 | **P0-0-6** | 部署上线（Vercel）+ 生产环境变量 + 冒烟测试 | 共担 | P0-0-3, P0-0-5 | 生产环境可注册登录；无环境变量泄漏 | ⚪ |
 
@@ -82,12 +81,13 @@
 - **验收**：`npm run dev` → 注册→登录→登出全通；未登录访问 `/dashboard` 被重定向到 `/login`；已登录访问 `/login` 被弹到 `/dashboard`
 - **交接点**：Bud 已跑通 `build` / `lint` / `tsc`，**但交互链路必须由 Steven 在本地终端实测**（WorkBuddy 环境拦截 `.next` 缓存，`next dev` 跑不起来）
 
-#### 🎫 P0-0-4 · 数据库迁移
+#### 🎫 P0-0-4 · 数据库迁移 —— 迁移文件已写好，待 Steven 在 SQL Editor 执行
 - **做什么**：按 `Database.md` 建全部 13 张表 + 索引 + 外键 + `updated_at` 触发器
-- **改哪些文件**：`supabase/migrations/*.sql`
-- **关键约束**：表名/字段名以 `Database.md` 为唯一标准（snake_case）；枚举用 `text + CHECK` 不用 Postgres enum；软删除；**必须建 `tasks_source_unique` 唯一索引**；禁止在 Dashboard 手动改表
-- **验收**：迁移脚本可重复执行；表结构与 `Database.md` 一致
-- **交接点**：无（纯 Bud）；前置 `.env.local` 就绪（P0-0-2a）
+- **改哪些文件**：`supabase/migrations/20260902003000_initial_schema.sql`（已就位）
+- **关键约束**：表名/字段名以 `Database.md` 为唯一标准（snake_case）；枚举用 `text + CHECK` 不用 Postgres enum；软删除；**必须建 `tasks_source_unique` 唯一索引**；禁止在 Dashboard 手动改表（结构只走迁移文件）
+- **验收**：迁移脚本可重复执行（`if not exists` / `drop trigger if exists`）；表结构与 `Database.md` 一致
+- **交接点**：⚠️ **沙箱无 Supabase CLI，无法代跑**。需 Steven 在 **Dashboard → SQL Editor → 粘贴整份 SQL → Run**（步骤见交付报告）。跑完执行验证查询确认 13 张表都在。
+- **⚠️ 未建但后续必须补**（不属于 P0-0-4 范围，留待处理）：`handle_new_user` 触发器 —— 注册时自动在 `profiles` 插一行。没有它，P0-1 做 Workspace CRUD 时用户会"找不到 profile 记录"。建议并入 P0-0-5 或单开一个 P0-0-4a。
 
 #### 🎫 P0-0-5 · RLS 策略
 - **做什么**：所有业务表 `ENABLE ROW LEVEL SECURITY` + 行级策略
