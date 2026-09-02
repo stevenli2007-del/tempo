@@ -107,14 +107,14 @@
 - Supabase URL Configuration：Site URL = 生产 URL；Redirect URLs 含 `http://localhost:3000/**` + `https://tempo-six-neon.vercel.app/**`
 - 生产冒烟通过：landing page 可访问、注册新账号直接进 `/dashboard`、登出回 `/login`、未登录访问 `/dashboard` 弹回 `/login`
 
-**⚠️ 三个已踩过的坑（下次别再掉进去）**
+**⚠️ 四个已踩过的坑（下次别再掉进去）**
 1. **git author 邮箱必须匹配 GitHub 账号** —— 否则 Vercel 判「冒名顶替」直接 **Blocked**，不报 build 错。修复：
    ```bash
    git config user.email "stevenli2007@berkeley.edu" && git config user.name "Steven Li"
    git commit --amend --author="Steven Li <stevenli2007@berkeley.edu>" --no-edit
    git push --force-with-lease origin main
    ```
-2. **Server Client 里 `cookies()` 必须在 `getSupabaseEnv()` 之后调用**（不是之前）。先 env 校验后 cookies()，env 缺失时 Next 看不到 cookies() 调用就误判 `/dashboard` 为静态页强行预渲染 → `prerender-error`。**修复套路**：所有 session 依赖页加 `export const dynamic = 'force-dynamic'`。
+2. **Server Client 里 `cookies()` 必须在 `getSupabaseEnv()` 之前调用**（不是之后）。顺序反了的话，env 缺失时会在 `cookies()` 之前就抛错，Next 看不到 `cookies()` 调用 → 误判 `/dashboard` 为静态页强行预渲染 → `prerender-error`。**修复套路**：所有 session 依赖页加 `export const dynamic = 'force-dynamic'`。（修复溯源：commit `8f408d8`）
 3. **env vars 保存 ≠ 已注入当前 deployment** —— 先 Deploy 后加 env vars，旧 build 不带变量，页面 500。**加完必须手动 Redeploy**，让 Vercel 重跑 build 把变量烤进 bundle。
 4. **`NEXT_PUBLIC_*` 变量在 Vercel UI 应选 Config 不要选 Secret** —— Vercel 会红框警告，公开值用 Secret 是误导且徒增混淆。
 
