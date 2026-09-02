@@ -8,6 +8,7 @@ import {
   SYLLABUS_COLUMNS_WITH_TEXT,
   extractExtension,
   isAllowedExtension,
+  isStorageObjectNotFoundError,
   toSyllabus,
 } from '@/lib/syllabi'
 import type { SyllabusRow, SyllabusRowWithText } from '@/lib/syllabi'
@@ -106,11 +107,10 @@ export async function POST(request: Request, { params }: RouteContext) {
       .createSignedUrl(row.file_url, SIGNED_URL_TTL_SECONDS)
 
     if (signError) {
-      // ⚠️ 实测（2026-09-02）：`createSignedUrl` **会**检查对象是否存在 ——
-      // 对象不存在时返回 `StorageApiError { statusCode: '404', code: 'NoSuchKey', message: 'Object not found' }`。
-      // 这正是「悬挂行」（票据签发了但浏览器没传完）的判定信号，
-      // **不能当服务端错误抛出去**（那会让用户看到 500，而不是"文件没传完"）。
-      if (isObjectNotFoundError(signError)) {
+      // 悬挂行（票据签发了但浏览器没传完）的判定信号。
+      // **不能当服务端错误抛出去** —— 那会让用户看到 500，而不是「文件没传完」。
+      // 判定细节（statusCode 是字符串 '404'）见 `isStorageObjectNotFoundError`。
+      if (isStorageObjectNotFoundError(signError)) {
         await markExtractResult(supabase, id, fileMissingOutcome())
         return jsonError(request, 409, 'file_missing', FILE_MISSING_ERROR)
       }
@@ -151,18 +151,6 @@ export async function POST(request: Request, { params }: RouteContext) {
 /** 悬挂行的提取结果：直接置 failed + 原因，让用户看得见（Database.md 3.3 的兜底约定）。 */
 function fileMissingOutcome(): ExtractOutcome {
   return { status: 'failed', text: null, method: null, pageCount: null, error: FILE_MISSING_ERROR }
-}
-
-/**
- * 判断 Storage 错误是不是「对象不存在」。
- *
- * Supabase 返回的是 `StorageApiError`，`statusCode` 是**字符串** `'404'`（不是数字），
- * `code` 是 `'NoSuchKey'`。两个条件都判，免得将来平台只改其中一个。
- */
-function isObjectNotFoundError(error: unknown): boolean {
-  if (typeof error !== 'object' || error === null) return false
-  const { statusCode, code } = error as { statusCode?: unknown; code?: unknown }
-  return statusCode === '404' || statusCode === 404 || code === 'NoSuchKey'
 }
 
 /**

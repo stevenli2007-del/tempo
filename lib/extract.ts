@@ -1,6 +1,8 @@
+import path from 'node:path'
+
 import JSZip from 'jszip'
 import mammoth from 'mammoth'
-import { PDFParse } from 'pdf-parse'
+import { getDocument } from 'pdfjs-dist/legacy/build/pdf.mjs'
 
 import type { SyllabusExtension } from '@/lib/syllabi'
 import type { ExtractMethod, ExtractStatus } from '@/types/syllabus'
@@ -11,7 +13,10 @@ import type { ExtractMethod, ExtractStatus } from '@/types/syllabus'
  * 输入是文件内容 buffer，输出是「状态 + 文本 + 元数据」，**不碰数据库也不碰网络** ——
  * 取文件、写行是 `POST /api/v1/syllabi/:id/extract` 的事。这样这一层可以单独测。
  *
- * 依赖见 `TechStack.md` 版本矩阵：`pdf-parse` 2.4.5 / `mammoth` 1.12.2 / `jszip` 3.10.1。
+ * 依赖见 `TechStack.md` 版本矩阵：`pdfjs-dist` 5.4.296 / `mammoth` 1.12.2 / `jszip` 3.10.1。
+ *
+ * ⚠️ PDF 入口**只能**是 `pdfjs-dist/legacy/build/pdf.mjs`，原因见 `extractPdf()` 上方注释
+ * 与 `TechStack.md` 第 2 节的 ⚠️（换回现代构建或换回 `pdf-parse` 都会在生产环境炸）。
  */
 
 export type ExtractOutcome = {
@@ -61,33 +66,66 @@ export async function extractSyllabusText(
 // PDF
 // ---------------------------------------------------------------
 
+/**
+ * 标准字体数据目录（Helvetica / Times 等非嵌入字体要用到）。
+ *
+ * 不传 `standardFontDataUrl` 时 pdfjs 每页都会 warn，且缺字体度量可能影响换行位置。
+ * 传了但路径不存在也只是 warn（实测仍能抽出文本），所以这里放心传、不做存在性判断。
+ */
+const STANDARD_FONT_DATA_URL = path.join(
+  process.cwd(),
+  'node_modules/pdfjs-dist/standard_fonts/',
+)
+
+/**
+ * PDF 文本提取。
+ *
+ * ⚠️ 入口必须是 **legacy 构建**：pdfjs 的现代构建（`pdfjs-dist/build/pdf.mjs`）在 Node 下
+ * 跑 `getDocument()` 会抛 `ReferenceError: DOMMatrix is not defined`；只有 legacy 构建
+ * 自带 `DOMMatrix` polyfill。这是 2026-09-02 生产事故的直接教训 —— 上一版用的
+ * `pdf-parse` 死在同一处（它靠 `require('@napi-rs/canvas')` 补 DOMMatrix，canvas
+ * 加载失败时只 warn 不赋值，紧接着模块顶层 `new DOMMatrix()` 就崩），
+ * 而本地 macOS 装了 23MB 的 `@napi-rs/canvas-darwin-arm64`，本地全绿、线上全红。
+ */
 async function extractPdf(file: Buffer): Promise<ExtractOutcome> {
-  // v2 是类式 API：`new PDFParse({ data }).getText()`。v1 的 `pdfParse(buffer)` 已废弃。
-  const parser = new PDFParse({ data: new Uint8Array(file) })
+  const doc = await getDocument({
+    data: new Uint8Array(file),
+    standardFontDataUrl: STANDARD_FONT_DATA_URL,
+    isEvalSupported: false, // 不渲染就不需要 eval，多数 serverless 环境也禁用它
+    disableFontFace: true, // 同上：不往 document 里注入字体
+    useSystemFonts: false,
+  }).promise
+
   try {
-    const result = await parser.getText()
+    const pages: string[] = []
+    for (let number = 1; number <= doc.numPages; number += 1) {
+      const page = await doc.getPage(number)
+      const content = await page.getTextContent()
+      // `items` 里混着有 `str` 的文本片段和只有 `type` 的标记片段（marked content），
+      // 后者不承载文字，跳过。`hasEOL` 表示该片段是一行结尾 —— pdfjs 不自带换行符，
+      // 不补的话整页会粘成一长条，喂给 LLM 更难解析。
+      pages.push(content.items.map((item) => ('str' in item ? toLine(item) : '')).join(''))
+    }
 
-    // ⚠️ **不要用 `result.text`** —— pdf-parse 2.x 会在每页之间注入
-    // `-- N of M --` 分页标记（`"\n\n-- 1 of 6 --\n\n"`）。那段标记会一路带进
-    // P0-1-3 的 LLM 输入里，属于纯噪声。
-    // `result.pages` 是干净的逐页文本，拼起来即可；扫描件拼出来正好是空串，
-    // 「抽不出文字」的判定因此天然成立（用 `result.text` 判空会永远判不出来）。
-    const raw = result.pages.map((page) => page.text).join('\n')
-    const text = normalizeText(raw)
-
+    // 扫描件 / 图片型 PDF 拼出来正好是空串，「抽不出文字」的判定天然成立。
+    const text = normalizeText(pages.join('\n'))
     if (text === '') return failure(EMPTY_PDF_MESSAGE)
 
     return {
       status: 'extracted',
       text,
       method: 'pdf_text',
-      pageCount: result.total,
+      pageCount: doc.numPages,
       error: null,
     }
   } finally {
-    // pdfjs 会起 worker，不 destroy 会漏。失败路径也要走到这里。
-    await parser.destroy()
+    await doc.destroy()
   }
+}
+
+/** 按 pdfjs 的 `hasEOL` 补换行。不补的话整页文字会连成一条。 */
+function toLine(item: { str: string; hasEOL: boolean }): string {
+  return item.hasEOL ? `${item.str}\n` : item.str
 }
 
 // ---------------------------------------------------------------

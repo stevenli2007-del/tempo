@@ -48,9 +48,15 @@ Next.js App（前端页面 + Route Handlers 后端逻辑）
 | `@supabase/ssr` | `0.12.5` | 服务端 Auth client | |
 | `@supabase/supabase-js` | `2.112.4` | 浏览器 client | |
 | `@tailwindcss/postcss` | `4.3.3` | PostCSS 插件 | Tailwind v4 必需 |
-| `pdf-parse` | `2.4.5` | PDF 文本提取 | **v2 起 API 改为类式**：`new PDFParse({ data }).getText()`，不是 v1 的 `pdfParse(buffer)` |
+| `pdfjs-dist` | `5.4.296` | PDF 文本提取 | **只能走 `legacy/build/pdf.mjs`**（见下方 ⚠️）；替代已废弃的 `pdf-parse` 2.4.5 |
 | `mammoth` | `1.12.2` | docx 文本提取 | `{ convertToHtml, extractRawText }`；用 `extractRawText` 直接取纯文本，不转 HTML |
 | `jszip` | `3.10.1` | pptx 文本提取 | pptx 本质是 zip + XML，解出 `ppt/slides/slide*.xml` 后剥标签；**不引专用 pptx 库**（可选库维护状态普遍一般） |
+
+> ⚠️ **PDF 提取三条硬约束（2026-09-02 生产事故后确立，改动前必读）**
+>
+> 1. **入口只能是 `pdfjs-dist/legacy/build/pdf.mjs`。** pdfjs 的**现代构建**（`pdfjs-dist/build/pdf.mjs`）在 Node 下跑 `getDocument()` 会直接抛 `ReferenceError: DOMMatrix is not defined`；只有 **legacy 构建**自带 `DOMMatrix` polyfill。实测对照：现代构建 FAIL / legacy 构建 OK。
+> 2. **不再使用 `pdf-parse`。** 2.4.5 在模块顶层无条件执行 `new DOMMatrix()`，而它的 `DOMMatrix` 补全是靠 `require('@napi-rs/canvas')` 拿的 —— canvas 加载失败时它**只打 warning 不设值**，紧接着顶层就崩。macOS 上有 23MB 的 `@napi-rs/canvas-darwin-arm64` 所以本地一切正常，**Vercel 上函数包里没有这个原生二进制 → 路由 import 即 500**，且响应体为空、连不碰 PDF 的分支（非法 uuid → 400）也 500。这是典型的「本地全绿、线上全红」。
+> 3. **不要引任何依赖 canvas / 原生二进制的 PDF 库。** 我们只要文本，不要渲染。为了一句提取拖一套 Skia 进函数包，冷启动与体积都不划算。
 
 ---
 
@@ -149,9 +155,9 @@ interface LLMProvider {
 
 | 格式 | 库 | 备注 |
 |---|---|---|
-| PDF | `pdf-parse` | 扫描件会抽出空文本 → 走第 5.4 节降级 |
+| PDF | `pdfjs-dist` 5.4.296（`legacy/build/pdf.mjs`） | 扫描件会抽出空文本 → 走第 5.4 节降级。**入口不可换成现代构建**，见第 2 节 ⚠️ |
 | Word (.docx) | `mammoth` | 输出 HTML/文本 |
-| PPT (.pptx) | `pptx-parser` 或等效库 | **不要**在小众库上耗过多时间，效果不理想就走降级提示 |
+| PPT (.pptx) | `jszip` 解 XML | 自取 `<a:t>`，不引专用 pptx 库 |
 
 **统一约束**：文本抽取必须在**服务端**执行；抽取结果要记录"是否成功 / 抽出字符数"，用于判断是否走了降级。
 

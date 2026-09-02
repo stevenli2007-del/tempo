@@ -197,3 +197,22 @@ export function buildStoragePath(
 ): string {
   return `${userId}/${courseId}/${syllabusId}.${ext}`
 }
+
+/**
+ * 判断 Storage 报错是不是「对象不存在」（悬挂行判定的唯一信号）。
+ *
+ * ⚠️ **必须共享，不要在每个路由各写一份**：这个谓词写错的表现是
+ * **用户看到 500 而不是「文件没传完」**，而且本地很难碰到（本地几乎不会造悬挂行），
+ * 属于典型的线上才炸的分支。2026-09-02 就漏了一处（download 端点）被冒烟抓到。
+ *
+ * 判定要点（实测值，两个条件都要判）：
+ * - `createSignedUrl` **会**检查对象是否存在，不存在时返回
+ *   `StorageApiError { status: 400, statusCode: '404', code: 'NoSuchKey', message: 'Object not found' }`
+ * - **`statusCode` 是字符串 `'404'`**，不是数字。只写 `=== 404` 永远判不出来。
+ * - 外层 HTTP `status` 是 400，别拿它当判据。
+ */
+export function isStorageObjectNotFoundError(error: unknown): boolean {
+  if (typeof error !== 'object' || error === null) return false
+  const { statusCode, code } = error as { statusCode?: unknown; code?: unknown }
+  return statusCode === '404' || statusCode === 404 || code === 'NoSuchKey'
+}

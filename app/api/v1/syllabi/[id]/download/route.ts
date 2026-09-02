@@ -1,5 +1,5 @@
 import { getCurrentUser, internalError, jsonError, jsonOk } from '@/lib/api/response'
-import { SYLLABUS_BUCKET, SYLLABUS_COLUMNS } from '@/lib/syllabi'
+import { SYLLABUS_BUCKET, SYLLABUS_COLUMNS, isStorageObjectNotFoundError } from '@/lib/syllabi'
 import type { SyllabusRow } from '@/lib/syllabi'
 import type { SyllabusDownloadUrl } from '@/types/syllabus'
 import { UUID_PATTERN } from '@/lib/api/params'
@@ -18,6 +18,9 @@ import { UUID_PATTERN } from '@/lib/api/params'
 
 /** 签名有效期（秒）。够用户点开，不够拿来外传。 */
 const SIGNED_URL_TTL_SECONDS = 60
+
+/** 悬挂行（行在、文件不在）的提示文案。 */
+const FILE_MISSING_ERROR = '这份 syllabus 的文件不存在，可能上传没完成。请重新上传。'
 
 
 interface RouteContext {
@@ -56,8 +59,18 @@ export async function GET(request: Request, { params }: RouteContext) {
       .from(SYLLABUS_BUCKET)
       .createSignedUrl(storagePath, SIGNED_URL_TTL_SECONDS)
 
-    if (signError || !signed) {
-      throw signError ?? new Error('createSignedUrl 未返回签名 URL')
+    if (signError) {
+      // 悬挂行：行在，文件不在（票据签发了但浏览器没传完，或文件被删了）。
+      // ⚠️ 这里要是直接 throw，用户看到的是 500 而不是「文件不存在」——
+      // 2026-09-02 冒烟抓到的真 bug，extract 端点早先修过，download 漏了同一处。
+      // 与 extract 的区别：extract 是「动作做不了」→ 409；download 是「资源不存在」→ 404。
+      if (isStorageObjectNotFoundError(signError)) {
+        return jsonError(request, 404, 'file_missing', FILE_MISSING_ERROR)
+      }
+      throw signError
+    }
+    if (!signed) {
+      throw new Error('createSignedUrl 未返回签名 URL')
     }
 
     const response: SyllabusDownloadUrl = {

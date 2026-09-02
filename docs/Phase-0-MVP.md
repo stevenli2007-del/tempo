@@ -191,27 +191,37 @@
 #### 🎫 P0-1-2 · 文本提取管线（PDF / docx / pptx）· ✅ 已完成，勿重做
 
 - **做什么**：上传流程的第 3 拍——把 Storage 里的文件读回来，抽成纯文本存进 `syllabi.raw_text`，返回前 1000 字符的预览。
-- **✅ 已完成**（commit 见变更记录）。**验收：API 端到端 27 项全绿**。
+- **✅ 已完成**（commit 见变更记录）。**验收：API 端到端 41 项全绿**。
 - **改哪些文件**：
   - `lib/extract.ts`（新）—— 三格式提取器，**纯函数层：不碰 DB 不碰网络**，可单独测
   - `app/api/v1/syllabi/[id]/extract/route.ts`（新）—— 取行 → 签下载 URL → 拉文件 → 提取 → 写回 → 返回
   - `types/mammoth.d.ts`（新）—— mammoth 无自带类型且 `@types/mammoth` **不存在**（404），手写最小声明
   - `lib/api/params.ts`（新）—— `UUID_PATTERN`，原散在 3 个路由里各写一份，第 4 次出现时抽出
-  - `next.config.mjs` —— **`serverExternalPackages: ['pdf-parse']`**，不加这条所有 PDF 提取会静默失败
+  - `next.config.mjs` —— `serverExternalPackages: ['pdfjs-dist']` + `outputFileTracingIncludes` 把 `standard_fonts/**` 打进函数包
   - `types/syllabus.ts` —— 新增 `SyllabusExtractResponse`
-  - `lib/syllabi.ts` —— 新增 `SYLLABUS_COLUMNS_WITH_TEXT`（多 `raw_text` 一列）
+  - `lib/syllabi.ts` —— 新增 `SYLLABUS_COLUMNS_WITH_TEXT`（多 `raw_text` 一列）+ `isStorageObjectNotFoundError()`（download / extract 共用）
+  - `app/api/v1/syllabi/[id]/download/route.ts` —— 补 `404 file_missing`（原本抛 500）
   - `components/courses/syllabus-upload.tsx` —— 第 4 拍：直传成功后调 extract，展示预览 / 降级提示
-- **🔴 四个踩过的坑（下一个人别再踩）**：
-  1. **`pdf-parse` 必须设为 server external**。被打包后 `pdf.worker.mjs` 不会产出，运行时报 `Setting up fake worker failed: Cannot find module '.next/server/chunks/pdf.worker.mjs'`，**表现为所有 PDF 静默提取失败**（HTTP 仍 200，`extractStatus='failed'`）。
-  2. **不要用 `result.text`，要用 `result.pages`**。pdf-parse 2.x 会在 `text` 里注入 `-- N of M --` 分页标记，会一路污染到 P0-1-3 的 LLM 输入。且扫描件的 `text` 是 `"\n\n-- 1 of 1 --\n\n"`（非空），**用 `text` 判空永远判不出"抽不出文字"**；`pages` 拼出来正好是空串，判定天然成立。
+- **🔴 踩过的坑（下一个人别再踩）**：
+  1. 🔥 **PDF 提取器不能用 `pdf-parse`，入口只能用 `pdfjs-dist/legacy/build/pdf.mjs`。**
+     `pdf-parse` 2.4.5 在**模块顶层**无条件 `new DOMMatrix()`，而它的 `DOMMatrix` 靠 `require('@napi-rs/canvas')` 补 —— canvas 加载失败时它**只 warn 不赋值**，紧接着顶层就崩。
+     本地 macOS 装了 23MB 的 `@napi-rs/canvas-darwin-arm64`，所以**本地全绿**；Vercel 函数包里没有这个原生二进制 → **该路由 import 即 500**，响应体为空，连不碰 PDF 的分支（非法 uuid → 400）也 500。
+     另外 pdfjs 的**现代构建**（`pdfjs-dist/build/pdf.mjs`）跑 `getDocument()` 同样 `DOMMatrix is not defined`，**只有 legacy 构建自带 polyfill**。
+     → 通用教训：**本地能跑不代表线上能跑，差别往往在原生依赖。** 依赖变更后必须到生产环境打一次。
+  2. **不要用 `result.text`，要用 `result.pages`**（保留条目，供对照）。pdf-parse 2.x 会在 `text` 里注入 `-- N of M --` 分页标记。换 pdfjs 后这条不再适用，但**「提取结果里不能出现解析器自己注入的标记」这个原则仍然成立** —— 冒烟里专门有一条断言检查 `-- N of M --`。
   3. **`createSignedUrl` 会检查对象是否存在**，不存在时返回 `StorageApiError { statusCode: '404', code: 'NoSuchKey' }`。这是悬挂行的判定信号，**不能当服务端错误抛出去**（否则用户看到 500 而不是"文件没传完"）。
+     ⚠️ **这个判定极易漏**：extract 端点修了，download 端点漏了同一处，被端到端冒烟抓到才补上。
+     → 谓词统一收在 `lib/syllabi.ts` 的 `isStorageObjectNotFoundError()`，**两处共用，不许各写一份**。注意 `statusCode` 是**字符串** `'404'`，只判数字 404 永远命中不了。
   4. **`extract_method` 有 CHECK 约束**：只能是 `pdf_text` / `docx` / `pptx` / `manual`。注意 `docx`/`pptx` **没有** `_text` 后缀（初版遗留，未为此改生产表），写 `docx_text` 会被 DB 拒绝。
+  5. **取不到线上的错误就别猜。** 本次先猜了两轮（worker 文件没打包 → 加 `outputFileTracingIncludes`），全错。
+     **有效手段是临时加一个诊断路由**，把 `import` 逐个 try/catch 并把错误消息回传，一次就定位到 `DOMMatrix is not defined`。
+     ⚠️ 顺带：App Router 里 **下划线开头的目录（`app/api/v1/_diag/`）是私有目录，不会建路由**，诊断路由要叫 `diag-tmp` 这种名字。
 - **关键约束**：
   - **提取失败返回 200，不是 HTTP 错误** —— 文件存下来了，只是读不出文字。前端走 `notice`（提示色）而非 `error`（错误色），文案要写「上传成功，但…」。
   - **取文件用当前用户会话签的 URL，不用 service role** —— 这样下载仍受 `storage.objects` 的 RLS 约束，查询逻辑写错也取不到别人的文件。
   - **幂等**：已 `extracted` 的行直接返回既有结果（文本只依赖不可变的文件内容）。
   - **`raw_text` 写但列表不读**：几 MB 的全文不能进列表响应，只有 extract 端点读它取预览。
-- **自测（Bud，2026-09-02）：27/27 全绿** —— 三格式提取正确（含 method / 页数 / pptx 按 slide 数字排序而非字典序）、无分页标记污染、扫描件降级（200 + failed + 原因 + `previewText=null`）、幂等、**悬挂行 409 `file_missing` + 置 failed**、越权 404、未登录 401、非法 uuid 400、`x-request-id` 回传。
+- **自测（Bud，2026-09-02）：41/41 全绿** —— 三格式提取正确（含 method / 页数 / pptx 按 slide 数字排序而非字典序）、无分页标记污染、多页 PDF 页序正确、扫描件降级（200 + failed + 原因 + `previewText=null`）、幂等、**悬挂行 409 `file_missing` + DB 里确认置 failed**、download 悬挂行 404、越权 404、未登录 401、非法 uuid 400、`x-request-id` 回传、Storage 端到端（直传 → 签名下载 → 内容字节一致 → 跨用户被拒）。
   - 测试文件用 python `zipfile` 手工生成最小合法 pdf / docx / pptx（docx、pptx 本质都是 zip + XML），不依赖任何 Office 工具。
 - **尚未验证**：浏览器 UI（与 P0-1-1 合并验收）。
 - **已知留白**：① 提取失败的行没有「重试提取」入口（Phase 0 无存量数据，重新上传即可）；② `maxDuration = 60` 是为 20MB PDF 留的，Vercel 套餐若更低需下调。
@@ -321,4 +331,5 @@ P0-0 基础设施
 | 2026-09-02 | **Storage 迁移执行方式修正**：`CREATE POLICY on storage.objects` 在 SQL Editor 报 `42501: must be owner of table objects`（该表 owner 是平台内部的 `supabase_storage_admin`）。迁移文件改写为 **Dashboard UI 操作步骤 + SQL 语义留档 + 可跑的验收 SELECT**；`Database.md` 7.3 与 P0-1-1 执行卡同步修正 |
 | 2026-09-02 | **P0-1-1 复测全绿 ✅**：Steven 通过 Dashboard UI 建好桶与 4 条策略后，API 冒烟 **19/19** + Storage 端到端直探 **7/7**（含跨用户隔离）。测试数据已清理。P0-1-1 与 P0-1-2 的浏览器 UI **合并验收**（共用同一组件） |
 | 2026-09-02 | **P0-1-2 文本提取管线完成 ✅**：新增 `lib/extract.ts`（pdf / docx / pptx 三格式）+ `POST /api/v1/syllabi/:id/extract`；`TechStack.md` 登记 `pdf-parse` 2.4.5 / `mammoth` 1.12.2 / `jszip` 3.10.1；`API-Contract.md` 新增 extract 端点并**修正「201 响应带 previewText」的设计错误**（签票据时文件还没传上来）；抽出 `lib/api/params.ts` 的 `UUID_PATTERN`；`next.config.mjs` 加 `serverExternalPackages: ['pdf-parse']`。**端到端冒烟 27/27 全绿**。进度指针推进至 `P0-1-3` LLM provider 抽象层 |
+| 2026-09-02 | 🔥 **生产事故修复：PDF 提取器由 `pdf-parse` 2.4.5 换成 `pdfjs-dist` 5.4.296（legacy 构建）**。`pdf-parse` 模块顶层无条件 `new DOMMatrix()`，DOMMatrix 靠 `require('@napi-rs/canvas')` 补、加载失败只 warn 不赋值 → **Vercel 上 extract 路由 import 即 500（空响应体）**，本地 macOS 因装有 23MB 原生二进制而全绿。排查手段：临时诊断路由逐个 `import` 抓错误消息（**下划线目录 `_diag` 是私有目录不建路由，改名 `diag-tmp` 才生效**）。连带把 `isStorageObjectNotFoundError()` 抽到 `lib/syllabi.ts` 共用，并修掉 **download 端点漏判 `NoSuchKey` 导致悬挂行返回 500** 的真 bug（冒烟抓到）。`API-Contract.md` 补 download 的 `404 file_missing` 语义与提取器换版记录。**端到端冒烟 41/41 全绿** |
 

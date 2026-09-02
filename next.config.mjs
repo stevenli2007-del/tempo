@@ -1,29 +1,20 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   /**
-   * `pdf-parse`（底层是 pdfjs-dist）在运行时要加载自带的 `pdf.worker.mjs`。
-   *
-   * 被打包进 server bundle 后，这个 worker 文件不会被单独产出，运行时报：
-   * `Setting up fake worker failed: Cannot find module '.next/server/chunks/pdf.worker.mjs'`
-   * —— 结果就是**所有 PDF 提取静默失败**。
-   *
-   * 标记为 server external：Next 不再打包它，运行时直接从 node_modules require，
-   * worker 按包内的相对路径正常解析。
+   * pdfjs 体量大（legacy 构建 ~940KB）且内部会按 `import.meta.url` 解析资源，
+   * 被打包进 server bundle 容易出幺蛾子。标记为 external：运行时直接从 node_modules 加载。
    */
-  serverExternalPackages: ['pdf-parse'],
+  serverExternalPackages: ['pdfjs-dist'],
 
   /**
-   * 光有 serverExternalPackages 在 Vercel 上不够（2026-09-02 实测：该路由整体 500）。
+   * 标准字体数据（Helvetica / Times 等非嵌入字体要用到）是**运行时**按路径读的，
+   * 不会被 import 图追踪到，必须显式声明，否则 `standardFontDataUrl` 指向的目录不在函数包里。
    *
-   * 原因：pdfjs 在 Node 下把 worker 解析成**相对路径** `./pdf.worker.mjs`
-   * —— external 之后它相对的是本包目录 `node_modules/pdf-parse/dist/pdf-parse/cjs/`，
-   * 本地 `next start` 能命中，但 Vercel 给每个函数单独裁剪 node_modules，
-   * 这个包（以及它里面的 worker 文件）可能压根没被打进函数包 → 路由连加载都失败。
-   *
-   * 强制把整个 `pdf-parse/dist` 打进所有 API 函数包。
+   * 缺了它不会崩 —— pdfjs 只是 warn，文本照样抽得出来（实测过），
+   * 但会每页打一条 `UnknownErrorException`，且缺字体度量可能影响换行位置。
    */
   outputFileTracingIncludes: {
-    '/api/**': ['./node_modules/pdf-parse/dist/**/*'],
+    '/api/**': ['./node_modules/pdfjs-dist/standard_fonts/**/*'],
   },
 };
 

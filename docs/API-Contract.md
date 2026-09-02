@@ -209,7 +209,22 @@
 }
 ```
 
-不存在或不属于当前用户 → `404`（[ADR-010](./Decisions.md#adr-010)）。
+**失败情形**
+
+| 状态 | `error.code` | 触发条件 |
+|---|---|---|
+| `400` | `bad_request` | `:id` 不是合法 UUID |
+| `401` | `unauthenticated` | 未登录 |
+| `404` | `not_found` | syllabus 行不存在或不属于当前用户（[ADR-010](./Decisions.md#adr-010)） |
+| `404` | `file_missing` | **行在、文件不在**（悬挂行：票据签发了但浏览器没传完 / 文件被删） |
+
+> ⚠️ **`file_missing` 必须显式处理。** `createSignedUrl` **会**检查对象是否存在，
+> 不存在时抛 `StorageApiError { statusCode: '404', code: 'NoSuchKey' }`。
+> 不当成已知错误拦下来，用户看到的就是 **500** —— 2026-09-02 冒烟抓到 download 端点漏了这一处。
+> 判定谓词统一用 `lib/syllabi.ts` 的 `isStorageObjectNotFoundError()`，**不要各路由自己写**
+> （`statusCode` 是**字符串** `'404'`，只判数字 404 永远命中不了）。
+>
+> 与 extract 端点的状态码差异是有意的：**extract 是「动作做不了」→ 409；download 是「资源不存在」→ 404。**
 
 ### `POST /api/v1/syllabi/:id/extract` — 第 3 步：提取文本
 
@@ -219,7 +234,7 @@
 
 | 扩展名 | 提取器 | `extract_method` |
 |---|---|---|
-| `.pdf` | `pdf-parse` 2.x（`r.pages` 拼接，**不用 `r.text`** —— 它会注入 `-- N of M --` 分页标记污染后续 LLM 输入） | `pdf_text` |
+| `.pdf` | `pdfjs-dist` 5.4.296 **legacy 构建**（逐页 `getTextContent()`，按 `hasEOL` 补换行后拼接） | `pdf_text` |
 | `.docx` | `mammoth` `extractRawText`，直接取纯文本不转 HTML | `docx` |
 | `.pptx` | `jszip` 解 `ppt/slides/slide*.xml` 后取 `<a:t>` | `pptx` |
 
@@ -233,7 +248,7 @@
   "syllabus": {
     "id": "…",
     "extractStatus": "extracted",   // extracted | failed
-    "extractMethod": "pdf_text",    // pdf_text | docx_text | pptx_text | null（失败时）
+    "extractMethod": "pdf_text",    // pdf_text | docx | pptx | null（失败时）。以 DB CHECK 约束为准，没有 _text 后缀
     "extractError": null,           // 失败时是给人看的原因，如「扫描件 PDF 抽不出文字」
     "pageCount": 6,                 // 仅 PDF，其余为 null
     "…": "其余字段同上传响应"
@@ -474,3 +489,5 @@
 | 2026-09-02 | **§1.2 / §1.4 状态码调整**：Phase 0 不使用 403，「不属于当前用户」与「不存在」统一返回 404（文案「…不存在或无权访问」）。原「403 避免探测存在性」的**意图保留、手段改换** —— RLS 下要区分 403/404 必须用 service role 绕过 RLS 探测存在性，反而制造泄漏口子 | [ADR-010](./Decisions.md#adr-010)，Steven 拍板 |
 | 2026-09-02 | **§3 上传改为两步式直传**（multipart 作废）：`POST /api/v1/courses/:id/syllabus` 改为 JSON 入参 + 签发 Storage 签名上传 URL；新增 `GET /api/v1/syllabi/:id/download` 签短时下载 URL。同步标注 `extractStatus` / `previewText` 为 P0-1-2 待补 | [ADR-009](./Decisions.md#adr-009)、`Database.md` 7.3、P0-1-1 |
 | 2026-09-02 | **§3 新增 `POST /api/v1/syllabi/:id/extract`**（P0-1-2）：上传流程拆成「取票据 → 直传 → 提取」三拍，**修正原「201 响应带 previewText」的设计错误** —— 签票据时文件还没传上来，服务端无法提取。提取失败返回 **200 + `extractStatus: "failed"`**（不是 HTTP 错误），悬挂行返回 `409 file_missing`，已提取的行幂等返回既有结果 | P0-1-2、[ADR-010](./Decisions.md#adr-010) |
+| 2026-09-02 | **PDF 提取器由 `pdf-parse` 2.4.5 换成 `pdfjs-dist` 5.4.296 legacy 构建**：`pdf-parse` 模块顶层无条件 `new DOMMatrix()`，而它的 DOMMatrix 靠 `require('@napi-rs/canvas')` 补，canvas 加载失败时只 warn 不赋值 → **Vercel 上该路由 import 即 500（空响应体，连不碰 PDF 的分支也 500）**；本地 macOS 因装有 23MB 原生二进制而全绿，是典型「本地全绿、线上全红」。响应体与错误语义不变，仅换提取器实现；同时修正响应示例里 `extractMethod` 注释误写的 `docx_text` / `pptx_text` | 生产事故复盘、`TechStack.md` 第 2 节 ⚠️ |
+| 2026-09-02 | **§3 download 端点补 `404 file_missing`**：行在、文件不在（悬挂行）时，原本把 Storage 的 `NoSuchKey` 直接抛成 **500**。判定谓词抽到 `lib/syllabi.ts` 的 `isStorageObjectNotFoundError()`，由 download 与 extract 共用，避免两处各写一份再漏一次 | 端到端冒烟抓到的真 bug |
