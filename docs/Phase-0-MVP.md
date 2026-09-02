@@ -29,9 +29,12 @@
 
 ## 当前进度指针
 
-**当前 task**：`P0-0-2` Supabase 接入 ｜ **下一步**：Steven 建 Supabase 项目 → 填 `.env.local` → 跑 `npm run dev` 验证连接
+**当前 task**：`P0-0-3` Supabase Auth（代码已完成，**待 Steven 跑 `npm run dev` 实测验收**）｜ **下一步**：P0-0-4 数据库迁移
 
-> 📌 **现状（2026-09-02 核实）**：P0-0-1 脚手架代码已完成；P0-0-2 的 Bud 部分（前后端 client 分离 + `.env.example`）已完成。**卡点只剩 Steven 手动步骤**——去 Supabase 建项目、拿 URL/anon key、填 `.env.local`。这一步 AI 代劳不了，做完即可收口 P0-0-2。
+> 📌 **现状（2026-09-02 核实）**：
+> - P0-0-1 脚手架 ✅、P0-0-2a（Steven 建项目 + `.env.local`）✅、P0-0-2b（client 分离）✅。
+> - P0-0-3 代码已完成并通过 `build` / `lint` / `tsc`，**但注册→登录→登出这条交互链路 Bud 跑不了 `next dev`（WorkBuddy 环境拦截 `.next` 缓存），必须由 Steven 在本地终端实测验收。**
+> - 验收通过后，标记 P0-0-3 ✅ 并进入 P0-0-4（建表）。
 
 ---
 
@@ -42,9 +45,9 @@
 | 编号 | 任务 | Owner | 依赖 | 验收标准 | 状态 |
 |---|---|---|---|---|---|
 | **P0-0-1** | 项目脚手架：Next.js 16.3.4 App Router + TS + Tailwind v4 + shadcn/ui 初始化，目录结构按 `CodingRules.md` | Bud | — | 本地 `dev` 可跑，访问首页看到占位页；TS 无报错 | ✅ |
-| **P0-0-2a** | **【Steven 手动】** 在 Supabase 建项目 + 拿 Project URL / anon key + `cp .env.example .env.local` 填两个值 | **Steven** | P0-0-1 | `.env.local` 已填两个值；`npm run dev` 不报"缺少环境变量"错误 | ⚪ |
+| **P0-0-2a** | **【Steven 手动】** 在 Supabase 建项目 + 拿 Project URL / anon key + `cp .env.example .env.local` 填两个值 | **Steven** | P0-0-1 | `.env.local` 已填两个值；`npm run dev` 不报"缺少环境变量"错误 | ✅ |
 | **P0-0-2b** | 前后端 client 分离（`lib/supabase/server.ts` / `browser.ts` 分开，不混用）+ `.env.example` 模板 + env 缺失即抛错校验 | Bud | P0-0-1 | `lib/supabase/{server,browser,env}.ts` 就位；service key 不进前端 | ✅ |
-| **P0-0-3** | Supabase Auth：邮箱 + 密码注册/登录 + 中间件保护路由 | Bud | P0-0-2a | 可注册、登录、登出；未登录访问受保护页面被重定向 | ⚪ |
+| **P0-0-3** | Supabase Auth：邮箱 + 密码注册/登录 + proxy 保护路由 | Bud | P0-0-2a | 可注册、登录、登出；未登录访问受保护页面被重定向 | 🔵 待实测 |
 | **P0-0-4** | 数据库迁移：建表（按 `Database.md` 全部表 + 索引 + 外键） | Bud | P0-0-2a | 迁移脚本可重复执行；表结构与 `Database.md` 一致 | ⚪ |
 | **P0-0-5** | RLS 策略：用户只能访问自己的数据 | Bud | P0-0-4 | 用两个测试账号交叉验证，看不到对方任何数据 | ⚪ |
 | **P0-0-6** | 部署上线（Vercel）+ 生产环境变量 + 冒烟测试 | 共担 | P0-0-3, P0-0-5 | 生产环境可注册登录；无环境变量泄漏 | ⚪ |
@@ -66,12 +69,18 @@
 #### 🎫 P0-0-2b · 前后端 client 分离 —— ✅ 已完成，勿重做
 `lib/supabase/server.ts` / `browser.ts` / `env.ts` 已就位。下次会话若领到此 task，直接跳过。
 
-#### 🎫 P0-0-3 · Supabase Auth
-- **做什么**：邮箱+密码注册 / 登录 / 登出 + `middleware.ts` 保护受保护路由（未登录重定向）
-- **改哪些文件**：登录/注册页面（`app/(routes)/` 下）、`middleware.ts`、相关 Server/Client Component
-- **关键约束**：`@supabase/ssr` 0.12.5；服务端用 `server.ts`、浏览器用 `browser.ts`，不混用；session 刷新统一由 middleware 负责（`server.ts` 的 `setAll` 已按 Server Component 只读容忍处理）
-- **验收**：`npm run dev` → 注册→登录→登出全通；未登录访问受保护页被重定向
-- **交接点**：无（纯 Bud）；前置 `.env.local` 已就绪（P0-0-2a）
+#### 🎫 P0-0-3 · Supabase Auth —— 代码已完成，待 Steven 实测验收
+- **做什么**：邮箱+密码注册 / 登录 / 登出 + `proxy.ts` 保护受保护路由（未登录重定向）
+- **改哪些文件**：`proxy.ts`（根）、`lib/supabase/proxy.ts`、`lib/auth/actions.ts`、`app/api/auth/callback/route.ts`、`components/auth/auth-form.tsx`、`app/(routes)/{login,signup,dashboard}/page.tsx`、`app/page.tsx`、`types/auth.ts`
+- **关键约束**：
+  - ⚠️ **Next 16 已把根 `middleware.ts` 约定改名为 `proxy.ts`**，导出函数名也从 `middleware` 改为 `proxy`。两者同时存在会直接报 **E900 构建错误**，且 `middleware.ts` 每次 build 都会刷弃用警告。已迁移完毕。
+  - 必须用 `supabase.auth.getUser()` 而非 `getSession()` —— 前者真去 Auth 服务端校验 JWT，`getSession()` 只解本地 cookie，伪造 cookie 会被放行。
+  - `@supabase/ssr` 0.12.5；服务端用 `server.ts`、浏览器用 `browser.ts`，不混用。
+  - `redirect()` 会抛 `NEXT_REDIRECT`，**必须写在 try/catch 之外**，否则被当错误吞掉。
+  - 路由白/黑名单集中在 `lib/supabase/proxy.ts` 的 `PROTECTED_PREFIXES` / `AUTH_PAGES`，不要散落到各页面。
+- **已知边界**：不碰 `profiles` 表（P0-0-4 才建），dashboard 只显示 auth session 里的 email / id / last_sign_in_at。
+- **验收**：`npm run dev` → 注册→登录→登出全通；未登录访问 `/dashboard` 被重定向到 `/login`；已登录访问 `/login` 被弹到 `/dashboard`
+- **交接点**：Bud 已跑通 `build` / `lint` / `tsc`，**但交互链路必须由 Steven 在本地终端实测**（WorkBuddy 环境拦截 `.next` 缓存，`next dev` 跑不起来）
 
 #### 🎫 P0-0-4 · 数据库迁移
 - **做什么**：按 `Database.md` 建全部 13 张表 + 索引 + 外键 + `updated_at` 触发器
