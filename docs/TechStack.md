@@ -48,15 +48,18 @@ Next.js App（前端页面 + Route Handlers 后端逻辑）
 | `@supabase/ssr` | `0.12.5` | 服务端 Auth client | |
 | `@supabase/supabase-js` | `2.112.4` | 浏览器 client | |
 | `@tailwindcss/postcss` | `4.3.3` | PostCSS 插件 | Tailwind v4 必需 |
-| `pdfjs-dist` | `5.4.296` | PDF 文本提取 | **只能走 `legacy/build/pdf.mjs`**（见下方 ⚠️）；替代已废弃的 `pdf-parse` 2.4.5 |
+| `unpdf` | `1.8.1` | PDF 文本提取 | 自带为 serverless 重新打包的 pdfjs，**零运行时依赖**；替代 `pdf-parse` 与「直接引 `pdfjs-dist`」两种写法（见下方 ⚠️） |
+| `pdfjs-dist` | `5.4.296` | **仅提供字体 / cmap 数据文件** | **不 import 它的 JS**，只按路径读 `standard_fonts/` 与 `cmaps/`；它只是 unpdf 的数据包 |
 | `mammoth` | `1.12.2` | docx 文本提取 | `{ convertToHtml, extractRawText }`；用 `extractRawText` 直接取纯文本，不转 HTML |
 | `jszip` | `3.10.1` | pptx 文本提取 | pptx 本质是 zip + XML，解出 `ppt/slides/slide*.xml` 后剥标签；**不引专用 pptx 库**（可选库维护状态普遍一般） |
 
-> ⚠️ **PDF 提取三条硬约束（2026-09-02 生产事故后确立，改动前必读）**
+> ⚠️ **PDF 提取四条硬约束（2026-09-02 生产事故后确立，改动前必读）**
 >
-> 1. **入口只能是 `pdfjs-dist/legacy/build/pdf.mjs`。** pdfjs 的**现代构建**（`pdfjs-dist/build/pdf.mjs`）在 Node 下跑 `getDocument()` 会直接抛 `ReferenceError: DOMMatrix is not defined`；只有 **legacy 构建**自带 `DOMMatrix` polyfill。实测对照：现代构建 FAIL / legacy 构建 OK。
-> 2. **不再使用 `pdf-parse`。** 2.4.5 在模块顶层无条件执行 `new DOMMatrix()`，而它的 `DOMMatrix` 补全是靠 `require('@napi-rs/canvas')` 拿的 —— canvas 加载失败时它**只打 warning 不设值**，紧接着顶层就崩。macOS 上有 23MB 的 `@napi-rs/canvas-darwin-arm64` 所以本地一切正常，**Vercel 上函数包里没有这个原生二进制 → 路由 import 即 500**，且响应体为空、连不碰 PDF 的分支（非法 uuid → 400）也 500。这是典型的「本地全绿、线上全红」。
-> 3. **不要引任何依赖 canvas / 原生二进制的 PDF 库。** 我们只要文本，不要渲染。为了一句提取拖一套 Skia 进函数包，冷启动与体积都不划算。
+> 1. **必须用 `unpdf`，不要直接用 `pdfjs-dist`，也不要用 `pdf-parse`。** 三个死在同一处：pdfjs 在 Node 下的**模块作用域**就要 `new DOMMatrix()`，而 `DOMMatrix` 是靠 `require('@napi-rs/canvas')`（Skia 原生二进制）补的 —— **canvas 加载失败时它只 warn 不赋值，紧接着顶层就崩**。实测：`pdf-parse` 2.4.5、`pdfjs-dist` 的现代构建**和 legacy 构建**，在 Vercel 上一律 import 即 500（空响应体，连不碰 PDF 的分支 —— 比如「非法 uuid → 400」—— 也 500）。
+>    unpdf 正是给这个坑打的补丁：重新打包 pdfjs，字符串替换剥掉浏览器 API 引用、worker 内联、补缺失的全局对象，**不依赖任何原生二进制**。线上实测（linux / node 24 / DOMMatrix 未定义）提取正常。
+> 2. **本地验证这类库，必须先 `delete globalThis.DOMMatrix` 再 import。** 本地 macOS 装着 `@napi-rs/canvas-darwin-arm64`（23MB 原生二进制），会掩盖问题 —— 我第一轮就是因此误判「换 pdfjs legacy 已经修好」，白推了一次部署。**本地全绿 ≠ 线上能跑**，凡是「依赖里有原生二进制/浏览器 API」的库都要这么验。
+> 3. **`pdfjs-dist` 只当数据包用。** unpdf 不会 import 它的 JS，只在解析时按路径读 `standard_fonts/` 与 `cmaps/`。这两个目录是**运行时读的文件**，不在 import 图里，必须靠 `next.config.mjs` 的 `outputFileTracingIncludes` 显式打进函数包。缺了不会崩（只 warn），但非嵌入字体缺度量可能改变换行位置。
+> 4. **释放文档用 `pdf.cleanup()`，不是 `destroy()`。** pdf.js v5 把 `destroy()` 改名成 `cleanup()`；长驻的 Node 进程里不释放会积少成多。
 
 ---
 

@@ -380,6 +380,42 @@ P0-1-7 实现 `app/api/v1/courses/[id]/route.ts` 时发现这条在 RLS 下**落
 
 ---
 
+### ADR-011：PDF 文本提取用 `unpdf`，不用 `pdf-parse` 或直接引 `pdfjs-dist`
+
+- **状态**：已接受
+- **日期**：2026-09-02（生产事故复盘后，Steven 拍板）
+- **影响**：`lib/extract.ts`、`next.config.mjs`、`TechStack.md` 第 2 节、`API-Contract.md` §3
+
+**背景**
+
+P0-1-2 上线后，`POST /api/v1/syllabi/:id/extract` 在 Vercel 上**对所有请求一律 500**，响应体为空。本地 `next start` 与端到端冒烟全绿（27/27），是典型「本地全绿、线上全红」。
+
+上临时诊断路由抓线上错误后定位：`pdf-parse` 2.4.5 在**模块作用域**无条件执行 `new DOMMatrix()`，而 `DOMMatrix` 是浏览器 API，靠 `require('@napi-rs/canvas')`（Skia 原生二进制）补 —— canvas 加载失败时它**只 warn 不赋值**，紧接着顶层就崩。本地 macOS 装有 `@napi-rs/canvas-darwin-arm64`（23MB）所以全绿；Vercel 函数包里没有这个原生二进制。
+
+第一次修（`pdfjs-dist` legacy 构建）**失败**，且暴露了更深的问题：`pdfjs-dist` 的现代构建**和 legacy 构建在 Vercel 上同样抛 `DOMMatrix is not defined`**。我此前「legacy 自带 polyfill」的判断是错的 —— 本地能看到 `DOMMatrix` 其实还是 canvas 提供的，**本地测试环境被同一个「只存在于本地的依赖」污染了**，跟 `pdf-parse` 是同一个陷阱。
+
+**决策**
+
+PDF 提取用 `unpdf` 1.8.1；`pdfjs-dist` 保留在依赖里，但**只当数据包用**（提供 `standard_fonts/` 与 `cmaps/`，不 import 它的 JS）。
+
+**理由**
+
+- unpdf 的存在意义就是解决这个坑：它用 rolldown 重新打包 pdfjs，**字符串替换剥掉浏览器 API 引用、worker 内联、补缺失的全局对象**，产出单文件、**零运行时依赖**、不需要任何原生二进制。
+- 备选方案都不划算：① 打包 `@napi-rs/canvas` 进函数包 → +23MB、冷启动变慢、AL2023 上还有二次翻车风险；② 自写 `DOMMatrix` stub → 赌 pdfjs 内部「只构造不调用」矩阵方法，版本升级即碎。
+- 「文件都在、import 就崩」这个失败模式**响应体为空**，只能靠临时诊断路由抓，排查成本高，值得一次性根治。
+
+**后果**
+
+- `serverExternalPackages: ['unpdf']`（它是预打包产物，没必要让 Turbopack 再过一遍手）；`outputFileTracingIncludes` 显式打进 `pdfjs-dist` 的 `standard_fonts/**` 与 `cmaps/**` —— 这两个目录是运行时按路径读的，不在 import 图里，不声明就不会进函数包。
+- 释放文档用 `pdf.cleanup()`（pdf.js v5 把 `destroy()` 改名了）。
+- **给未来留的方法论**：验证「依赖里含原生二进制 / 浏览器 API」的库时，本地必须 `delete globalThis.DOMMatrix` 再 import，否则本地残留的 canvas 会让人得出「换库已修好」的错误结论 —— 这次就因此白推了一次部署。
+
+**复审条件**
+
+unpdf 停止维护，或出现官方 serverless 构建（pdfjs 官方原生支持 Node 且不再依赖 canvas）。
+
+---
+
 ## 待决事项（尚未拍板，需后续决策）
 
 **约定**：每条待决事项在**最相关的那份文档**里有详细说明，`Decisions.md` 只维护索引。避免在两处各写一半导致漂移。
@@ -402,4 +438,4 @@ P0-1-7 实现 `app/api/v1/courses/[id]/route.ts` 时发现这条在 RLS 下**落
 
 ---
 
-*创建：2026-09-01 ｜ 最近更新：2026-09-02（新增 ADR-009 syllabus 上传通道浏览器直传 Storage；新增 ADR-010 RLS 下 403→404 统一为 404）*
+*创建：2026-09-01 ｜ 最近更新：2026-09-02（新增 ADR-009 syllabus 上传通道浏览器直传 Storage；新增 ADR-010 RLS 下 403→404 统一为 404；新增 ADR-011 PDF 提取用 unpdf）*

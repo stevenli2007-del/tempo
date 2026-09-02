@@ -234,7 +234,7 @@
 
 | 扩展名 | 提取器 | `extract_method` |
 |---|---|---|
-| `.pdf` | `pdfjs-dist` 5.4.296 **legacy 构建**（逐页 `getTextContent()`，按 `hasEOL` 补换行后拼接） | `pdf_text` |
+| `.pdf` | `unpdf` 1.8.1（内部是为 serverless 重打包的 pdfjs，`extractText(mergePages: false)` 逐页提取后拼接；**换行由 unpdf 按 `hasEOL` 补**，实测与手写拼接一致） | `pdf_text` |
 | `.docx` | `mammoth` `extractRawText`，直接取纯文本不转 HTML | `docx` |
 | `.pptx` | `jszip` 解 `ppt/slides/slide*.xml` 后取 `<a:t>` | `pptx` |
 
@@ -489,5 +489,5 @@
 | 2026-09-02 | **§1.2 / §1.4 状态码调整**：Phase 0 不使用 403，「不属于当前用户」与「不存在」统一返回 404（文案「…不存在或无权访问」）。原「403 避免探测存在性」的**意图保留、手段改换** —— RLS 下要区分 403/404 必须用 service role 绕过 RLS 探测存在性，反而制造泄漏口子 | [ADR-010](./Decisions.md#adr-010)，Steven 拍板 |
 | 2026-09-02 | **§3 上传改为两步式直传**（multipart 作废）：`POST /api/v1/courses/:id/syllabus` 改为 JSON 入参 + 签发 Storage 签名上传 URL；新增 `GET /api/v1/syllabi/:id/download` 签短时下载 URL。同步标注 `extractStatus` / `previewText` 为 P0-1-2 待补 | [ADR-009](./Decisions.md#adr-009)、`Database.md` 7.3、P0-1-1 |
 | 2026-09-02 | **§3 新增 `POST /api/v1/syllabi/:id/extract`**（P0-1-2）：上传流程拆成「取票据 → 直传 → 提取」三拍，**修正原「201 响应带 previewText」的设计错误** —— 签票据时文件还没传上来，服务端无法提取。提取失败返回 **200 + `extractStatus: "failed"`**（不是 HTTP 错误），悬挂行返回 `409 file_missing`，已提取的行幂等返回既有结果 | P0-1-2、[ADR-010](./Decisions.md#adr-010) |
-| 2026-09-02 | **PDF 提取器由 `pdf-parse` 2.4.5 换成 `pdfjs-dist` 5.4.296 legacy 构建**：`pdf-parse` 模块顶层无条件 `new DOMMatrix()`，而它的 DOMMatrix 靠 `require('@napi-rs/canvas')` 补，canvas 加载失败时只 warn 不赋值 → **Vercel 上该路由 import 即 500（空响应体，连不碰 PDF 的分支也 500）**；本地 macOS 因装有 23MB 原生二进制而全绿，是典型「本地全绿、线上全红」。响应体与错误语义不变，仅换提取器实现；同时修正响应示例里 `extractMethod` 注释误写的 `docx_text` / `pptx_text` | 生产事故复盘、`TechStack.md` 第 2 节 ⚠️ |
+| 2026-09-02 | **PDF 提取器定为 `unpdf` 1.8.1**（中间态曾换到 `pdfjs-dist` legacy，**已作废**）：`pdf-parse` 2.4.5、`pdfjs-dist` 的现代构建**和 legacy 构建**，在 Node 下都于模块作用域 `new DOMMatrix()`，而 DOMMatrix 靠 `require('@napi-rs/canvas')` 补，canvas 加载失败时只 warn 不赋值 → **Vercel 上该路由 import 即 500（空响应体，连不碰 PDF 的分支也 500）**；本地 macOS 装有 23MB 原生二进制而全绿，是典型「本地全绿、线上全红」。unpdf 自带为 serverless 重打包的 pdfjs（worker 内联 + 剥浏览器 API），**零运行时依赖、不需要 canvas**，线上实测通过。响应体与错误语义不变，仅换提取器实现；同时修正响应示例里 `extractMethod` 注释误写的 `docx_text` / `pptx_text` | 生产事故复盘、`TechStack.md` 第 2 节 ⚠️、[ADR-011](./Decisions.md#adr-011) |
 | 2026-09-02 | **§3 download 端点补 `404 file_missing`**：行在、文件不在（悬挂行）时，原本把 Storage 的 `NoSuchKey` 直接抛成 **500**。判定谓词抽到 `lib/syllabi.ts` 的 `isStorageObjectNotFoundError()`，由 download 与 extract 共用，避免两处各写一份再漏一次 | 端到端冒烟抓到的真 bug |
