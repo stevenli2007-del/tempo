@@ -26,11 +26,28 @@ Next.js App（前端页面 + Route Handlers 后端逻辑）
 
 ## 2. 前端
 
-- **框架**：Next.js 14+（**App Router**，不用 Pages Router）
+- **框架**：Next.js **16.3.4**（**App Router**，不用 Pages Router；配套 React 19）
 - **语言**：TypeScript（不用纯 JavaScript）
-- **样式**：Tailwind CSS
-- **组件库**：shadcn/ui（按需复制组件到项目，不是传统 npm 依赖包）
+- **样式**：Tailwind CSS **4.3.3**（v4 CSS-first，无 `tailwind.config.ts`，配色走 `globals.css` 的 `@theme`）
+- **组件库**：shadcn/ui **4.x**（按需复制组件到项目，不是传统 npm 依赖包）
 - **状态管理**：优先用 React 自带 `useState` / `useContext` / Server Components 数据获取；除非页面状态非常复杂，否则**不引入** Redux / Zustand 等额外状态管理库
+
+### 🔒 版本锁定矩阵（唯一事实源）
+
+> **强制规则**：以下版本已锁定。安装任何依赖**禁止使用 `@latest`**；新增依赖前先查本表，锁了用锁定的，没锁先提出拍板再装。
+
+| 依赖 | 锁定版本 | 用途 | 关键备注 |
+|---|---|---|---|
+| `next` | `16.3.4` | 全栈框架 | App Router；16 起 `next lint` 已移除，lint 走 `eslint .` |
+| `react` / `react-dom` | `19.2.8` | UI 框架 | Next 16 配套 |
+| `typescript` | `5.x` | 语言 | |
+| `tailwindcss` | `4.3.3` | 样式 | v4 CSS-first，配 `@tailwindcss/postcss` |
+| `shadcn` | `4.x` | 组件库 | base-nova 主题；按需复制组件 |
+| `eslint` | `9.39.5` | 静态检查 | **锁 9 不升 10**（ESLint 10 太新，`eslint-plugin-react` 未适配）；flat config `eslint.config.mjs` |
+| `eslint-config-next` | `16.3.4` | ESLint 规则集 | 自带 flat config，无需 `@eslint/eslintrc`/FlatCompat |
+| `@supabase/ssr` | `0.12.5` | 服务端 Auth client | |
+| `@supabase/supabase-js` | `2.112.4` | 浏览器 client | |
+| `@tailwindcss/postcss` | `4.3.3` | PostCSS 插件 | Tailwind v4 必需 |
 
 ---
 
@@ -269,3 +286,4 @@ interface LLMProvider {
 | 2026-09-01 | 新增 iCal Feed 作为 Plan B | [ADR-002](./Decisions.md#adr-002) |
 | 2026-09-01 | 扫描件策略改为"降级提示"，不引入 OCR 管线 | 讨论决策 |
 | 2026-09-01 | T-1 关闭：token 入口实测可用，Phase 0 走 PAT；iCal 从"条件性实现"降级为"长期 Plan B，不进 Phase 0" | P0-2-1 实测结论 |
+| 2026-09-01 | **锁定版本矩阵**：Next `16.3.4` / React `19.2.8` / Tailwind `4.3.3` / shadcn `4.x` / ESLint `9.39.5` / Supabase 客户端；**禁用 `@latest`** | 版本雪崩修复（P0-0-1/P0-0-2） |
