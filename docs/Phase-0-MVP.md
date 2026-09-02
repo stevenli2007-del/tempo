@@ -29,16 +29,23 @@
 
 ## 当前进度指针
 
-**当前 task**：`P0-1-1` syllabus 上传入口 + Supabase Storage（**等待下次会话开始**）
+**当前 task**：`P0-1-7` Workspace CRUD（课程创建 / 列表 / 编辑 / 删除）
 
 > 📌 **P0-0 基础设施 全部完成 ✅**
 > - P0-0-1 脚手架 · P0-0-2a/b Supabase 接入 · P0-0-3 Auth · P0-0-4 13 表迁移 · P0-0-5 RLS + handle_new_user · P0-0-6 Vercel 部署 + 生产冒烟。
 > - 生产 URL：`https://tempo-six-neon.vercel.app`（GitHub `stevenli2007-del/tempo` Private，push main 自动部署）。
 > - Supabase URL Configuration：Site URL + Redirect URLs（`http://localhost:3000/**` + `https://tempo-six-neon.vercel.app/**`）已配齐。
 
-> 📌 **P0-1 已就绪（11 task）**：第一个是 **P0-1-1 · 文件存储**（syllabus 上传 + Supabase Storage + 类型/大小校验）。该 task 零外部依赖、零合规风险，是验证"学生愿意上传 syllabus 且认可 AI 解析价值"的起点。
+> 📌 **⚠️ 顺序调整（2026-09-02，Steven 拍板）：执行顺序 ≠ 编号顺序 —— P0-1-7 提前到 P0-1-1 之前。**
+> - **原因**：`syllabi.course_id` 是 `NOT NULL`（`supabase/migrations/20260902003000_initial_schema.sql:71`），而上传接口是 `POST /api/v1/courses/:id/syllabus`（`API-Contract.md:141`）。**没有课程就没有上传落点**，按原编号顺序做出来是个测不通的半成品。
+> - **实际执行序**：`P0-1-7 → P0-1-1 → P0-1-2 → …`（其余 task 相对顺序不变）。
+> - **编号保持不动**：`P0-1-x` 是 task 的稳定标识，已出现在 commit message 与 memory 里。重编号会让这些引用全部失效。**顺序以本指针为准，不以编号大小为准。**
 
-> 📌 **领 P0-1-1 时只需读**：`Phase-0-MVP.md` 执行卡 + `TechStack.md` 第 2 节版本矩阵 + `Database.md`（storage 相关表）即可开工，按 `CodingRules.md` 阅读策略**不重读全部 11 份文档**。
+> 📌 **同日另两个决策（2026-09-02，Steven 拍板）**
+> 1. **syllabus 上传走「浏览器直传 Supabase Storage」**，不再走服务端 multipart 转发 —— 见 [ADR-009](./Decisions.md#adr-009)。`API-Contract.md` §3 的 multipart 契约将在 P0-1-1 交付时同步改写。
+> 2. **Storage 桶规范**（桶名 / 路径约定 / `storage.objects` RLS 策略）**并入 P0-1-1 一起交付**：先补 `Database.md` 新增 Storage 小节（SSOT 在前），再出迁移文件，不单独拆 task。
+
+> 📌 **领 P0-1-7 时只需读**：`Phase-0-MVP.md` 中 P0-1-7 执行卡 + `TechStack.md` 第 2 节版本矩阵 + `API-Contract.md` 第 2 节（课程契约）+ `Database.md` 第 3.2 节（`courses` 表）即可开工，按 `CodingRules.md` 阅读策略**不重读全部 11 份文档**。
 
 ---
 
@@ -125,10 +132,12 @@
 ## P0-1 M1 — 静态理解（syllabus 解析）
 
 > 目标：验证"学生愿意上传 syllabus 且认可 AI 解析价值"。**这一阶段零外部依赖、零合规风险，是最该先跑通的部分。**
+>
+> ⚠️ **表格行顺序 ≠ 执行顺序**：实际先做 `P0-1-7`（课程 CRUD）再做 `P0-1-1`（上传），原因见[进度指针的顺序调整说明](#当前进度指针)。**表格行序保持编号顺序不动，只为编号可读性。**
 
 | 编号 | 任务 | Owner | 依赖 | 验收标准 | 状态 |
 |---|---|---|---|---|---|
-| **P0-1-1** | 文件存储：syllabus 上传入口 + Supabase Storage + 类型/大小校验（PDF / docx / pptx） | Bud | P0-0-6 | 可上传并取回文件；非法类型被拒绝且有提示 | ⚪ |
+| **P0-1-1** | 文件存储：syllabus 上传入口 + Supabase Storage + 类型/大小校验（PDF / docx / pptx） | Bud | P0-0-6, **P0-1-7** | 可上传并取回文件；非法类型被拒绝且有提示 | ⚪ |
 | **P0-1-2** | 文本提取管线（PDF / docx / pptx），抽不出时**明确降级提示**而非静默返回空 | Bud | P0-1-1 | 三种格式各测一份真实文件；扫描件走降级提示不崩溃 | ⚪ |
 | **P0-1-3** | LLM provider 抽象层（`lib/llm`）：默认 DeepSeek adapter + JSON schema 结构化输出 + 错误处理 | Bud | P0-0-6 | 抽象层可用；切换 provider 只改配置不动业务代码（[ADR-003](./Decisions.md#adr-003)） | ⚪ |
 | **P0-1-4** | 五板块抽取 prompt v1：Grade Composition / Course Outline / Test Dates / Office Hours / Submission Policy，**拆成独立抽取任务** | Bud | P0-1-3 | 每板块独立调用；输出符合 schema；缺失字段返回 null 不编造 | ⚪ |
@@ -215,4 +224,5 @@ P0-0 基础设施
 | 2026-09-01 | P0-2-1 完成（Steven 实测：token 入口可用）→ P0-2-10 iCal 兜底标记为不执行；新增 P0-2-1b 记录实测细节；Phase 1 OAuth 申请改为「Phase 0 验证后再启动」（Steven 拍板，偏离原并行建议） |
 | 2026-09-02 | 修复文档漂移（P0-0-1 「Next.js 14」→「16.3.4」，与 TechStack 对齐）；P0-0-2 拆分为 2a（Steven 手动建项目/填 env）/ 2b（Bud 写 client，已完成）；P0-0-6 改「共担」并标注交接点；新增「P0-0 执行卡」小节；更新进度指针反映真实卡点 |
 | 2026-09-02 | P0-0 基础设施全部完成：P0-0-3 Auth ✅（Next 16 middleware 改名为 proxy）+ P0-0-4 13 表迁移 ✅ + P0-0-5 RLS + handle_new_user ✅ + P0-0-6 Vercel 部署 ✅（生产 URL `tempo-six-neon.vercel.app`，Steven 实测生产冒烟通过）；进度指针推进至 P0-1 M1（syllabus 静态理解）。**记录四个部署坑**：git author 不匹配 GitHub / `cookies()` 顺序错 / env vars 保存≠注入 / `NEXT_PUBLIC_*` 别勾 Secret |
+| 2026-09-02 | **执行顺序调整（Steven 拍板）**：`P0-1-7` 课程 CRUD 提前至 `P0-1-1` 上传之前（`syllabi.course_id` 为 NOT NULL，无课则无上传落点）。**task 编号一律不变**，顺序以「当前进度指针」为准，表格行序仅服务编号可读性。同日决策：上传改浏览器直传（新增 [ADR-009](./Decisions.md#adr-009)）；Storage 桶规范并入 P0-1-1 交付 |
 
