@@ -33,7 +33,7 @@
 
 > 📌 **P0-1-7 / P0-1-1 / P0-1-2 均已完成 ✅（2026-09-02）**
 > - **ADR-010 已拍板接受**：RLS 保护的资源，「越权」与「不存在」统一返回 `404`，Phase 0 不用 403。契约文档已同步改（§1.2 / §1.4），**后续所有资源端点按此执行，不再逐个论证**。
-> - **P0-1-1 / P0-1-2 的浏览器 UI 验收合并做**：两者共用 `syllabus-upload.tsx` 一个组件，上传后立刻展示提取状态与文本预览，**分开验反而割裂**。Steven 本地 `npm run dev` 走一遍即可覆盖两个 task。
+> - **P0-1-1 / P0-1-2 的浏览器 UI 已由 Steven 本地验收通过（2026-09-02，合并验收）**：两者共用 `syllabus-upload.tsx` 一个组件，上传 → 提取状态 → 文本预览 → 错误提示文案走一遍覆盖两个 task。M1 前三个 task 全部收口，下一 task 为 P0-1-3。
 
 > 📌 **P0-0 基础设施 全部完成 ✅**
 > - P0-0-1 脚手架 · P0-0-2a/b Supabase 接入 · P0-0-3 Auth · P0-0-4 13 表迁移 · P0-0-5 RLS + handle_new_user · P0-0-6 Vercel 部署 + 生产冒烟。
@@ -160,7 +160,7 @@
 
 > 与 P0-0 一样：领 task 时只读对应执行卡 + `TechStack.md` 第 2 节版本矩阵，不必重读全部文档。
 
-#### 🎫 P0-1-1 · syllabus 上传入口 + Supabase Storage + 类型/大小校验
+#### 🎫 P0-1-1 · syllabus 上传入口 + Supabase Storage + 类型/大小校验 · ✅ 已完成，勿重做
 - **做什么**：能上传一份 syllabus 并存进 Supabase Storage，能取回来；非法类型/超大小被拒绝且有提示。
 - **⚠️ 前置（Steven 手动，走 Dashboard UI，不走 SQL Editor）**：`supabase/migrations/20260902220000_storage_syllabi.sql` 的头部写了完整步骤。**不能在 SQL Editor 整段执行** —— `CREATE POLICY on storage.objects` 会报 `42501: must be owner of table objects`（该表 owner 是平台内部的 `supabase_storage_admin`，SQL Editor 的 postgres 角色不是 owner，而建策略要求 owner）。正确做法：① Dashboard → Storage → New bucket（`syllabi`，私有，limit 20MB）→ ② Storage → Policies 建四条。**不执行的话上传会 500**（RLS 拒绝一切 insert，且该检查发生在"桶是否存在"之前，报错文案是 `new row violates row-level security policy`，**不是** "bucket not found"，别被误导）。验收用的两条 SELECT 在 SQL Editor 可以正常跑，写在迁移文件末尾。
 - **改哪些文件**：
@@ -185,7 +185,7 @@
   - **API 冒烟 19 项，18 项通过**：未登录 401 / 非法 uuid 400 / 非 JSON 400 / 5 项入参校验 400 / 2 项类型错误 415 / 超限 413 / 课程不存在 404 / **B 给 A 的课传文件 404（越权隔离 ✅）** / 下载端点 400·404·401 / `x-request-id` 回传 ✅
   - **复测（2026-09-02 Steven 执行 Storage 后）✅ 19/19 全绿**：原唯一未过的 201 正常路径已通过。另做 **Storage 端到端直探 7/7**：签名上传（RLS INSERT 放行）→ 直传 → 签下载 URL → 真实取回内容一致 → **B 传 A 的路径被拒** → **B 下载 A 的文件被拒** → A 删除自己的对象（RLS DELETE 放行）。
   - 顺带修了冒烟基建的两个坑：① 沙箱里 `signUp` 的 **PKCE code challenge 生成会抛错**，测试脚本一律先 `signInWithPassword`（不走 PKCE）；② `@supabase/ssr` 的 `setAll` 回调收到的是 **`{name, value}` 对象数组**，不是元组。
-- **尚未验证**：浏览器 UI 交互（沙箱起不了 `next dev`）——**与 P0-1-2 合并验收**，两者共用同一组件。
+- **✅ 浏览器 UI 已由 Steven 本地验收通过（2026-09-02，与 P0-1-2 合并验收）**：上传交互、提取状态展示、文本预览与错误提示文案均正常。
 - **已知留白**：**上传中断会留悬挂行**（已由 P0-1-2 的 409 + 置 `failed` 兜住，见下卡）；未新增 `file_size`/`mime_type` 列（Diff First，需要时再加）；端点总表里 `GET /api/v1/health` 实际未实现（返回 404，属 P0-0-6 遗留）。
 
 #### 🎫 P0-1-2 · 文本提取管线（PDF / docx / pptx）· ✅ 已完成，勿重做
@@ -227,7 +227,7 @@
 - **自测（Bud，2026-09-02）：57/57 全绿** —— 三格式提取正确（含 method / 页数 / pptx 按 slide 数字排序而非字典序）、多页 PDF 页序正确、PDF 行内换行保留、非嵌入标准字体（Times-Roman）可抽、扫描件降级（200 + failed + 原因 + `previewText=null` + method=null）、幂等、**悬挂行 409 `file_missing` + DB 里确认置 failed**、download 悬挂行 404、越权 404、未登录 401、非法 uuid 400、类型不支持 415 / 超限 413、`x-request-id` 回传、Storage 端到端（直传 → 签名下载 → 跨用户被拒 → 测试数据清理）。
 - **生产验证（2026-09-02）**：`extract` 未登录 401 / 非法 uuid 400 / download 401 全部恢复正常（此前一律 500）；诊断路由在 **linux + node 24 + DOMMatrix 未定义**的条件下实测提取出正确文本。
   - 测试文件用 python `zipfile` 手工生成最小合法 pdf / docx / pptx（docx、pptx 本质都是 zip + XML），不依赖任何 Office 工具。
-- **尚未验证**：浏览器 UI（与 P0-1-1 合并验收）。
+- **✅ 浏览器 UI 已由 Steven 本地验收通过（2026-09-02，与 P0-1-1 合并验收）**。
 - **已知留白**：① 提取失败的行没有「重试提取」入口（Phase 0 无存量数据，重新上传即可）；② `maxDuration = 60` 是为 20MB PDF 留的，Vercel 套餐若更低需下调。
 
 #### 🎫 P0-1-7 · Workspace CRUD（课程创建 / 列表 / 编辑 / 删除）· ✅ 已完成，勿重做
@@ -337,4 +337,5 @@ P0-0 基础设施
 | 2026-09-02 | **P0-1-2 文本提取管线完成 ✅**：新增 `lib/extract.ts`（pdf / docx / pptx 三格式）+ `POST /api/v1/syllabi/:id/extract`；`TechStack.md` 登记 `pdf-parse` 2.4.5 / `mammoth` 1.12.2 / `jszip` 3.10.1；`API-Contract.md` 新增 extract 端点并**修正「201 响应带 previewText」的设计错误**（签票据时文件还没传上来）；抽出 `lib/api/params.ts` 的 `UUID_PATTERN`；`next.config.mjs` 加 `serverExternalPackages: ['pdf-parse']`。**端到端冒烟 27/27 全绿**。进度指针推进至 `P0-1-3` LLM provider 抽象层 |
 | 2026-09-02 | 🔥 **生产事故修复：PDF 提取器由 `pdf-parse` 2.4.5 换成 `pdfjs-dist` 5.4.296（legacy 构建）**。`pdf-parse` 模块顶层无条件 `new DOMMatrix()`，DOMMatrix 靠 `require('@napi-rs/canvas')` 补、加载失败只 warn 不赋值 → **Vercel 上 extract 路由 import 即 500（空响应体）**，本地 macOS 因装有 23MB 原生二进制而全绿。排查手段：临时诊断路由逐个 `import` 抓错误消息（**下划线目录 `_diag` 是私有目录不建路由，改名 `diag-tmp` 才生效**）。连带把 `isStorageObjectNotFoundError()` 抽到 `lib/syllabi.ts` 共用，并修掉 **download 端点漏判 `NoSuchKey` 导致悬挂行返回 500** 的真 bug（冒烟抓到）。`API-Contract.md` 补 download 的 `404 file_missing` 语义与提取器换版记录。**端到端冒烟 41/41 全绿** |
 | 2026-09-02 | 🔥🔥 **生产事故修复（第二轮，最终方案）：PDF 提取器定为 `unpdf` 1.8.1**。上一轮的 `pdfjs-dist` legacy 构建**在 Vercel 上同样 500** —— 我此前「legacy 自带 DOMMatrix polyfill」的判断是错的，本地看到的 `DOMMatrix` 其实仍由 `@napi-rs/canvas` 提供，**本地测试环境被同一个「只存在于本地的依赖」污染**。三者（pdf-parse、pdfjs 现代构建、pdfjs legacy 构建）死在同一处：模块作用域 `new DOMMatrix()`，canvas 缺失时只 warn 不赋值。unpdf 自带为 serverless 重打包的 pdfjs（worker 内联 + 剥浏览器 API + 补全局对象），**零运行时依赖、不需要 canvas**。`pdfjs-dist` 保留为**纯数据依赖**（`standard_fonts/` + `cmaps/`，靠 `outputFileTracingIncludes` 打进函数包）。同步新增 [ADR-011](./Decisions.md#adr-011)。**本地端到端冒烟 57/57 全绿；生产实测（linux / node 24 / DOMMatrix 未定义）提取正常，extract 与 download 端点 401/400 均恢复正常** |
+| 2026-09-02 | **P0-1-1 + P0-1-2 浏览器 UI 验收通过 ✅（Steven 本地，合并验收，共用 `syllabus-upload.tsx`）**。M1 前三个 task（P0-1-7 / P0-1-1 / P0-1-2）全部收口，两张执行卡标注「勿重做」。进度指针维持 `P0-1-3` LLM provider 抽象层（下一 task） |
 
