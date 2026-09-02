@@ -23,6 +23,14 @@ import type {
 export const SYLLABUS_COLUMNS =
   'id, course_id, file_url, file_name, extract_method, extract_status, extract_error, page_count, parse_status, parse_error, uploaded_at'
 
+/**
+ * 提取端点（`POST /api/v1/syllabi/:id/extract`）专用：多一个 `raw_text`。
+ *
+ * 列表与上传响应**一律不带这一列** —— 一份 20MB 的 syllabus 抽出来的文本可能是几 MB，
+ * 回传全文既浪费带宽也会拖垮首屏。只有 extract 端点需要读它（幂等返回时取预览）。
+ */
+export const SYLLABUS_COLUMNS_WITH_TEXT = `${SYLLABUS_COLUMNS}, raw_text`
+
 /** syllabi 表在 DB 里的真实形状（snake_case）。只在本文件内使用。 */
 export type SyllabusRow = {
   id: string
@@ -37,6 +45,9 @@ export type SyllabusRow = {
   parse_error: string | null
   uploaded_at: string
 }
+
+/** 带 `raw_text` 的行，配合 `SYLLABUS_COLUMNS_WITH_TEXT` 使用。 */
+export type SyllabusRowWithText = SyllabusRow & { raw_text: string | null }
 
 // ---------------------------------------------------------------
 // 上传校验

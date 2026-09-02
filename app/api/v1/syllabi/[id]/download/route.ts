@@ -2,6 +2,7 @@ import { getCurrentUser, internalError, jsonError, jsonOk } from '@/lib/api/resp
 import { SYLLABUS_BUCKET, SYLLABUS_COLUMNS } from '@/lib/syllabi'
 import type { SyllabusRow } from '@/lib/syllabi'
 import type { SyllabusDownloadUrl } from '@/types/syllabus'
+import { UUID_PATTERN } from '@/lib/api/params'
 
 /**
  * `GET /api/v1/syllabi/:id/download` —— 签发**短时**下载 URL。
@@ -18,7 +19,6 @@ import type { SyllabusDownloadUrl } from '@/types/syllabus'
 /** 签名有效期（秒）。够用户点开，不够拿来外传。 */
 const SIGNED_URL_TTL_SECONDS = 60
 
-const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
 interface RouteContext {
   params: Promise<{ id: string }>

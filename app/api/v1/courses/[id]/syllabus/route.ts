@@ -10,6 +10,7 @@ import {
 } from '@/lib/syllabi'
 import type { SyllabusRow } from '@/lib/syllabi'
 import type { CreateSyllabusResponse } from '@/types/syllabus'
+import { UUID_PATTERN } from '@/lib/api/params'
 
 /**
  * `POST /api/v1/courses/:id/syllabus` —— 签发上传票据（两步式直传的第 1 步）。
@@ -24,7 +25,6 @@ import type { CreateSyllabusResponse } from '@/types/syllabus'
  * 统一 404。
  */
 
-const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
 interface RouteContext {
   params: Promise<{ id: string }>

@@ -29,11 +29,11 @@
 
 ## 当前进度指针
 
-**当前 task**：`P0-1-1` 文件存储：syllabus 上传入口 + Supabase Storage + 类型/大小校验
+**当前 task**：`P0-1-3` LLM provider 抽象层（`lib/llm`）：DeepSeek adapter + 结构化输出 + 错误处理
 
-> 📌 **P0-1-7 已完成并通过 Steven 验收 ✅（2026-09-02）**
-> - 已推送 origin/main（`494c9ec` feat + `f380ef0` / `8e466f7` docs），Vercel 已自动部署。
+> 📌 **P0-1-7 / P0-1-1 / P0-1-2 均已完成 ✅（2026-09-02）**
 > - **ADR-010 已拍板接受**：RLS 保护的资源，「越权」与「不存在」统一返回 `404`，Phase 0 不用 403。契约文档已同步改（§1.2 / §1.4），**后续所有资源端点按此执行，不再逐个论证**。
+> - **P0-1-1 / P0-1-2 的浏览器 UI 验收合并做**：两者共用 `syllabus-upload.tsx` 一个组件，上传后立刻展示提取状态与文本预览，**分开验反而割裂**。Steven 本地 `npm run dev` 走一遍即可覆盖两个 task。
 
 > 📌 **P0-0 基础设施 全部完成 ✅**
 > - P0-0-1 脚手架 · P0-0-2a/b Supabase 接入 · P0-0-3 Auth · P0-0-4 13 表迁移 · P0-0-5 RLS + handle_new_user · P0-0-6 Vercel 部署 + 生产冒烟。
@@ -142,8 +142,8 @@
 
 | 编号 | 任务 | Owner | 依赖 | 验收标准 | 状态 |
 |---|---|---|---|---|---|
-| **P0-1-1** | 文件存储：syllabus 上传入口 + Supabase Storage + 类型/大小校验（PDF / docx / pptx） | Bud | P0-0-6, **P0-1-7** | 可上传并取回文件；非法类型被拒绝且有提示 | ⚪ |
-| **P0-1-2** | 文本提取管线（PDF / docx / pptx），抽不出时**明确降级提示**而非静默返回空 | Bud | P0-1-1 | 三种格式各测一份真实文件；扫描件走降级提示不崩溃 | ⚪ |
+| **P0-1-1** | 文件存储：syllabus 上传入口 + Supabase Storage + 类型/大小校验（PDF / docx / pptx） | Bud | P0-0-6, **P0-1-7** | 可上传并取回文件；非法类型被拒绝且有提示 | ✅ |
+| **P0-1-2** | 文本提取管线（PDF / docx / pptx），抽不出时**明确降级提示**而非静默返回空 | Bud | P0-1-1 | 三种格式各测一份真实文件；扫描件走降级提示不崩溃 | ✅ |
 | **P0-1-3** | LLM provider 抽象层（`lib/llm`）：默认 DeepSeek adapter + JSON schema 结构化输出 + 错误处理 | Bud | P0-0-6 | 抽象层可用；切换 provider 只改配置不动业务代码（[ADR-003](./Decisions.md#adr-003)） | ⚪ |
 | **P0-1-4** | 五板块抽取 prompt v1：Grade Composition / Course Outline / Test Dates / Office Hours / Submission Policy，**拆成独立抽取任务** | Bud | P0-1-3 | 每板块独立调用；输出符合 schema；缺失字段返回 null 不编造 | ⚪ |
 | **P0-1-5** | 解析 API 路由 + 结果落库 + **修正 diff 存储**（保存原始解析 vs 修正后 + 差异字段） | Bud | P0-1-2, P0-1-4 | 数据库同时存有原始与修正版本，可追溯差异 | ⚪ |
@@ -185,8 +185,36 @@
   - **API 冒烟 19 项，18 项通过**：未登录 401 / 非法 uuid 400 / 非 JSON 400 / 5 项入参校验 400 / 2 项类型错误 415 / 超限 413 / 课程不存在 404 / **B 给 A 的课传文件 404（越权隔离 ✅）** / 下载端点 400·404·401 / `x-request-id` 回传 ✅
   - **复测（2026-09-02 Steven 执行 Storage 后）✅ 19/19 全绿**：原唯一未过的 201 正常路径已通过。另做 **Storage 端到端直探 7/7**：签名上传（RLS INSERT 放行）→ 直传 → 签下载 URL → 真实取回内容一致 → **B 传 A 的路径被拒** → **B 下载 A 的文件被拒** → A 删除自己的对象（RLS DELETE 放行）。
   - 顺带修了冒烟基建的两个坑：① 沙箱里 `signUp` 的 **PKCE code challenge 生成会抛错**，测试脚本一律先 `signInWithPassword`（不走 PKCE）；② `@supabase/ssr` 的 `setAll` 回调收到的是 **`{name, value}` 对象数组**，不是元组。
-- **尚未验证**：浏览器 UI 交互（沙箱起不了 `next dev`）——Steven 本地走一遍上传/下载/错误提示。
-- **已知留白**：`extractStatus` 恒为 `pending`（提取管线属 P0-1-2）；**上传中断会留悬挂行**，靠 P0-1-2 提取失败时置 `extract_status='failed'` 兜住可见性；未新增 `file_size`/`mime_type` 列（Diff First，需要时再加）；端点总表里 `GET /api/v1/health` 实际未实现（返回 404，属 P0-0-6 遗留）。
+- **尚未验证**：浏览器 UI 交互（沙箱起不了 `next dev`）——**与 P0-1-2 合并验收**，两者共用同一组件。
+- **已知留白**：**上传中断会留悬挂行**（已由 P0-1-2 的 409 + 置 `failed` 兜住，见下卡）；未新增 `file_size`/`mime_type` 列（Diff First，需要时再加）；端点总表里 `GET /api/v1/health` 实际未实现（返回 404，属 P0-0-6 遗留）。
+
+#### 🎫 P0-1-2 · 文本提取管线（PDF / docx / pptx）· ✅ 已完成，勿重做
+
+- **做什么**：上传流程的第 3 拍——把 Storage 里的文件读回来，抽成纯文本存进 `syllabi.raw_text`，返回前 1000 字符的预览。
+- **✅ 已完成**（commit 见变更记录）。**验收：API 端到端 27 项全绿**。
+- **改哪些文件**：
+  - `lib/extract.ts`（新）—— 三格式提取器，**纯函数层：不碰 DB 不碰网络**，可单独测
+  - `app/api/v1/syllabi/[id]/extract/route.ts`（新）—— 取行 → 签下载 URL → 拉文件 → 提取 → 写回 → 返回
+  - `types/mammoth.d.ts`（新）—— mammoth 无自带类型且 `@types/mammoth` **不存在**（404），手写最小声明
+  - `lib/api/params.ts`（新）—— `UUID_PATTERN`，原散在 3 个路由里各写一份，第 4 次出现时抽出
+  - `next.config.mjs` —— **`serverExternalPackages: ['pdf-parse']`**，不加这条所有 PDF 提取会静默失败
+  - `types/syllabus.ts` —— 新增 `SyllabusExtractResponse`
+  - `lib/syllabi.ts` —— 新增 `SYLLABUS_COLUMNS_WITH_TEXT`（多 `raw_text` 一列）
+  - `components/courses/syllabus-upload.tsx` —— 第 4 拍：直传成功后调 extract，展示预览 / 降级提示
+- **🔴 四个踩过的坑（下一个人别再踩）**：
+  1. **`pdf-parse` 必须设为 server external**。被打包后 `pdf.worker.mjs` 不会产出，运行时报 `Setting up fake worker failed: Cannot find module '.next/server/chunks/pdf.worker.mjs'`，**表现为所有 PDF 静默提取失败**（HTTP 仍 200，`extractStatus='failed'`）。
+  2. **不要用 `result.text`，要用 `result.pages`**。pdf-parse 2.x 会在 `text` 里注入 `-- N of M --` 分页标记，会一路污染到 P0-1-3 的 LLM 输入。且扫描件的 `text` 是 `"\n\n-- 1 of 1 --\n\n"`（非空），**用 `text` 判空永远判不出"抽不出文字"**；`pages` 拼出来正好是空串，判定天然成立。
+  3. **`createSignedUrl` 会检查对象是否存在**，不存在时返回 `StorageApiError { statusCode: '404', code: 'NoSuchKey' }`。这是悬挂行的判定信号，**不能当服务端错误抛出去**（否则用户看到 500 而不是"文件没传完"）。
+  4. **`extract_method` 有 CHECK 约束**：只能是 `pdf_text` / `docx` / `pptx` / `manual`。注意 `docx`/`pptx` **没有** `_text` 后缀（初版遗留，未为此改生产表），写 `docx_text` 会被 DB 拒绝。
+- **关键约束**：
+  - **提取失败返回 200，不是 HTTP 错误** —— 文件存下来了，只是读不出文字。前端走 `notice`（提示色）而非 `error`（错误色），文案要写「上传成功，但…」。
+  - **取文件用当前用户会话签的 URL，不用 service role** —— 这样下载仍受 `storage.objects` 的 RLS 约束，查询逻辑写错也取不到别人的文件。
+  - **幂等**：已 `extracted` 的行直接返回既有结果（文本只依赖不可变的文件内容）。
+  - **`raw_text` 写但列表不读**：几 MB 的全文不能进列表响应，只有 extract 端点读它取预览。
+- **自测（Bud，2026-09-02）：27/27 全绿** —— 三格式提取正确（含 method / 页数 / pptx 按 slide 数字排序而非字典序）、无分页标记污染、扫描件降级（200 + failed + 原因 + `previewText=null`）、幂等、**悬挂行 409 `file_missing` + 置 failed**、越权 404、未登录 401、非法 uuid 400、`x-request-id` 回传。
+  - 测试文件用 python `zipfile` 手工生成最小合法 pdf / docx / pptx（docx、pptx 本质都是 zip + XML），不依赖任何 Office 工具。
+- **尚未验证**：浏览器 UI（与 P0-1-1 合并验收）。
+- **已知留白**：① 提取失败的行没有「重试提取」入口（Phase 0 无存量数据，重新上传即可）；② `maxDuration = 60` 是为 20MB PDF 留的，Vercel 套餐若更低需下调。
 
 #### 🎫 P0-1-7 · Workspace CRUD（课程创建 / 列表 / 编辑 / 删除）· ✅ 已完成，勿重做
 - **做什么**：课程 CRUD。列表按学期分组展示；删除 = 归档，带二次确认。
@@ -290,4 +318,7 @@ P0-0 基础设施
 | 2026-09-02 | **执行顺序调整（Steven 拍板）**：`P0-1-7` 课程 CRUD 提前至 `P0-1-1` 上传之前（`syllabi.course_id` 为 NOT NULL，无课则无上传落点）。**task 编号一律不变**，顺序以「当前进度指针」为准，表格行序仅服务编号可读性。同日决策：上传改浏览器直传（新增 [ADR-009](./Decisions.md#adr-009)）；Storage 桶规范并入 P0-1-1 交付 |
 | 2026-09-02 | **P0-1-7 交付并验收通过 ✅**（commit `494c9ec` + `f380ef0` + `8e466f7`，已推 origin/main 并自动部署）。API 层 16 项 curl 冒烟全过，浏览器 UI 由 Steven 本地验收通过。**403→404 契约偏离经 Steven 拍板接受，升格为 [ADR-010](./Decisions.md#adr-010)**，`API-Contract.md` §1.2 / §1.4 同步修改，适用于所有受 RLS 保护的资源端点。进度指针推进至 `P0-1-1` |
 | 2026-09-02 | **P0-1-1 开发完成（待 Steven 执行 Storage 迁移后终验）**：新增 `Database.md` 7.3 Storage 小节 + 迁移 `20260902220000_storage_syllabi.sql`；上传改两步式直传（[ADR-009](./Decisions.md#adr-009)）；新增 `GET /api/v1/syllabi/:id/download`；`API-Contract.md` §3 的 multipart 契约作废改写为两步式。**API 冒烟 19 项过 18 项，唯一未过的 201 正常路径卡在迁移未执行**（RLS 拒绝一切 `storage.objects` insert）。新增 P0-1-1 执行卡 |
+| 2026-09-02 | **Storage 迁移执行方式修正**：`CREATE POLICY on storage.objects` 在 SQL Editor 报 `42501: must be owner of table objects`（该表 owner 是平台内部的 `supabase_storage_admin`）。迁移文件改写为 **Dashboard UI 操作步骤 + SQL 语义留档 + 可跑的验收 SELECT**；`Database.md` 7.3 与 P0-1-1 执行卡同步修正 |
+| 2026-09-02 | **P0-1-1 复测全绿 ✅**：Steven 通过 Dashboard UI 建好桶与 4 条策略后，API 冒烟 **19/19** + Storage 端到端直探 **7/7**（含跨用户隔离）。测试数据已清理。P0-1-1 与 P0-1-2 的浏览器 UI **合并验收**（共用同一组件） |
+| 2026-09-02 | **P0-1-2 文本提取管线完成 ✅**：新增 `lib/extract.ts`（pdf / docx / pptx 三格式）+ `POST /api/v1/syllabi/:id/extract`；`TechStack.md` 登记 `pdf-parse` 2.4.5 / `mammoth` 1.12.2 / `jszip` 3.10.1；`API-Contract.md` 新增 extract 端点并**修正「201 响应带 previewText」的设计错误**（签票据时文件还没传上来）；抽出 `lib/api/params.ts` 的 `UUID_PATTERN`；`next.config.mjs` 加 `serverExternalPackages: ['pdf-parse']`。**端到端冒烟 27/27 全绿**。进度指针推进至 `P0-1-3` LLM provider 抽象层 |
 

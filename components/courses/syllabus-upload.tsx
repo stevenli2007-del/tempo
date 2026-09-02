@@ -7,7 +7,12 @@ import { readApiErrorMessage } from '@/lib/api/client-error'
 import { createClient } from '@/lib/supabase/browser'
 import { ALLOWED_EXTENSIONS, MAX_FILE_SIZE_BYTES, extractExtension, isAllowedExtension } from '@/lib/syllabi'
 import { Button } from '@/components/ui/button'
-import type { CreateSyllabusResponse, Syllabus, SyllabusDownloadUrl } from '@/types/syllabus'
+import type {
+  CreateSyllabusResponse,
+  Syllabus,
+  SyllabusDownloadUrl,
+  SyllabusExtractResponse,
+} from '@/types/syllabus'
 
 /**
  * Syllabus 上传入口（ADR-009：浏览器直传 Storage，文件不经我们服务端）。
@@ -16,9 +21,13 @@ import type { CreateSyllabusResponse, Syllabus, SyllabusDownloadUrl } from '@/ty
  *   1. 前端预校验扩展名与大小 —— **只为体验**，不是权威；
  *   2. `POST /api/v1/courses/:id/syllabus` 取上传票据（服务端再校验一遍）；
  *   3. `uploadToSignedUrl(path, token, file)` 直接传到 Storage；
- *   4. `router.refresh()` 让服务端组件重新取数。
+ *   4. `POST /api/v1/syllabi/:id/extract` 提取文本（P0-1-2）；
+ *   5. `router.refresh()` 让服务端组件重新取数。
  *
- * 第 2、3 步是两个独立的失败点，任一失败都给出明确提示（CodingRules 7）。
+ * 第 2、3、4 步是三个独立的失败点，任一失败都给出明确提示（CodingRules 7）。
+ *
+ * ⚠️ **第 4 步失败不算上传失败** —— 文件已经存下来了，只是读不出文字。
+ * 所以走 `notice`（提示色）而不是 `error`（错误色），文案也要说清「上传成功，但…」。
  */
 
 interface SyllabusUploadProps {
@@ -26,18 +35,24 @@ interface SyllabusUploadProps {
   syllabus: Syllabus | null
 }
 
-type Pending = 'uploading' | 'downloading'
+type Pending = 'uploading' | 'extracting' | 'downloading'
 
 export function SyllabusUpload({ courseId, syllabus }: SyllabusUploadProps) {
   const router = useRouter()
   const inputRef = useRef<HTMLInputElement>(null)
   const [pending, setPending] = useState<Pending | null>(null)
   const [error, setError] = useState<string | null>(null)
+  /** 非致命提示（如"上传成功但读不出文字"）。用提示色，跟真正的失败区分开。 */
+  const [notice, setNotice] = useState<string | null>(null)
+  /** 提取到的文本预览，供用户立刻确认"抽出来的东西对不对"。 */
+  const [preview, setPreview] = useState<string | null>(null)
 
   const isBusy = pending !== null
 
   async function handleUpload(file: File) {
     setError(null)
+    setNotice(null)
+    setPreview(null)
 
     // 前端预校验：同样的规则服务端会再跑一遍，这里是让用户在上传前就看到原因。
     const ext = extractExtension(file.name)
@@ -63,7 +78,7 @@ export function SyllabusUpload({ courseId, syllabus }: SyllabusUploadProps) {
         return
       }
 
-      const { upload } = (await ticketResponse.json()) as CreateSyllabusResponse
+      const { syllabus: created, upload } = (await ticketResponse.json()) as CreateSyllabusResponse
 
       const supabase = createClient()
       const { error: uploadError } = await supabase.storage
@@ -73,6 +88,26 @@ export function SyllabusUpload({ courseId, syllabus }: SyllabusUploadProps) {
       if (uploadError) {
         setError('文件上传失败，请重试')
         return
+      }
+
+      // 第 4 拍：文件已在 Storage，现在才能提取文本。
+      setPending('extracting')
+      const extractResponse = await fetch(`/api/v1/syllabi/${created.id}/extract`, {
+        method: 'POST',
+      })
+
+      if (!extractResponse.ok) {
+        // 到不了这里基本只有 409（文件没传完）或网络问题。文件本身已经存下来了，
+        // 所以也走 notice 而不是 error —— 用户不需要重新上传。
+        setNotice(await readApiErrorMessage(extractResponse, '文本提取'))
+      } else {
+        const result = (await extractResponse.json()) as SyllabusExtractResponse
+        setPreview(result.previewText)
+        if (result.syllabus.extractStatus === 'failed') {
+          setNotice(
+            `上传成功，但这份文件读不出文字：${result.syllabus.extractError ?? '原因未知'}`,
+          )
+        }
       }
 
       router.refresh()
@@ -164,15 +199,41 @@ export function SyllabusUpload({ courseId, syllabus }: SyllabusUploadProps) {
             onClick={() => inputRef.current?.click()}
             disabled={isBusy}
           >
-            {pending === 'uploading' ? '上传中…' : '上传 syllabus'}
+            {pending === 'uploading'
+              ? '上传中…'
+              : pending === 'extracting'
+                ? '提取中…'
+                : '上传 syllabus'}
           </Button>
         </div>
       )}
+
+      {/* 提取中给个明确反馈 —— 20MB 的 PDF 可能要好几秒，静默会让人以为卡死了。 */}
+      {pending === 'extracting' ? (
+        <p className="mt-3 text-xs text-muted-foreground">文件已上传，正在提取文本…</p>
+      ) : null}
+
+      {notice ? (
+        <p role="status" className="mt-3 text-sm text-muted-foreground">
+          {notice}
+        </p>
+      ) : null}
 
       {error ? (
         <p role="alert" className="mt-3 text-sm text-destructive">
           {error}
         </p>
+      ) : null}
+
+      {preview ? (
+        <details className="mt-3">
+          <summary className="cursor-pointer text-xs text-muted-foreground">
+            查看提取到的文本（前 {preview.length} 字符）
+          </summary>
+          <pre className="mt-2 max-h-40 overflow-auto whitespace-pre-wrap rounded border border-border bg-background p-2 text-xs text-foreground">
+            {preview}
+          </pre>
+        </details>
       ) : null}
     </div>
   )

@@ -123,7 +123,7 @@ Supabase Auth 的 `auth.users` 管认证，本表放业务扩展字段，`id` �
 > 桶 `syllabi` 是私有的，**不存在永久可访问的 URL**；签名 URL 会过期（本项目签 60 秒）。所以这里只能存路径，取文件时用 `storage.from('syllabi').createSignedUrl(file_url, 60)` **现签现用**。
 > 字段名沿用初版的 `file_url` 未作改名 —— Phase 0 无存量数据，改名成本极低，**若 Steven 认为 `storage_path` 更少歧义，一句话即可改**（一处迁移 + 本文件 + `lib/syllabi.ts`）。
 
-> ⚠️ **「上传未完成」的悬挂行**（P0-1-1 已知留白）：直传模式下先建行、后传文件（ADR-009），若上传中断会留下一条 `extract_status='pending'` 但没有实际文件的行。Phase 0 不额外做对账清理 —— P0-1-2 的提取步骤读不到文件时会把该行置为 `extract_status='failed'` + `extract_error`，由既有机制兜住**失败可见性**（CodingRules 7）。
+> ⚠️ **「上传未完成」的悬挂行**（P0-1-1 已知留白，**P0-1-2 已实现兜底**）：直传模式下先建行、后传文件（ADR-009），若上传中断会留下一条 `extract_status='pending'` 但没有实际文件的行。Phase 0 不额外做对账清理 —— 判定信号是 `createSignedUrl` 对不存在的对象返回 `StorageApiError { statusCode: '404', code: 'NoSuchKey' }`，extract 端点据此把该行置为 `extract_status='failed'` + 原因，并返回 **409 `file_missing`**（不是 500）。
 
 ### 3.4 `grade_components`（成绩构成）
 
@@ -521,3 +521,4 @@ syllabus 可能含教师姓名、office hour 地址、评分细则等个人信�
 | 2026-09-01 | 初版：10 张表 | — |
 | 2026-09-01 | 重写：新增 `sync_runs` / `llm_runs` / `parse_corrections`；新增派生规则章节（ADR-004）；新增同步语义章节；`courses` 增同步状态字段；`tasks` 增 `is_derived` / `external_updated_at` / `last_seen_at` / `is_deleted`；`canvas_credentials` 字段改名与状态机；token 有效期修正 | ADR-001（内核）、ADR-003（LLM 可插拔）、ADR-004（派生）、ADR-005（同步）、PRD F3/F4 |
 | 2026-09-02 | 新增 **7.3 Supabase Storage** 小节（桶 `syllabi`、路径约定、`storage.objects` 四条 RLS 策略、不设 MIME 白名单的理由）；澄清 §3.3 `file_url` 存的是**对象路径而非 URL**（私有桶无永久 URL）；记录「上传未完成的悬挂行」这一已知留白及其兜底机制 | P0-1-1、ADR-009（直传）、`Security-Privacy.md` 私有桶约定 |
+| 2026-09-02 | **P0-1-2 落地后对 §3.3 的补充**：`raw_text` 由 `POST /api/v1/syllabi/:id/extract` 写入，**列表与上传响应一律不读这一列**（可能几 MB，只有 extract 端点读它取前 1000 字符预览）；`extract_method` 的 CHECK 约束取值确认为 `pdf_text` / `docx` / `pptx` / `manual`（**`docx`/`pptx` 没有 `_text` 后缀**，是初版遗留，不为此改生产表）；悬挂行的兜底已实现 —— `createSignedUrl` 对不存在的对象返回 `NoSuchKey`，extract 端点据此置 `failed` + 返回 409 | P0-1-2、`API-Contract.md` §3 |

@@ -1,6 +1,7 @@
 import { COURSE_COLUMNS, parseUpdateCourseInput, toCourse, toCourseUpdate } from '@/lib/courses'
 import type { CourseRow } from '@/lib/courses'
 import { getCurrentUser, internalError, jsonError, jsonOk } from '@/lib/api/response'
+import { UUID_PATTERN } from '@/lib/api/params'
 
 /**
  * 单个课程端点（API-Contract.md 第 2 节）。
@@ -16,7 +17,6 @@ import { getCurrentUser, internalError, jsonError, jsonOk } from '@/lib/api/resp
  * 文案写成"课程不存在或无权访问"，既不撒谎也不泄漏。
  */
 
-const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
 interface RouteContext {
   // Next 15+ 起 params 是 Promise，必须 await。

@@ -193,9 +193,9 @@
 }
 ```
 
-> ⏳ **P0-1-2 待补**：文本提取（extract）做完后，本响应会多出 `previewText`（前 1000 字符），且 `extractStatus` 会变成 `extracted` / `failed`。
-> **P0-1-1 阶段这些恒为初始值**（`extractStatus: "pending"`），因为提取管线还没建。
-> 抽取失败（如扫描件）时 `extractStatus: "failed"` + `extractError`，**HTTP 仍返回 201** —— 文件是存下来了，只是抽不出文本。前端据此走降级提示，而不是当作上传失败。
+> ⚠️ **本端点不做文本提取。** 签发票据时文件还没传上来，服务端手里没有文件内容，拿不到文本。
+> 提取是**第 3 步**：浏览器 `uploadToSignedUrl` 成功后再调 `POST /api/v1/syllabi/:id/extract`。
+> 因此本响应的 `extractStatus` **恒为 `pending`**，`previewText` 不在本端点返回。
 
 ### `GET /api/v1/syllabi/:id/download` — 取回文件
 
@@ -210,6 +210,47 @@
 ```
 
 不存在或不属于当前用户 → `404`（[ADR-010](./Decisions.md#adr-010)）。
+
+### `POST /api/v1/syllabi/:id/extract` — 第 3 步：提取文本
+
+上传流程的**最后一拍**（P0-1-2）。前端在 `uploadToSignedUrl` 成功后立即调用。
+
+服务端用**当前用户会话**签一个短时下载 URL 把文件读回来（走 RLS，不用 service role），按扩展名分派提取器：
+
+| 扩展名 | 提取器 | `extract_method` |
+|---|---|---|
+| `.pdf` | `pdf-parse` 2.x（`r.pages` 拼接，**不用 `r.text`** —— 它会注入 `-- N of M --` 分页标记污染后续 LLM 输入） | `pdf_text` |
+| `.docx` | `mammoth` `extractRawText`，直接取纯文本不转 HTML | `docx` |
+| `.pptx` | `jszip` 解 `ppt/slides/slide*.xml` 后取 `<a:t>` | `pptx` |
+
+> ⚠️ `extract_method` 在 `syllabi` 表上**有 CHECK 约束**（`Database.md` 3.3）：取值只能是 `pdf_text` / `docx` / `pptx` / `manual`。
+> 命名不一致（`docx` 而非 `docx_text`）是初版遗留，**不为此改生产表**，代码与文档一律以 DB 约束为准。
+
+**响应 200**（提取失败也返回 200 —— 文件存下来了，只是抽不出文本）
+
+```jsonc
+{
+  "syllabus": {
+    "id": "…",
+    "extractStatus": "extracted",   // extracted | failed
+    "extractMethod": "pdf_text",    // pdf_text | docx_text | pptx_text | null（失败时）
+    "extractError": null,           // 失败时是给人看的原因，如「扫描件 PDF 抽不出文字」
+    "pageCount": 6,                 // 仅 PDF，其余为 null
+    "…": "其余字段同上传响应"
+  },
+  "previewText": "Course: Math 53 … 前 1000 字符"   // 提取成功时才有
+}
+```
+
+| 失败情形 | 状态 | `code` | 说明 |
+|---|---|---|---|
+| 未登录 | 401 | `unauthorized` | |
+| 非法 uuid | 400 | `bad_request` | |
+| 不存在或不属于当前用户 | 404 | `not_found` | [ADR-010](./Decisions.md#adr-010) |
+| 文件未上传完（悬挂行） | 409 | `file_missing` | 票据签发后浏览器没传完就关了页面 |
+| 提取器抛错 / 抽不出文字 | **200** | — | `extractStatus: "failed"` + `extractError`，**不是 HTTP 错误** |
+
+**幂等**：已 `extracted` 的行**直接返回既有结果**，不重跑（提取只依赖文件内容，文件不可变）。
 
 ### `POST /api/v1/syllabi/:id/parse`
 触发 LLM 五板块抽取。**异步**：创建 `llm_runs` 记录后立即返回 `202`。
@@ -406,6 +447,7 @@
 | GET/PATCH/DELETE | `/api/v1/courses/:id` | 课程详情 / 更新 / 归档 | P0-1-7, P0-1-8 |
 | POST | `/api/v1/courses/:id/syllabus` | 取上传票据（两步式直传第 1 步，**非 multipart**） | P0-1-1 |
 | GET | `/api/v1/syllabi/:id/download` | 签短时下载 URL（私有桶无永久 URL） | P0-1-1 |
+| POST | `/api/v1/syllabi/:id/extract` | 提取文本（上传流程第 3 步，幂等） | P0-1-2 |
 | POST | `/api/v1/syllabi/:id/parse` | 触发解析 | P0-1-4 |
 | GET | `/api/v1/syllabi/:id/parse-status` | 解析进度 | P0-1-11 |
 | POST | `/api/v1/syllabi/:id/reparse` | 重新解析 | P0-1-4 |
@@ -431,3 +473,4 @@
 | 2026-09-01 | 初版 | `CodingRules.md`（Diff First、业务语义命名）、`Database.md`、`Sync-Strategy.md`、PRD F1-F6 |
 | 2026-09-02 | **§1.2 / §1.4 状态码调整**：Phase 0 不使用 403，「不属于当前用户」与「不存在」统一返回 404（文案「…不存在或无权访问」）。原「403 避免探测存在性」的**意图保留、手段改换** —— RLS 下要区分 403/404 必须用 service role 绕过 RLS 探测存在性，反而制造泄漏口子 | [ADR-010](./Decisions.md#adr-010)，Steven 拍板 |
 | 2026-09-02 | **§3 上传改为两步式直传**（multipart 作废）：`POST /api/v1/courses/:id/syllabus` 改为 JSON 入参 + 签发 Storage 签名上传 URL；新增 `GET /api/v1/syllabi/:id/download` 签短时下载 URL。同步标注 `extractStatus` / `previewText` 为 P0-1-2 待补 | [ADR-009](./Decisions.md#adr-009)、`Database.md` 7.3、P0-1-1 |
+| 2026-09-02 | **§3 新增 `POST /api/v1/syllabi/:id/extract`**（P0-1-2）：上传流程拆成「取票据 → 直传 → 提取」三拍，**修正原「201 响应带 previewText」的设计错误** —— 签票据时文件还没传上来，服务端无法提取。提取失败返回 **200 + `extractStatus: "failed"`**（不是 HTTP 错误），悬挂行返回 `409 file_missing`，已提取的行幂等返回既有结果 | P0-1-2、[ADR-010](./Decisions.md#adr-010) |

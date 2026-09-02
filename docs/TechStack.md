@@ -48,6 +48,9 @@ Next.js App（前端页面 + Route Handlers 后端逻辑）
 | `@supabase/ssr` | `0.12.5` | 服务端 Auth client | |
 | `@supabase/supabase-js` | `2.112.4` | 浏览器 client | |
 | `@tailwindcss/postcss` | `4.3.3` | PostCSS 插件 | Tailwind v4 必需 |
+| `pdf-parse` | `2.4.5` | PDF 文本提取 | **v2 起 API 改为类式**：`new PDFParse({ data }).getText()`，不是 v1 的 `pdfParse(buffer)` |
+| `mammoth` | `1.12.2` | docx 文本提取 | `{ convertToHtml, extractRawText }`；用 `extractRawText` 直接取纯文本，不转 HTML |
+| `jszip` | `3.10.1` | pptx 文本提取 | pptx 本质是 zip + XML，解出 `ppt/slides/slide*.xml` 后剥标签；**不引专用 pptx 库**（可选库维护状态普遍一般） |
 
 ---
 

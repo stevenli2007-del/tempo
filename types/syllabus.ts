@@ -68,3 +68,16 @@ export type SyllabusDownloadUrl = {
   /** 签名 URL 的过期时刻（ISO 8601）。过期后必须重新请求本接口。 */
   expiresAt: string
 }
+
+/** `POST /api/v1/syllabi/:id/extract` 的响应体。 */
+export type SyllabusExtractResponse = {
+  syllabus: Syllabus
+  /**
+   * 提取出的文本前 1000 字符，供前端立刻展示"抽出来的东西对不对"。
+   *
+   * **提取失败时是 `null`**（此时 `syllabus.extractStatus === 'failed'`，
+   * 原因在 `syllabus.extractError`）。注意 HTTP 状态仍是 200 ——
+   * 文件存下来了，只是读不出文字，不算请求失败。
+   */
+  previewText: string | null
+}
