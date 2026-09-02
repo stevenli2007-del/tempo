@@ -1,17 +1,36 @@
 import { redirect } from 'next/navigation'
 
 import { Button } from '@/components/ui/button'
+import { CourseCard } from '@/components/courses/course-card'
+import { CourseCreatePanel } from '@/components/courses/course-create-panel'
 import { signOut } from '@/lib/auth/actions'
+import { COURSE_COLUMNS, toCourse } from '@/lib/courses'
+import type { CourseRow } from '@/lib/courses'
 import { createClient } from '@/lib/supabase/server'
+import type { Course } from '@/types/course'
 
 export const metadata = {
-  title: '总览 · Tempo',
+  title: '我的课程 · Tempo',
 }
 
 // 依赖用户 session，绝不能被静态预渲染。
 // 虽然 createClient() 里的 cookies() 已能让 Next 识别为动态路由，
 // 但这里显式声明，避免将来有人调整调用顺序时又退化成静态页。
 export const dynamic = 'force-dynamic'
+
+/** 按学期分组。Map 保持插入顺序，配合 SQL 的 created_at 升序，分组顺序稳定可预期。 */
+function groupBySemester(courses: Course[]): { semester: string; courses: Course[] }[] {
+  const groups = new Map<string, Course[]>()
+  for (const course of courses) {
+    const list = groups.get(course.semester)
+    if (list) {
+      list.push(course)
+    } else {
+      groups.set(course.semester, [course])
+    }
+  }
+  return Array.from(groups, ([semester, list]) => ({ semester, courses: list }))
+}
 
 export default async function DashboardPage() {
   const supabase = await createClient()
@@ -25,6 +44,16 @@ export default async function DashboardPage() {
     redirect('/login')
   }
 
+  const { data, error } = await supabase
+    .from('courses')
+    .select(COURSE_COLUMNS)
+    .eq('is_archived', false)
+    .order('created_at', { ascending: true })
+
+  // 查询失败必须让用户看见，不能因为 error 分支返回空数组就渲染成"还没有课程"。
+  // 静默的旧数据/空数据比明确的错误更危险（CodingRules 7、PRD F4 失败可见性）。
+  const courses = data ? (data as CourseRow[]).map(toCourse) : []
+  const groups = groupBySemester(courses)
   const email = user.email ?? '（未设置邮箱）'
 
   return (
@@ -43,25 +72,42 @@ export default async function DashboardPage() {
         </div>
       </header>
 
-      <div className="mx-auto max-w-4xl px-6 py-12">
-        <h1 className="text-2xl font-semibold tracking-tight">总览</h1>
-        <p className="mt-2 text-sm text-muted-foreground">
-          P0-0-3 认证已跑通。这里将来是总览页（P0-1-9）：课程卡片 + 跨课程近期任务。
-        </p>
-        <dl className="mt-8 grid gap-4 sm:grid-cols-2">
-          <div className="rounded-lg border border-border p-4">
-            <dt className="text-xs text-muted-foreground">用户 ID</dt>
-            <dd className="mt-1 font-mono text-xs break-all">{user.id}</dd>
+      <div className="mx-auto max-w-4xl space-y-8 px-6 py-10">
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <h1 className="text-2xl font-semibold tracking-tight">我的课程</h1>
+            <p className="mt-2 text-sm text-muted-foreground">
+              先建课程，再上传 syllabus —— Tempo 会帮你把里面的考试、评分和日程抽出来。
+            </p>
           </div>
-          <div className="rounded-lg border border-border p-4">
-            <dt className="text-xs text-muted-foreground">上次登录</dt>
-            <dd className="mt-1 text-sm">
-              {user.last_sign_in_at
-                ? new Date(user.last_sign_in_at).toLocaleString('zh-CN')
-                : '—'}
-            </dd>
+          <CourseCreatePanel />
+        </div>
+
+        {error ? (
+          <div role="alert" className="rounded-lg border border-destructive/40 bg-card p-4">
+            <p className="text-sm font-medium text-destructive">课程列表加载失败</p>
+            <p className="mt-1 text-sm text-muted-foreground">{error.message}</p>
           </div>
-        </dl>
+        ) : null}
+
+        {!error && courses.length === 0 ? (
+          <div className="rounded-xl border border-dashed border-border p-10 text-center">
+            <p className="text-sm text-muted-foreground">
+              还没有课程。点右上角「新建课程」，从一门课开始。
+            </p>
+          </div>
+        ) : null}
+
+        {groups.map((group) => (
+          <section key={group.semester} className="space-y-3">
+            <h2 className="text-sm font-medium text-muted-foreground">{group.semester}</h2>
+            <div className="grid gap-4 sm:grid-cols-2">
+              {group.courses.map((course) => (
+                <CourseCard key={course.id} course={course} />
+              ))}
+            </div>
+          </section>
+        ))}
       </div>
     </main>
   )
