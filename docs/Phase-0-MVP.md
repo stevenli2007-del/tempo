@@ -151,6 +151,34 @@
 
 ---
 
+### P0-1 执行卡（AI 开工最小上下文）
+
+> 与 P0-0 一样：领 task 时只读对应执行卡 + `TechStack.md` 第 2 节版本矩阵，不必重读全部文档。
+
+#### 🎫 P0-1-7 · Workspace CRUD（课程创建 / 列表 / 编辑 / 删除）
+- **做什么**：课程 CRUD。列表按学期分组展示；删除 = 归档，带二次确认。
+- **改哪些文件**：
+  - `types/course.ts` —— `Course`（对外形状，camelCase）/ `CreateCourseInput` / `UpdateCourseInput` / `ApiErrorBody`
+  - `lib/courses.ts` —— `CourseRow` + `COURSE_COLUMNS`（唯一知道 DB 列名的地方）、`toCourse()` 行→响应映射、`parseCreateCourseInput()` / `parseUpdateCourseInput()` 校验、`toCourseInsert()` / `toCourseUpdate()` 列映射
+  - `lib/api/response.ts` —— `jsonOk` / `jsonError` / `internalError` / `getCurrentUser`，含 `x-request-id` 原样回传（契约 1.5）
+  - `app/api/v1/courses/route.ts` —— `GET` 列表 / `POST` 新建
+  - `app/api/v1/courses/[id]/route.ts` —— `PATCH` 更新 / `DELETE` 归档
+  - `components/courses/{course-form,course-card,course-create-panel}.tsx`
+  - `app/(routes)/dashboard/page.tsx` —— 改为课程列表页（**没有新增 `/courses` 路由**）
+- **关键约束**：
+  - **删除 = 归档**：`courses` 表没有 `is_deleted` 字段，只有 `is_archived`（`Database.md` 4.4 软删除约定）。`API-Contract.md` §2 对 `DELETE` 的描述也是 `is_archived=true`，两边一致。
+  - **PATCH 语义**：`undefined` = 该字段不改，`null` = 清空该字段。`semester` / `courseName` 是 DB `NOT NULL`，**不允许被清空**，传 null 返回 400。
+  - **⚠️ 契约偏离（已记在 `[id]/route.ts` 头部注释）**：契约 1.2 要求"资源不属于当前用户返回 403"，但 RLS 让别人课程在当前会话下查不出来，服务端无法区分「不存在」与「不是你的」。用 service role 绕过 RLS 去探测存在性反而制造泄漏口子，与 403-not-404 的意图相悖 → **统一返回 404**，文案「课程不存在或无权访问」。
+  - **GET 列表返回扁平 `data`**，分组在前端做；**暂不含 `upcomingTasks` 字段**（P0-1-9 总览页时补）。刻意不返回硬编码 `[]` —— 那样将来"有任务却显示空"是静默错误数据。
+  - **越权不在应用层判断**：RLS 已保证只能看到自己的行，`getCurrentUser()` 只负责判登录。
+  - **前端校验只管体验**，服务端 `parseXxxInput()` 才是权威（ADR-009 已把这条写进评审清单）。
+  - `toCourse()` 对约束外的 `sync_status` 是 **抛错**而非给兜底值 —— 该字段会直接展示成同步状态，编一个出来就是假数据。DB 有 CHECK 约束，正常不会触发。
+- **自测**：`NODE_OPTIONS= npx tsc --noEmit` ✅｜`NODE_OPTIONS= npm run lint` ✅｜`NODE_OPTIONS= npm run build` ✅（4 个新端点均为 ƒ 动态）
+- **验收（Steven 本地）**：登录 → 建课 → 出现在列表 → 编辑改名 → 刷新仍在 → 删除（二次确认）→ 从列表消失 → SQL 查 `select id, course_name, is_archived from courses` 确认行还在且 `is_archived = true`。
+- **已知留白**：列表不显示 syllabus 状态（P0-1-1 之后才有意义）；`upcomingTasks` 待 P0-1-9；`GET /api/v1/courses/:id` 详情（含五板块）属 P0-1-8。
+
+---
+
 ## P0-2 M2 — 动态感知（数据源同步）
 
 > 目标：验证"任务自动同步是否减少打开 Canvas 的次数"——**Tempo 内核的第一环**。

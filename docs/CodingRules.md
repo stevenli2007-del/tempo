@@ -80,6 +80,7 @@ Canvas token、LLM API Key、Supabase 密钥、加密密钥——**只允许存�
 /components          → 可复用 React 组件
 /lib                 → 工具函数、Supabase client、LLM 封装、Canvas client
   /auth              → 认证 Server Actions（signIn / signUp / signOut，见 P0-0-3）
+  /api               → API Route 响应辅助（统一错误结构 / x-request-id 回传，见 API-Contract.md 1.3、1.5）
   /llm               → LLM provider 抽象层（可插拔，见 TechStack.md）
 /types               → TS 类型定义（与 Database.md 保持一致）
 ```
