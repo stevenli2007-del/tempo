@@ -110,6 +110,14 @@ Canvas token、LLM API Key、Supabase 密钥、加密密钥——**只允许存�
 2. **自测结论**：跑通了什么、没跑通什么、有没有已知问题
 3. **下一步建议**
 
+**API 层的自测办法（WorkBuddy 沙箱实测可行，2026-09-02）**：沙箱里 `next dev` 起不来（NODE_OPTIONS 注入的 FS shim 拦 `.next` 写入），但 **`npm run build` + `npm run start` 可以**（清空 `NODE_OPTIONS` 即可）。因此可以：
+
+1. `NODE_OPTIONS= npm run build` 后起 `NODE_OPTIONS= npm run start`
+2. 写一个临时脚本用 `@supabase/ssr` 的 `createServerClient` + 假 cookie store（`setAll` 里捕获）注册/登录测试用户，把 cookie 导出成 `Cookie` 头
+3. 用 curl 打自己的 API，覆盖正常路径 + 异常路径 + **跨用户越权**
+
+这样 API 层不必留给 Steven 首测；**浏览器 UI 的交互与样式仍然只能由 Steven 本地 `npm run dev` 验收**，交付时要如实区分这两者。临时脚本用完必须删除并提交前 `git status` 复查。
+
 **验收不通过时**：按具体意见修改，不自作主张扩大改动范围。改完重新提交验收。
 
 **任务边界**：做的时候发现了别的问题——记下来作为下一个 task 的候选，**不在当前 task 里顺手改**（见 1.2）。

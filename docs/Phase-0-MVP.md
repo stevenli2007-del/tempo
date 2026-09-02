@@ -173,8 +173,10 @@
   - **越权不在应用层判断**：RLS 已保证只能看到自己的行，`getCurrentUser()` 只负责判登录。
   - **前端校验只管体验**，服务端 `parseXxxInput()` 才是权威（ADR-009 已把这条写进评审清单）。
   - `toCourse()` 对约束外的 `sync_status` 是 **抛错**而非给兜底值 —— 该字段会直接展示成同步状态，编一个出来就是假数据。DB 有 CHECK 约束，正常不会触发。
-- **自测**：`NODE_OPTIONS= npx tsc --noEmit` ✅｜`NODE_OPTIONS= npm run lint` ✅｜`NODE_OPTIONS= npm run build` ✅（4 个新端点均为 ƒ 动态）
-- **验收（Steven 本地）**：登录 → 建课 → 出现在列表 → 编辑改名 → 刷新仍在 → 删除（二次确认）→ 从列表消失 → SQL 查 `select id, course_name, is_archived from courses` 确认行还在且 `is_archived = true`。
+- **自测（Bud，2026-09-02）**
+  - `NODE_OPTIONS= npx tsc --noEmit` ✅ ｜ `NODE_OPTIONS= npm run lint` ✅ ｜ `NODE_OPTIONS= npm run build` ✅（4 个新端点均为 ƒ 动态路由）
+  - **API 层 16 项 curl 冒烟全过** —— 沙箱里 `next dev` 起不来但 `next start` 能起（见 `CodingRules.md` §5），配合临时脚本导出真实会话 cookie 打穿了：建课 / 改名 / 归档 / 列表、6 条异常路径（缺字段、类型错、`semester=null`、空 PATCH、非法 uuid、不存在的 uuid）、跨用户越权隔离、`x-request-id` 回传。
+- **尚未验证**：**浏览器 UI**（建课表单、编辑切换、删除二次确认的交互与样式）——仍需 Steven 本地跑 `npm run dev` 走一遍。
 - **已知留白**：列表不显示 syllabus 状态（P0-1-1 之后才有意义）；`upcomingTasks` 待 P0-1-9；`GET /api/v1/courses/:id` 详情（含五板块）属 P0-1-8。
 
 ---
