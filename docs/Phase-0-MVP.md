@@ -29,7 +29,11 @@
 
 ## 当前进度指针
 
-**当前 task**：`P0-1-7` Workspace CRUD（课程创建 / 列表 / 编辑 / 删除）
+**当前 task**：`P0-1-1` 文件存储：syllabus 上传入口 + Supabase Storage + 类型/大小校验
+
+> 📌 **P0-1-7 已完成并通过 Steven 验收 ✅（2026-09-02）**
+> - 已推送 origin/main（`494c9ec` feat + `f380ef0` / `8e466f7` docs），Vercel 已自动部署。
+> - **ADR-010 已拍板接受**：RLS 保护的资源，「越权」与「不存在」统一返回 `404`，Phase 0 不用 403。契约文档已同步改（§1.2 / §1.4），**后续所有资源端点按此执行，不再逐个论证**。
 
 > 📌 **P0-0 基础设施 全部完成 ✅**
 > - P0-0-1 脚手架 · P0-0-2a/b Supabase 接入 · P0-0-3 Auth · P0-0-4 13 表迁移 · P0-0-5 RLS + handle_new_user · P0-0-6 Vercel 部署 + 生产冒烟。
@@ -45,7 +49,8 @@
 > 1. **syllabus 上传走「浏览器直传 Supabase Storage」**，不再走服务端 multipart 转发 —— 见 [ADR-009](./Decisions.md#adr-009)。`API-Contract.md` §3 的 multipart 契约将在 P0-1-1 交付时同步改写。
 > 2. **Storage 桶规范**（桶名 / 路径约定 / `storage.objects` RLS 策略）**并入 P0-1-1 一起交付**：先补 `Database.md` 新增 Storage 小节（SSOT 在前），再出迁移文件，不单独拆 task。
 
-> 📌 **领 P0-1-7 时只需读**：`Phase-0-MVP.md` 中 P0-1-7 执行卡 + `TechStack.md` 第 2 节版本矩阵 + `API-Contract.md` 第 2 节（课程契约）+ `Database.md` 第 3.2 节（`courses` 表）即可开工，按 `CodingRules.md` 阅读策略**不重读全部 11 份文档**。
+> 📌 **领 P0-1-1 时只需读**：`Phase-0-MVP.md` 中 P0-1-1 执行卡 + `TechStack.md` 第 2 节版本矩阵 + `Database.md` Storage 小节 + `API-Contract.md` §1.5 / §3 + [ADR-009](./Decisions.md#adr-009) / [ADR-010](./Decisions.md#adr-010) 即可开工，按 `CodingRules.md` 阅读策略**不重读全部 11 份文档**。
+> - 参考 P0-1-7 的既有实现：`lib/courses.ts`（snake_case ↔ camelCase 唯一映射点）+ `lib/api/response.ts`（统一响应）+ `app/api/v1/courses/[id]/route.ts`（资源端点范式，含 ADR-010 落地写法）。
 
 ---
 
@@ -143,7 +148,7 @@
 | **P0-1-4** | 五板块抽取 prompt v1：Grade Composition / Course Outline / Test Dates / Office Hours / Submission Policy，**拆成独立抽取任务** | Bud | P0-1-3 | 每板块独立调用；输出符合 schema；缺失字段返回 null 不编造 | ⚪ |
 | **P0-1-5** | 解析 API 路由 + 结果落库 + **修正 diff 存储**（保存原始解析 vs 修正后 + 差异字段） | Bud | P0-1-2, P0-1-4 | 数据库同时存有原始与修正版本，可追溯差异 | ⚪ |
 | **P0-1-6** | 可编辑表单 UI：五个板块逐项编辑 / 补全 / 覆盖 + 保存 | Bud | P0-1-5 | 可修改任一字段并保存；TBD 状态可正常展示与编辑 | ⚪ |
-| **P0-1-7** | Workspace CRUD：创建（学期 + 课程名必填，编码/教师选填）、列表按学期分组、编辑、删除 | Bud | P0-0-6 | 建课后出现在总览页与列表；删除有二次确认 | ⚪ |
+| **P0-1-7** | Workspace CRUD：创建（学期 + 课程名必填，编码/教师选填）、列表按学期分组、编辑、删除 | Bud | P0-0-6 | 建课后出现在总览页与列表；删除有二次确认 | ✅ |
 | **P0-1-8** | 课程详情页：展示五板块最终信息 | Bud | P0-1-6, P0-1-7 | 保存后的数据完整展示；缺失项显示 TBD 而非空白 | ⚪ |
 | **P0-1-9** | 总览页 v1：课程卡片（显示近期 1-2 个任务）+ 跨课程近期任务列表（仅 syllabus 数据，按日期排序） | Bud | P0-1-8 | 能看到"最近 7 天所有课程要做的事"；可跳转课程详情 | ⚪ |
 | **P0-1-10** | 冷启动：**Demo Workspace**（预置示例课程，含已解析 syllabus 与示例任务） | Bud | P0-1-9 | 新用户从进入站点到看到有内容的总览页 ≤ 30 秒 | ⚪ |
@@ -168,7 +173,7 @@
 - **关键约束**：
   - **删除 = 归档**：`courses` 表没有 `is_deleted` 字段，只有 `is_archived`（`Database.md` 4.4 软删除约定）。`API-Contract.md` §2 对 `DELETE` 的描述也是 `is_archived=true`，两边一致。
   - **PATCH 语义**：`undefined` = 该字段不改，`null` = 清空该字段。`semester` / `courseName` 是 DB `NOT NULL`，**不允许被清空**，传 null 返回 400。
-  - **⚠️ 契约偏离（已记在 `[id]/route.ts` 头部注释）**：契约 1.2 要求"资源不属于当前用户返回 403"，但 RLS 让别人课程在当前会话下查不出来，服务端无法区分「不存在」与「不是你的」。用 service role 绕过 RLS 去探测存在性反而制造泄漏口子，与 403-not-404 的意图相悖 → **统一返回 404**，文案「课程不存在或无权访问」。
+  - **✅ 契约偏离已被接受并升格为 ADR-010**：契约 1.2 原要求"资源不属于当前用户返回 403"，但 RLS 让别人课程在当前会话下查不出来，服务端无法区分「不存在」与「不是你的」；用 service role 绕过 RLS 探测存在性反而制造泄漏口子，与 403-not-404 的意图相悖 → **统一返回 404**，文案「课程不存在或无权访问」。**Steven 于 2026-09-02 拍板接受**，已写入 [ADR-010](./Decisions.md#adr-010) 并同步改 `API-Contract.md` §1.2 / §1.4（403 标为 Phase 0 不使用）。**适用于所有受 RLS 保护的资源端点，后续 task 不再逐个论证。**
   - **GET 列表返回扁平 `data`**，分组在前端做；**暂不含 `upcomingTasks` 字段**（P0-1-9 总览页时补）。刻意不返回硬编码 `[]` —— 那样将来"有任务却显示空"是静默错误数据。
   - **越权不在应用层判断**：RLS 已保证只能看到自己的行，`getCurrentUser()` 只负责判登录。
   - **前端校验只管体验**，服务端 `parseXxxInput()` 才是权威（ADR-009 已把这条写进评审清单）。
@@ -176,7 +181,7 @@
 - **自测（Bud，2026-09-02）**
   - `NODE_OPTIONS= npx tsc --noEmit` ✅ ｜ `NODE_OPTIONS= npm run lint` ✅ ｜ `NODE_OPTIONS= npm run build` ✅（4 个新端点均为 ƒ 动态路由）
   - **API 层 16 项 curl 冒烟全过** —— 沙箱里 `next dev` 起不来但 `next start` 能起（见 `CodingRules.md` §5），配合临时脚本导出真实会话 cookie 打穿了：建课 / 改名 / 归档 / 列表、6 条异常路径（缺字段、类型错、`semester=null`、空 PATCH、非法 uuid、不存在的 uuid）、跨用户越权隔离、`x-request-id` 回传。
-- **尚未验证**：**浏览器 UI**（建课表单、编辑切换、删除二次确认的交互与样式）——仍需 Steven 本地跑 `npm run dev` 走一遍。
+- **✅ 浏览器 UI 已由 Steven 本地验收通过（2026-09-02）**：建课表单、编辑切换、删除二次确认三个交互 + 列表展示均正常。
 - **已知留白**：列表不显示 syllabus 状态（P0-1-1 之后才有意义）；`upcomingTasks` 待 P0-1-9；`GET /api/v1/courses/:id` 详情（含五板块）属 P0-1-8。
 
 ---
@@ -255,4 +260,5 @@ P0-0 基础设施
 | 2026-09-02 | 修复文档漂移（P0-0-1 「Next.js 14」→「16.3.4」，与 TechStack 对齐）；P0-0-2 拆分为 2a（Steven 手动建项目/填 env）/ 2b（Bud 写 client，已完成）；P0-0-6 改「共担」并标注交接点；新增「P0-0 执行卡」小节；更新进度指针反映真实卡点 |
 | 2026-09-02 | P0-0 基础设施全部完成：P0-0-3 Auth ✅（Next 16 middleware 改名为 proxy）+ P0-0-4 13 表迁移 ✅ + P0-0-5 RLS + handle_new_user ✅ + P0-0-6 Vercel 部署 ✅（生产 URL `tempo-six-neon.vercel.app`，Steven 实测生产冒烟通过）；进度指针推进至 P0-1 M1（syllabus 静态理解）。**记录四个部署坑**：git author 不匹配 GitHub / `cookies()` 顺序错 / env vars 保存≠注入 / `NEXT_PUBLIC_*` 别勾 Secret |
 | 2026-09-02 | **执行顺序调整（Steven 拍板）**：`P0-1-7` 课程 CRUD 提前至 `P0-1-1` 上传之前（`syllabi.course_id` 为 NOT NULL，无课则无上传落点）。**task 编号一律不变**，顺序以「当前进度指针」为准，表格行序仅服务编号可读性。同日决策：上传改浏览器直传（新增 [ADR-009](./Decisions.md#adr-009)）；Storage 桶规范并入 P0-1-1 交付 |
+| 2026-09-02 | **P0-1-7 交付并验收通过 ✅**（commit `494c9ec` + `f380ef0` + `8e466f7`，已推 origin/main 并自动部署）。API 层 16 项 curl 冒烟全过，浏览器 UI 由 Steven 本地验收通过。**403→404 契约偏离经 Steven 拍板接受，升格为 [ADR-010](./Decisions.md#adr-010)**，`API-Contract.md` §1.2 / §1.4 同步修改，适用于所有受 RLS 保护的资源端点。进度指针推进至 `P0-1-1` |
 
