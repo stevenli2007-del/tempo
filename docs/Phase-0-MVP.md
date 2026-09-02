@@ -29,7 +29,7 @@
 
 ## 当前进度指针
 
-**当前 task**：`P0-0-5` RLS 策略 + `handle_new_user` 触发器（**正在规划**）｜ **下一步**：P0-0-6 Vercel 部署
+**当前 task**：`P0-0-6` Vercel 部署 + 生产环境变量 + 冒烟测试（**准备开工**）
 
 > 📌 **现状（2026-09-02 核实）**：
 > - P0-0-1 脚手架 ✅、P0-0-2a（Supabase 项目 + `.env.local`）✅、P0-0-2b（client 分离）✅、**P0-0-3（Auth）✅ 已由 Steven 实测通过**。
@@ -48,7 +48,7 @@
 | **P0-0-2b** | 前后端 client 分离（`lib/supabase/server.ts` / `browser.ts` 分开，不混用）+ `.env.example` 模板 + env 缺失即抛错校验 | Bud | P0-0-1 | `lib/supabase/{server,browser,env}.ts` 就位；service key 不进前端 | ✅ |
 | **P0-0-3** | Supabase Auth：邮箱 + 密码注册/登录 + proxy 保护路由 | Bud | P0-0-2a | 可注册、登录、登出；未登录访问受保护页面被重定向 | ✅ |
 | **P0-0-4** | 数据库迁移：建表（按 `Database.md` 全部表 + 索引 + 外键） | 共担 | P0-0-2a | 迁移脚本可重复执行；表结构与 `Database.md` 一致 | ✅ |
-| **P0-0-5** | RLS 策略：用户只能访问自己的数据 | Bud | P0-0-4 | 用两个测试账号交叉验证，看不到对方任何数据 | ⚪ |
+| **P0-0-5** | RLS 策略：用户只能访问自己的数据 | Bud | P0-0-4 | 用两个测试账号交叉验证，看不到对方任何数据 | ✅ |
 | **P0-0-6** | 部署上线（Vercel）+ 生产环境变量 + 冒烟测试 | 共担 | P0-0-3, P0-0-5 | 生产环境可注册登录；无环境变量泄漏 | ⚪ |
 
 ---
@@ -87,7 +87,11 @@
 - ⚠️ 已知留白（已并入 P0-0-5）：`handle_new_user` 触发器待建
 
 #### 🎫 P0-0-5 · RLS 策略
-#### 🎫 P0-0-5 · RLS 策略 + `handle_new_user` 触发器（**正在规划**）
+#### 🎫 P0-0-5 · RLS 策略 + `handle_new_user` 触发器 ✅（commit `f6de152`，Steven 已实测）
+- 改动：`supabase/migrations/20260902100000_rls_and_handle_new_user.sql`（242 行）
+- 验收 ✅：13 表 rowsecurity=true、13 条 policy、handle_new_user trigger 在 a/b 注册时自动写 profile、A 模拟 session 看不到 B、B 模拟 session 看不到 A（set local role + request.jwt.claim.sub 三段验证全过）
+
+#### 🎫 P0-0-6 · Vercel 部署（**正在规划**）
 - **做什么**：
   - 所有业务表 `ENABLE ROW LEVEL SECURITY` + 行级策略（防越权读别人数据）
   - **`handle_new_user` 触发器**：注册时自动在 `profiles` 插一行（从 P0-0-4 留白转入）
