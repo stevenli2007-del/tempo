@@ -183,8 +183,9 @@
 - **自测（Bud，2026-09-02）**
   - `NODE_OPTIONS= npx tsc --noEmit` ✅ ｜ `NODE_OPTIONS= npm run lint` ✅（0 warning）｜ `NODE_OPTIONS= npm run build` ✅（新增 2 个 ƒ 动态路由）
   - **API 冒烟 19 项，18 项通过**：未登录 401 / 非法 uuid 400 / 非 JSON 400 / 5 项入参校验 400 / 2 项类型错误 415 / 超限 413 / 课程不存在 404 / **B 给 A 的课传文件 404（越权隔离 ✅）** / 下载端点 400·404·401 / `x-request-id` 回传 ✅
-  - **唯一未通过**：正常路径 201 —— 因 Storage 迁移未执行，`createSignedUploadUrl` 被 RLS 拒绝（500）。**等 Steven 执行迁移后复测。**
-- **尚未验证**：① 真实文件的端到端上传与下载（需迁移 + 浏览器）；② 浏览器 UI 交互（沙箱起不了 `next dev`）。
+  - **复测（2026-09-02 Steven 执行 Storage 后）✅ 19/19 全绿**：原唯一未过的 201 正常路径已通过。另做 **Storage 端到端直探 7/7**：签名上传（RLS INSERT 放行）→ 直传 → 签下载 URL → 真实取回内容一致 → **B 传 A 的路径被拒** → **B 下载 A 的文件被拒** → A 删除自己的对象（RLS DELETE 放行）。
+  - 顺带修了冒烟基建的两个坑：① 沙箱里 `signUp` 的 **PKCE code challenge 生成会抛错**，测试脚本一律先 `signInWithPassword`（不走 PKCE）；② `@supabase/ssr` 的 `setAll` 回调收到的是 **`{name, value}` 对象数组**，不是元组。
+- **尚未验证**：浏览器 UI 交互（沙箱起不了 `next dev`）——Steven 本地走一遍上传/下载/错误提示。
 - **已知留白**：`extractStatus` 恒为 `pending`（提取管线属 P0-1-2）；**上传中断会留悬挂行**，靠 P0-1-2 提取失败时置 `extract_status='failed'` 兜住可见性；未新增 `file_size`/`mime_type` 列（Diff First，需要时再加）；端点总表里 `GET /api/v1/health` 实际未实现（返回 404，属 P0-0-6 遗留）。
 
 #### 🎫 P0-1-7 · Workspace CRUD（课程创建 / 列表 / 编辑 / 删除）· ✅ 已完成，勿重做
