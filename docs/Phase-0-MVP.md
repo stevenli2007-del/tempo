@@ -29,7 +29,10 @@
 
 ## 当前进度指针
 
-**当前 task**：`P0-0-6` Vercel 部署 + 生产环境变量 + 冒烟测试（**准备开工**）
+**当前 task**：`P0-0-6` Vercel 部署 —— **代码/部署已完成**，剩 Steven 两步：① Supabase URL Configuration 加生产域名 ② 生产冒烟测试
+
+> 📌 **生产 URL**：`https://tempo-six-neon.vercel.app`（GitHub `stevenli2007-del/tempo` Private 仓库，push main 自动部署）
+> 📌 **代码侧已复核**：全仓库零硬编码 URL / localhost / `redirectTo`；redirect 全用相对路径（`/dashboard`、`/login`），不会被本地域名污染生产。
 
 > 📌 **现状（2026-09-02 核实）**：
 > - P0-0-1 脚手架 ✅、P0-0-2a（Supabase 项目 + `.env.local`）✅、P0-0-2b（client 分离）✅、**P0-0-3（Auth）✅ 已由 Steven 实测通过**。
@@ -49,7 +52,7 @@
 | **P0-0-3** | Supabase Auth：邮箱 + 密码注册/登录 + proxy 保护路由 | Bud | P0-0-2a | 可注册、登录、登出；未登录访问受保护页面被重定向 | ✅ |
 | **P0-0-4** | 数据库迁移：建表（按 `Database.md` 全部表 + 索引 + 外键） | 共担 | P0-0-2a | 迁移脚本可重复执行；表结构与 `Database.md` 一致 | ✅ |
 | **P0-0-5** | RLS 策略：用户只能访问自己的数据 | Bud | P0-0-4 | 用两个测试账号交叉验证，看不到对方任何数据 | ✅ |
-| **P0-0-6** | 部署上线（Vercel）+ 生产环境变量 + 冒烟测试 | 共担 | P0-0-3, P0-0-5 | 生产环境可注册登录；无环境变量泄漏 | ⚪ |
+| **P0-0-6** | 部署上线（Vercel）+ 生产环境变量 + 冒烟测试 | 共担 | P0-0-3, P0-0-5 | 生产环境可注册登录；无环境变量泄漏 | 🔵 待 Steven 配 Supabase URL + 冒烟 |
 
 ---
 
@@ -109,13 +112,33 @@
   - 删除 auth.users 中账号 → `profiles` 行级联消失
 - **交接点**：Bud 写迁移；Steven 在 SQL Editor 执行 + 用两个测试账号交叉验证
 
-#### 🎫 P0-0-6 · Vercel 部署（**进行中**）
+#### 🎫 P0-0-6 · Vercel 部署 —— **部署已完成**，剩 Steven 收尾
 - **做什么**：Vercel 部署 + 生产环境变量 + 冒烟测试
-- **改哪些文件**：Vercel Dashboard 环境变量；仓库已在 GitHub（`stevenli2007-del/tempo`，Private）
+- **改哪些文件**：0 代码改动（纯基础设施）；Vercel Dashboard 环境变量
 - **关键约束**：`SUPABASE_SERVICE_ROLE_KEY` 等密钥只在服务端、无 `NEXT_PUBLIC_` 前缀；生产变量不含任何密钥
 - **验收**：生产环境可注册登录；无环境变量泄漏
-- **交接点**：Steven 用 GitHub 一键注册 Vercel → Import `stevenli2007-del/tempo` → 设 2 个 env vars → Deploy；Bud 验证远端可访问、冒烟测试通过
-- **代码改动**：0（基础设施配置，不动应用逻辑）
+- **代码改动**：0
+
+**✅ 已完成（Bud）**
+- GitHub 仓库 `stevenli2007-del/tempo`（Private）已建 + 推送
+- Vercel Import 仓库 → 2 个 env vars（Production scope）→ 部署成功
+- 生产 URL：**`https://tempo-six-neon.vercel.app`**
+- 代码复核：全仓库零硬编码 URL / localhost / `redirectTo`，redirect 全相对路径
+
+**⚠️ 两个已踩过的坑（下次别再掉进去）**
+1. **git author 邮箱必须匹配 GitHub 账号** —— 否则 Vercel 判「冒名顶替」直接 **Blocked**，不报 build 错。修复：
+   ```bash
+   git config user.email "stevenli2007@berkeley.edu" && git config user.name "Steven Li"
+   git commit --amend --author="Steven Li <stevenli2007@berkeley.edu>" --no-edit
+   git push --force-with-lease origin main
+   ```
+2. **env vars 保存 ≠ 已注入当前 deployment** —— 先 Deploy 后加 env vars，旧 build 不带变量，页面 500。**加完必须手动 Redeploy**，让 Vercel 重跑 build 把变量烤进 bundle。
+
+**⏳ Steven 剩余两步**
+1. Supabase Dashboard → Authentication → URL Configuration：
+   - **Site URL** = `https://tempo-six-neon.vercel.app`
+   - **Redirect URLs** 加两条：`http://localhost:3000/**`（本地开发）+ `https://tempo-six-neon.vercel.app/**`（生产）
+2. 生产冒烟：`/` 打开 → 注册 `prod-test@tempo.dev` → 直接进 `/dashboard` → 登出回 `/login`
 
 ---
 
