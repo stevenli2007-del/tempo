@@ -8,10 +8,12 @@
 ## 使用方式
 
 **workflow（强制）**
-1. Bud 领一个 task → 实现 → 自测
+1. Bud 领一个 task → 读下方该 task 的**执行卡**（AI 开工最小上下文，不必重读全部文档）→ 实现 → 自测
 2. 交付时报告三件事：**改了什么 / 自测结论 / 下一步**
 3. Steven check → 通过 → 下一个 task；不通过 → 原地返工
 4. 一个 task 未通过前，**不启动下一个**
+
+**执行卡机制**：每个阶段表格下方附「执行卡」小节，含做什么 / 改哪些文件 / 关键约束 / 验收命令 / 交接点。**交接点 = 需要 Steven 手动操作的步骤**（建账号、填密钥、点按钮等），AI 到交接点就停，不空转等待。已完成的 task 执行卡标注「勿重做」，防止下次会话重做。当前已覆盖 P0-0，后续阶段做到时再补卡。
 
 **编号规则**：`P0-<里程碑>-<序号>`
 - `P0-0-x` 基础设施
@@ -27,7 +29,9 @@
 
 ## 当前进度指针
 
-**当前 task**：尚未开始 ｜ **下一步**：`P0-0-1` 项目脚手架
+**当前 task**：`P0-0-2` Supabase 接入 ｜ **下一步**：Steven 建 Supabase 项目 → 填 `.env.local` → 跑 `npm run dev` 验证连接
+
+> 📌 **现状（2026-09-02 核实）**：P0-0-1 脚手架代码已完成；P0-0-2 的 Bud 部分（前后端 client 分离 + `.env.example`）已完成。**卡点只剩 Steven 手动步骤**——去 Supabase 建项目、拿 URL/anon key、填 `.env.local`。这一步 AI 代劳不了，做完即可收口 P0-0-2。
 
 ---
 
@@ -37,12 +41,58 @@
 
 | 编号 | 任务 | Owner | 依赖 | 验收标准 | 状态 |
 |---|---|---|---|---|---|
-| **P0-0-1** | 项目脚手架：Next.js 14 App Router + TS + Tailwind + shadcn/ui 初始化，目录结构按 `CodingRules.md` | Bud | — | 本地 `dev` 可跑，访问首页看到占位页；TS 无报错 | ⚪ |
-| **P0-0-2** | Supabase 项目创建 + 环境变量配置 + 前后端 client 分离（server client / browser client 分开，不混用） | Bud | P0-0-1 | 本地与部署环境均能连上 Supabase；`.env.local` 不入库 | ⚪ |
-| **P0-0-3** | Supabase Auth：邮箱 + 密码注册/登录 + 中间件保护路由 | Bud | P0-0-2 | 可注册、登录、登出；未登录访问受保护页面被重定向 | ⚪ |
-| **P0-0-4** | 数据库迁移：建表（按 `Database.md` 全部表 + 索引 + 外键） | Bud | P0-0-2 | 迁移脚本可重复执行；表结构与 `Database.md` 一致 | ⚪ |
+| **P0-0-1** | 项目脚手架：Next.js 16.3.4 App Router + TS + Tailwind v4 + shadcn/ui 初始化，目录结构按 `CodingRules.md` | Bud | — | 本地 `dev` 可跑，访问首页看到占位页；TS 无报错 | ✅ |
+| **P0-0-2a** | **【Steven 手动】** 在 Supabase 建项目 + 拿 Project URL / anon key + `cp .env.example .env.local` 填两个值 | **Steven** | P0-0-1 | `.env.local` 已填两个值；`npm run dev` 不报"缺少环境变量"错误 | ⚪ |
+| **P0-0-2b** | 前后端 client 分离（`lib/supabase/server.ts` / `browser.ts` 分开，不混用）+ `.env.example` 模板 + env 缺失即抛错校验 | Bud | P0-0-1 | `lib/supabase/{server,browser,env}.ts` 就位；service key 不进前端 | ✅ |
+| **P0-0-3** | Supabase Auth：邮箱 + 密码注册/登录 + 中间件保护路由 | Bud | P0-0-2a | 可注册、登录、登出；未登录访问受保护页面被重定向 | ⚪ |
+| **P0-0-4** | 数据库迁移：建表（按 `Database.md` 全部表 + 索引 + 外键） | Bud | P0-0-2a | 迁移脚本可重复执行；表结构与 `Database.md` 一致 | ⚪ |
 | **P0-0-5** | RLS 策略：用户只能访问自己的数据 | Bud | P0-0-4 | 用两个测试账号交叉验证，看不到对方任何数据 | ⚪ |
-| **P0-0-6** | 部署上线（Vercel）+ 生产环境变量 + 冒烟测试 | Bud | P0-0-3, P0-0-5 | 生产环境可注册登录；无环境变量泄漏 | ⚪ |
+| **P0-0-6** | 部署上线（Vercel）+ 生产环境变量 + 冒烟测试 | 共担 | P0-0-3, P0-0-5 | 生产环境可注册登录；无环境变量泄漏 | ⚪ |
+
+---
+
+### P0-0 执行卡（AI 开工最小上下文）
+
+> 领某个 task 时，只读下面这张卡 + `TechStack.md` 第 2 节版本矩阵即可开工，不必重读全部文档（见 `CodingRules.md` 阅读策略）。
+
+#### 🎫 P0-0-1 · 脚手架 —— ✅ 已完成，勿重做
+`app/page.tsx` 已显示占位页；目录结构、本地字体、shadcn `button.tsx` 均已就位。下次会话若再领到此 task，直接跳到 P0-0-2a。
+
+#### 🎫 P0-0-2a · 【Steven 手动】Supabase 项目 + 环境变量
+- **做什么**：supabase.com 建项目 → 拿 Project URL + anon key → `cp .env.example .env.local` 填两个值
+- **交接点**：纯 Steven，AI 无法代劳
+- **验收**：`npm run dev` 不再报「缺少环境变量 NEXT_PUBLIC_SUPABASE_URL / ANON_KEY」
+
+#### 🎫 P0-0-2b · 前后端 client 分离 —— ✅ 已完成，勿重做
+`lib/supabase/server.ts` / `browser.ts` / `env.ts` 已就位。下次会话若领到此 task，直接跳过。
+
+#### 🎫 P0-0-3 · Supabase Auth
+- **做什么**：邮箱+密码注册 / 登录 / 登出 + `middleware.ts` 保护受保护路由（未登录重定向）
+- **改哪些文件**：登录/注册页面（`app/(routes)/` 下）、`middleware.ts`、相关 Server/Client Component
+- **关键约束**：`@supabase/ssr` 0.12.5；服务端用 `server.ts`、浏览器用 `browser.ts`，不混用；session 刷新统一由 middleware 负责（`server.ts` 的 `setAll` 已按 Server Component 只读容忍处理）
+- **验收**：`npm run dev` → 注册→登录→登出全通；未登录访问受保护页被重定向
+- **交接点**：无（纯 Bud）；前置 `.env.local` 已就绪（P0-0-2a）
+
+#### 🎫 P0-0-4 · 数据库迁移
+- **做什么**：按 `Database.md` 建全部 13 张表 + 索引 + 外键 + `updated_at` 触发器
+- **改哪些文件**：`supabase/migrations/*.sql`
+- **关键约束**：表名/字段名以 `Database.md` 为唯一标准（snake_case）；枚举用 `text + CHECK` 不用 Postgres enum；软删除；**必须建 `tasks_source_unique` 唯一索引**；禁止在 Dashboard 手动改表
+- **验收**：迁移脚本可重复执行；表结构与 `Database.md` 一致
+- **交接点**：无（纯 Bud）；前置 `.env.local` 就绪（P0-0-2a）
+
+#### 🎫 P0-0-5 · RLS 策略
+- **做什么**：所有业务表 `ENABLE ROW LEVEL SECURITY` + 行级策略
+- **改哪些文件**：`supabase/migrations/*.sql`
+- **关键约束**：`profiles` / `canvas_credentials` / `sync_runs` / `parse_corrections` 用 `auth.uid() = user_id`；`courses` 及其子表经 `courses` 反查；`llm_runs` 单独策略；细则见 `Security-Privacy.md` 第 4 节
+- **验收**：两个测试账号交叉验证，A 取不到 B 任何一行数据
+- **交接点**：无（纯 Bud）；前置 P0-0-4
+
+#### 🎫 P0-0-6 · Vercel 部署
+- **做什么**：Vercel 部署 + 生产环境变量 + 冒烟测试
+- **改哪些文件**：Vercel Dashboard 环境变量；如需 `vercel.json`
+- **关键约束**：`SUPABASE_SERVICE_ROLE_KEY` 等密钥只在服务端、无 `NEXT_PUBLIC_` 前缀；生产变量不含任何密钥
+- **验收**：生产环境可注册登录；无环境变量泄漏
+- **交接点**：Steven 提供 Vercel 账号，或授权 Bud 用 Vercel CLI 登录部署
 
 ---
 
@@ -137,3 +187,4 @@ P0-0 基础设施
 |---|---|
 | 2026-09-01 | 初版创建：33 个 task，分 P0-0 / P0-1 / P0-2 / P0-3 四组，含 Owner、依赖、验收标准、关键路径与风险登记 |
 | 2026-09-01 | P0-2-1 完成（Steven 实测：token 入口可用）→ P0-2-10 iCal 兜底标记为不执行；新增 P0-2-1b 记录实测细节；Phase 1 OAuth 申请改为「Phase 0 验证后再启动」（Steven 拍板，偏离原并行建议） |
+| 2026-09-02 | 修复文档漂移（P0-0-1 「Next.js 14」→「16.3.4」，与 TechStack 对齐）；P0-0-2 拆分为 2a（Steven 手动建项目/填 env）/ 2b（Bud 写 client，已完成）；P0-0-6 改「共担」并标注交接点；新增「P0-0 执行卡」小节；更新进度指针反映真实卡点 |
