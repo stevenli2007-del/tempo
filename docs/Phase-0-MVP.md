@@ -109,12 +109,13 @@
   - 删除 auth.users 中账号 → `profiles` 行级联消失
 - **交接点**：Bud 写迁移；Steven 在 SQL Editor 执行 + 用两个测试账号交叉验证
 
-#### 🎫 P0-0-6 · Vercel 部署
+#### 🎫 P0-0-6 · Vercel 部署（**进行中**）
 - **做什么**：Vercel 部署 + 生产环境变量 + 冒烟测试
-- **改哪些文件**：Vercel Dashboard 环境变量；如需 `vercel.json`
+- **改哪些文件**：Vercel Dashboard 环境变量；仓库已在 GitHub（`stevenli2007-del/tempo`，Private）
 - **关键约束**：`SUPABASE_SERVICE_ROLE_KEY` 等密钥只在服务端、无 `NEXT_PUBLIC_` 前缀；生产变量不含任何密钥
 - **验收**：生产环境可注册登录；无环境变量泄漏
-- **交接点**：Steven 提供 Vercel 账号，或授权 Bud 用 Vercel CLI 登录部署
+- **交接点**：Steven 用 GitHub 一键注册 Vercel → Import `stevenli2007-del/tempo` → 设 2 个 env vars → Deploy；Bud 验证远端可访问、冒烟测试通过
+- **代码改动**：0（基础设施配置，不动应用逻辑）
 
 ---
 
