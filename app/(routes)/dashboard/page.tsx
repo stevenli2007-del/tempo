@@ -19,8 +19,8 @@ export default async function DashboardPage() {
     data: { user },
   } = await supabase.auth.getUser()
 
-  // middleware 已经拦过一道，这里再兜一次底：既防 middleware 被人绕过，
-  // 也让 TS 知道 user 一定存在。
+  // proxy（原 middleware，Next 16 更名）已经拦过一道，这里再兜一次底：
+  // 既防 proxy 被人绕过，也让 TS 知道 user 一定存在。
   if (!user) {
     redirect('/login')
   }

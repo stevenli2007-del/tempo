@@ -8,7 +8,7 @@ import { getSupabaseEnv } from './env'
  * 只能在服务端调用。浏览器端请改用 @/lib/supabase/browser。
  *
  * 关于 setAll 的 try/catch：Server Component 里 cookie 是只读的，
- * 写入会抛错，这里静默忽略。session 刷新统一由 middleware 负责（见 P0-0-3）。
+ * 写入会抛错，这里静默忽略。session 刷新统一由 proxy 负责（见 P0-0-3；Next 16 已将 middleware 更名为 proxy）。
  *
  * ⚠️ 关于调用顺序：cookies() 必须先于 getSupabaseEnv() 执行。
  * Next.js 靠「渲染期间是否读过 cookies()」来判定路由是否依赖请求上下文。
