@@ -29,14 +29,16 @@
 
 ## 当前进度指针
 
-**当前 task**：`P0-0-6` Vercel 部署 —— **代码/部署已完成**，剩 Steven 两步：① Supabase URL Configuration 加生产域名 ② 生产冒烟测试
+**当前 task**：`P0-1-1` syllabus 上传入口 + Supabase Storage（**等待下次会话开始**）
 
-> 📌 **生产 URL**：`https://tempo-six-neon.vercel.app`（GitHub `stevenli2007-del/tempo` Private 仓库，push main 自动部署）
-> 📌 **代码侧已复核**：全仓库零硬编码 URL / localhost / `redirectTo`；redirect 全用相对路径（`/dashboard`、`/login`），不会被本地域名污染生产。
+> 📌 **P0-0 基础设施 全部完成 ✅**
+> - P0-0-1 脚手架 · P0-0-2a/b Supabase 接入 · P0-0-3 Auth · P0-0-4 13 表迁移 · P0-0-5 RLS + handle_new_user · P0-0-6 Vercel 部署 + 生产冒烟。
+> - 生产 URL：`https://tempo-six-neon.vercel.app`（GitHub `stevenli2007-del/tempo` Private，push main 自动部署）。
+> - Supabase URL Configuration：Site URL + Redirect URLs（`http://localhost:3000/**` + `https://tempo-six-neon.vercel.app/**`）已配齐。
 
-> 📌 **现状（2026-09-02 核实）**：
-> - P0-0-1 脚手架 ✅、P0-0-2a（Supabase 项目 + `.env.local`）✅、P0-0-2b（client 分离）✅、**P0-0-3（Auth）✅ 已由 Steven 实测通过**。
-> - P0-0-4 迁移文件 `supabase/migrations/20260902003000_initial_schema.sql` 已写好（13 表 + 外键 + 触发器 + 8 索引）。**沙箱无 Supabase CLI，无法代跑，需 Steven 在 Dashboard → SQL Editor 粘贴执行。**
+> 📌 **P0-1 已就绪（11 task）**：第一个是 **P0-1-1 · 文件存储**（syllabus 上传 + Supabase Storage + 类型/大小校验）。该 task 零外部依赖、零合规风险，是验证"学生愿意上传 syllabus 且认可 AI 解析价值"的起点。
+
+> 📌 **领 P0-1-1 时只需读**：`Phase-0-MVP.md` 执行卡 + `TechStack.md` 第 2 节版本矩阵 + `Database.md`（storage 相关表）即可开工，按 `CodingRules.md` 阅读策略**不重读全部 11 份文档**。
 
 ---
 
@@ -52,7 +54,7 @@
 | **P0-0-3** | Supabase Auth：邮箱 + 密码注册/登录 + proxy 保护路由 | Bud | P0-0-2a | 可注册、登录、登出；未登录访问受保护页面被重定向 | ✅ |
 | **P0-0-4** | 数据库迁移：建表（按 `Database.md` 全部表 + 索引 + 外键） | 共担 | P0-0-2a | 迁移脚本可重复执行；表结构与 `Database.md` 一致 | ✅ |
 | **P0-0-5** | RLS 策略：用户只能访问自己的数据 | Bud | P0-0-4 | 用两个测试账号交叉验证，看不到对方任何数据 | ✅ |
-| **P0-0-6** | 部署上线（Vercel）+ 生产环境变量 + 冒烟测试 | 共担 | P0-0-3, P0-0-5 | 生产环境可注册登录；无环境变量泄漏 | 🔵 待 Steven 配 Supabase URL + 冒烟 |
+| **P0-0-6** | 部署上线（Vercel）+ 生产环境变量 + 冒烟测试 | 共担 | P0-0-3, P0-0-5 | 生产环境可注册登录；无环境变量泄漏 | ✅ |
 
 ---
 
@@ -71,7 +73,7 @@
 #### 🎫 P0-0-2b · 前后端 client 分离 —— ✅ 已完成，勿重做
 `lib/supabase/server.ts` / `browser.ts` / `env.ts` 已就位。下次会话若领到此 task，直接跳过。
 
-#### 🎫 P0-0-3 · Supabase Auth —— 代码已完成，待 Steven 实测验收
+#### 🎫 P0-0-3 · Supabase Auth ✅（commit `02e6bde`，Steven 2026-09-02 实测 7 条验收全过）
 - **做什么**：邮箱+密码注册 / 登录 / 登出 + `proxy.ts` 保护受保护路由（未登录重定向）
 - **改哪些文件**：`proxy.ts`（根）、`lib/supabase/proxy.ts`、`lib/auth/actions.ts`、`app/api/auth/callback/route.ts`、`components/auth/auth-form.tsx`、`app/(routes)/{login,signup,dashboard}/page.tsx`、`app/page.tsx`、`types/auth.ts`
 - **关键约束**：
@@ -82,63 +84,41 @@
   - 路由白/黑名单集中在 `lib/supabase/proxy.ts` 的 `PROTECTED_PREFIXES` / `AUTH_PAGES`，不要散落到各页面。
 - **已知边界**：不碰 `profiles` 表（P0-0-4 才建），dashboard 只显示 auth session 里的 email / id / last_sign_in_at。
 - **验收**：`npm run dev` → 注册→登录→登出全通；未登录访问 `/dashboard` 被重定向到 `/login`；已登录访问 `/login` 被弹到 `/dashboard`
-- **交接点**：Bud 已跑通 `build` / `lint` / `tsc`，**但交互链路必须由 Steven 在本地终端实测**（WorkBuddy 环境拦截 `.next` 缓存，`next dev` 跑不起来）
 
 #### 🎫 P0-0-4 · 数据库迁移 ✅（commit `1e16944`，Steven 已执行 + 验证 13 张表）
 - 改动：`supabase/migrations/20260902003000_initial_schema.sql`（360 行）
 - 验收 ✅：Steven 在 Dashboard SQL Editor 执行 "Success. No rows returned"，验证查询返回 13 行
 - ⚠️ 已知留白（已并入 P0-0-5）：`handle_new_user` 触发器待建
 
-#### 🎫 P0-0-5 · RLS 策略
 #### 🎫 P0-0-5 · RLS 策略 + `handle_new_user` 触发器 ✅（commit `f6de152`，Steven 已实测）
 - 改动：`supabase/migrations/20260902100000_rls_and_handle_new_user.sql`（242 行）
 - 验收 ✅：13 表 rowsecurity=true、13 条 policy、handle_new_user trigger 在 a/b 注册时自动写 profile、A 模拟 session 看不到 B、B 模拟 session 看不到 A（set local role + request.jwt.claim.sub 三段验证全过）
 
-#### 🎫 P0-0-6 · Vercel 部署（**正在规划**）
-- **做什么**：
-  - 所有业务表 `ENABLE ROW LEVEL SECURITY` + 行级策略（防越权读别人数据）
-  - **`handle_new_user` 触发器**：注册时自动在 `profiles` 插一行（从 P0-0-4 留白转入）
-  - **匿名策略**：未登录用户**完全不读**任何业务表
-- **改哪些文件**：`supabase/migrations/20260905000000_rls_and_handle_new_user.sql`（新文件）
-- **关键约束**：
-  - `profiles` / `canvas_credentials` / `sync_runs` / `parse_corrections`：`auth.uid() = user_id`
-  - `courses` 及其子表（syllabi / tasks / exam_dates 等）：经 `courses.id` 反查，递归匹配 `auth.uid() = courses.user_id`
-  - `llm_runs`：只走 service role 写，**前端 anon key 完全无权限**（含 select）；日志不该被前端读取
-  - 校验：所有策略 `USING` + `WITH CHECK` 双写；触发器用 `security definer` + `set search_path = public`
-- **验收**：
-  - 两个测试账号 A/B，A 取 B 的任何一行都返回空
-  - 未登录访问任何业务表被拒
-  - 注册新账号 → `profiles` 表自动出现对应行
-  - 删除 auth.users 中账号 → `profiles` 行级联消失
-- **交接点**：Bud 写迁移；Steven 在 SQL Editor 执行 + 用两个测试账号交叉验证
-
-#### 🎫 P0-0-6 · Vercel 部署 —— **部署已完成**，剩 Steven 收尾
+#### 🎫 P0-0-6 · Vercel 部署 ✅（生产 URL `https://tempo-six-neon.vercel.app`，Steven 2026-09-02 实测冒烟通过）
 - **做什么**：Vercel 部署 + 生产环境变量 + 冒烟测试
 - **改哪些文件**：0 代码改动（纯基础设施）；Vercel Dashboard 环境变量
 - **关键约束**：`SUPABASE_SERVICE_ROLE_KEY` 等密钥只在服务端、无 `NEXT_PUBLIC_` 前缀；生产变量不含任何密钥
-- **验收**：生产环境可注册登录；无环境变量泄漏
 - **代码改动**：0
 
-**✅ 已完成（Bud）**
+**✅ 已完成（Bud + Steven 配合）**
 - GitHub 仓库 `stevenli2007-del/tempo`（Private）已建 + 推送
-- Vercel Import 仓库 → 2 个 env vars（Production scope）→ 部署成功
+- Vercel Import 仓库 → 2 个 env vars（Production scope，Config 类型不要勾 Secret）→ 部署成功
 - 生产 URL：**`https://tempo-six-neon.vercel.app`**
-- 代码复核：全仓库零硬编码 URL / localhost / `redirectTo`，redirect 全相对路径
+- Supabase URL Configuration：Site URL = 生产 URL；Redirect URLs 含 `http://localhost:3000/**` + `https://tempo-six-neon.vercel.app/**`
+- 生产冒烟通过：landing page 可访问、注册新账号直接进 `/dashboard`、登出回 `/login`、未登录访问 `/dashboard` 弹回 `/login`
 
-**⚠️ 两个已踩过的坑（下次别再掉进去）**
+**⚠️ 三个已踩过的坑（下次别再掉进去）**
 1. **git author 邮箱必须匹配 GitHub 账号** —— 否则 Vercel 判「冒名顶替」直接 **Blocked**，不报 build 错。修复：
    ```bash
    git config user.email "stevenli2007@berkeley.edu" && git config user.name "Steven Li"
    git commit --amend --author="Steven Li <stevenli2007@berkeley.edu>" --no-edit
    git push --force-with-lease origin main
    ```
-2. **env vars 保存 ≠ 已注入当前 deployment** —— 先 Deploy 后加 env vars，旧 build 不带变量，页面 500。**加完必须手动 Redeploy**，让 Vercel 重跑 build 把变量烤进 bundle。
+2. **Server Client 里 `cookies()` 必须在 `getSupabaseEnv()` 之后调用**（不是之前）。先 env 校验后 cookies()，env 缺失时 Next 看不到 cookies() 调用就误判 `/dashboard` 为静态页强行预渲染 → `prerender-error`。**修复套路**：所有 session 依赖页加 `export const dynamic = 'force-dynamic'`。
+3. **env vars 保存 ≠ 已注入当前 deployment** —— 先 Deploy 后加 env vars，旧 build 不带变量，页面 500。**加完必须手动 Redeploy**，让 Vercel 重跑 build 把变量烤进 bundle。
+4. **`NEXT_PUBLIC_*` 变量在 Vercel UI 应选 Config 不要选 Secret** —— Vercel 会红框警告，公开值用 Secret 是误导且徒增混淆。
 
-**⏳ Steven 剩余两步**
-1. Supabase Dashboard → Authentication → URL Configuration：
-   - **Site URL** = `https://tempo-six-neon.vercel.app`
-   - **Redirect URLs** 加两条：`http://localhost:3000/**`（本地开发）+ `https://tempo-six-neon.vercel.app/**`（生产）
-2. 生产冒烟：`/` 打开 → 注册 `prod-test@tempo.dev` → 直接进 `/dashboard` → 登出回 `/login`
+**⏭ 下一步**：进入 **P0-1 M1 — 静态理解（syllabus 解析）**，第一个 task 是 **P0-1-1 · 文件存储**。
 
 ---
 
@@ -234,3 +214,5 @@ P0-0 基础设施
 | 2026-09-01 | 初版创建：33 个 task，分 P0-0 / P0-1 / P0-2 / P0-3 四组，含 Owner、依赖、验收标准、关键路径与风险登记 |
 | 2026-09-01 | P0-2-1 完成（Steven 实测：token 入口可用）→ P0-2-10 iCal 兜底标记为不执行；新增 P0-2-1b 记录实测细节；Phase 1 OAuth 申请改为「Phase 0 验证后再启动」（Steven 拍板，偏离原并行建议） |
 | 2026-09-02 | 修复文档漂移（P0-0-1 「Next.js 14」→「16.3.4」，与 TechStack 对齐）；P0-0-2 拆分为 2a（Steven 手动建项目/填 env）/ 2b（Bud 写 client，已完成）；P0-0-6 改「共担」并标注交接点；新增「P0-0 执行卡」小节；更新进度指针反映真实卡点 |
+| 2026-09-02 | P0-0 基础设施全部完成：P0-0-3 Auth ✅（Next 16 middleware 改名为 proxy）+ P0-0-4 13 表迁移 ✅ + P0-0-5 RLS + handle_new_user ✅ + P0-0-6 Vercel 部署 ✅（生产 URL `tempo-six-neon.vercel.app`，Steven 实测生产冒烟通过）；进度指针推进至 P0-1 M1（syllabus 静态理解）。**记录四个部署坑**：git author 不匹配 GitHub / `cookies()` 顺序错 / env vars 保存≠注入 / `NEXT_PUBLIC_*` 别勾 Secret |
+
