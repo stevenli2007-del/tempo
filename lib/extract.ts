@@ -2,7 +2,7 @@ import path from 'node:path'
 
 import JSZip from 'jszip'
 import mammoth from 'mammoth'
-import { getDocument } from 'pdfjs-dist/legacy/build/pdf.mjs'
+import { extractText, getDocumentProxy } from 'unpdf'
 
 import type { SyllabusExtension } from '@/lib/syllabi'
 import type { ExtractMethod, ExtractStatus } from '@/types/syllabus'
@@ -13,10 +13,11 @@ import type { ExtractMethod, ExtractStatus } from '@/types/syllabus'
  * 输入是文件内容 buffer，输出是「状态 + 文本 + 元数据」，**不碰数据库也不碰网络** ——
  * 取文件、写行是 `POST /api/v1/syllabi/:id/extract` 的事。这样这一层可以单独测。
  *
- * 依赖见 `TechStack.md` 版本矩阵：`pdfjs-dist` 5.4.296 / `mammoth` 1.12.2 / `jszip` 3.10.1。
+ * 依赖见 `TechStack.md` 版本矩阵：`unpdf` 1.8.1 / `mammoth` 1.12.2 / `jszip` 3.10.1。
  *
- * ⚠️ PDF 入口**只能**是 `pdfjs-dist/legacy/build/pdf.mjs`，原因见 `extractPdf()` 上方注释
- * 与 `TechStack.md` 第 2 节的 ⚠️（换回现代构建或换回 `pdf-parse` 都会在生产环境炸）。
+ * ⚠️ PDF 提取**只能**用 `unpdf`，原因见 `extractPdf()` 上方注释与 `TechStack.md` 第 2 节的 ⚠️
+ * —— 这是 2026-09-02 生产事故（连续两个 PDF 库都在 Vercel 上 import 即崩）定下来的，
+ * 换回 `pdf-parse` 或直接引 `pdfjs-dist` 都会重演。
  */
 
 export type ExtractOutcome = {
@@ -67,65 +68,67 @@ export async function extractSyllabusText(
 // ---------------------------------------------------------------
 
 /**
- * 标准字体数据目录（Helvetica / Times 等非嵌入字体要用到）。
+ * 字体数据目录（非嵌入的 Helvetica / Times 等标准字体，以及 CJK 的 cmaps 要用到）。
  *
- * 不传 `standardFontDataUrl` 时 pdfjs 每页都会 warn，且缺字体度量可能影响换行位置。
- * 传了但路径不存在也只是 warn（实测仍能抽出文本），所以这里放心传、不做存在性判断。
+ * `pdfjs-dist` 在这里**只当数据包用** —— unpdf 不会 import 它的 JS（unpdf 自带为
+ * serverless 重新打包的 pdfjs），只在解析时按路径读这些字体文件。
+ *
+ * 显式传而不靠 unpdf 自己解析：它内部用的是 `import.meta.resolve('pdfjs-dist/package.json')`，
+ * 在打包器里常常解析不到（失败会静默跳过，等于没有字体数据）。
+ * 传了但路径不存在也只是 warn（实测仍能抽出文本），所以放心传、不做存在性判断。
  */
 const STANDARD_FONT_DATA_URL = path.join(
   process.cwd(),
   'node_modules/pdfjs-dist/standard_fonts/',
 )
+const CMAP_URL = path.join(process.cwd(), 'node_modules/pdfjs-dist/cmaps/')
 
 /**
  * PDF 文本提取。
  *
- * ⚠️ 入口必须是 **legacy 构建**：pdfjs 的现代构建（`pdfjs-dist/build/pdf.mjs`）在 Node 下
- * 跑 `getDocument()` 会抛 `ReferenceError: DOMMatrix is not defined`；只有 legacy 构建
- * 自带 `DOMMatrix` polyfill。这是 2026-09-02 生产事故的直接教训 —— 上一版用的
- * `pdf-parse` 死在同一处（它靠 `require('@napi-rs/canvas')` 补 DOMMatrix，canvas
- * 加载失败时只 warn 不赋值，紧接着模块顶层 `new DOMMatrix()` 就崩），
- * 而本地 macOS 装了 23MB 的 `@napi-rs/canvas-darwin-arm64`，本地全绿、线上全红。
+ * ⚠️ **必须用 unpdf，不要换成 `pdf-parse` 或直接引 `pdfjs-dist`**（2026-09-02 生产事故）。
+ *
+ * 事故复盘：pdfjs 在 Node 下模块作用域就要 `new DOMMatrix()`，而 DOMMatrix 靠
+ * `require('@napi-rs/canvas')`（Skia 原生二进制）补 —— canvas 加载失败时它**只 warn 不赋值**，
+ * 紧接着就崩。`pdf-parse` 2.4.5 与 `pdfjs-dist` 的 legacy / 现代构建**三个都死在同一处**。
+ * 本地 macOS 恰好装有 `@napi-rs/canvas-darwin-arm64`，于是本地全绿、Vercel 全红。
+ *
+ * unpdf 的做法正是给这个坑打的补丁：重新打包 pdfjs，字符串替换剥掉浏览器 API 引用、
+ * worker 内联、补缺失的全局对象，**不依赖任何原生二进制**。
+ *
+ * 另一个教训：本地验证这类库时，要 `delete globalThis.DOMMatrix` 再 import，
+ * 否则本地残留的 canvas 会让你得出「换库已修好」的错误结论 —— 我第一轮就这么翻过车。
  */
 async function extractPdf(file: Buffer): Promise<ExtractOutcome> {
-  const doc = await getDocument({
-    data: new Uint8Array(file),
+  const pdf = await getDocumentProxy(new Uint8Array(file), {
     standardFontDataUrl: STANDARD_FONT_DATA_URL,
-    isEvalSupported: false, // 不渲染就不需要 eval，多数 serverless 环境也禁用它
-    disableFontFace: true, // 同上：不往 document 里注入字体
-    useSystemFonts: false,
-  }).promise
+    cMapUrl: CMAP_URL,
+    cMapPacked: true,
+  })
 
   try {
-    const pages: string[] = []
-    for (let number = 1; number <= doc.numPages; number += 1) {
-      const page = await doc.getPage(number)
-      const content = await page.getTextContent()
-      // `items` 里混着有 `str` 的文本片段和只有 `type` 的标记片段（marked content），
-      // 后者不承载文字，跳过。`hasEOL` 表示该片段是一行结尾 —— pdfjs 不自带换行符，
-      // 不补的话整页会粘成一长条，喂给 LLM 更难解析。
-      pages.push(content.items.map((item) => ('str' in item ? toLine(item) : '')).join(''))
-    }
+    // `mergePages: false` → 逐页数组，我们按页拼接。
+    // 不要 `mergePages: true`：合并后是单字符串，页数信息只剩 totalPages，
+    // 但真正的原因是逐页拼接能保留页边界，LLM 解析表格型 syllabus 时更好定位。
+    //
+    // 换行由 unpdf 内部按 `hasEOL` 补（实测与手写 `hasEOL` 拼接结果一致），不用自己处理。
+    const { totalPages, text } = await extractText(pdf, { mergePages: false })
 
     // 扫描件 / 图片型 PDF 拼出来正好是空串，「抽不出文字」的判定天然成立。
-    const text = normalizeText(pages.join('\n'))
-    if (text === '') return failure(EMPTY_PDF_MESSAGE)
+    const joined = normalizeText(text.join('\n'))
+    if (joined === '') return failure(EMPTY_PDF_MESSAGE)
 
     return {
       status: 'extracted',
-      text,
+      text: joined,
       method: 'pdf_text',
-      pageCount: doc.numPages,
+      pageCount: totalPages,
       error: null,
     }
   } finally {
-    await doc.destroy()
+    // pdf.js v5 把 `destroy()` 改名成 `cleanup()`。不释放会漏文档（长驻的 Node 进程里积少成多）。
+    await pdf.cleanup()
   }
-}
-
-/** 按 pdfjs 的 `hasEOL` 补换行。不补的话整页文字会连成一条。 */
-function toLine(item: { str: string; hasEOL: boolean }): string {
-  return item.hasEOL ? `${item.str}\n` : item.str
 }
 
 // ---------------------------------------------------------------

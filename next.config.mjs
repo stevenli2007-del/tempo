@@ -1,20 +1,27 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   /**
-   * pdfjs 体量大（legacy 构建 ~940KB）且内部会按 `import.meta.url` 解析资源，
-   * 被打包进 server bundle 容易出幺蛾子。标记为 external：运行时直接从 node_modules 加载。
+   * unpdf 里内嵌了一份为 serverless 重新打包的 pdfjs（单文件 ~1MB），
+   * 走的是预打包产物，让 Turbopack 再过一遍手没有收益、只有风险。
+   * 标记 external：运行时直接从 node_modules 原样加载。
    */
-  serverExternalPackages: ['pdfjs-dist'],
+  serverExternalPackages: ['unpdf'],
 
   /**
-   * 标准字体数据（Helvetica / Times 等非嵌入字体要用到）是**运行时**按路径读的，
-   * 不会被 import 图追踪到，必须显式声明，否则 `standardFontDataUrl` 指向的目录不在函数包里。
+   * 字体与 CJK 字符映射数据是**运行时按路径读的文件**，不在 import 图里，
+   * 不会被自动追踪，必须显式声明，否则 `standardFontDataUrl` / `cMapUrl` 指向的目录
+   * 不会出现在 Vercel 的函数包里。
    *
    * 缺了它不会崩 —— pdfjs 只是 warn，文本照样抽得出来（实测过），
-   * 但会每页打一条 `UnknownErrorException`，且缺字体度量可能影响换行位置。
+   * 但非嵌入字体的度量会缺失，可能改变换行位置。
+   *
+   * ⚠️ 数据来源是 `pdfjs-dist` 包，但**只是当数据包用**，不 import 它的 JS（见 `lib/extract.ts`）。
    */
   outputFileTracingIncludes: {
-    '/api/**': ['./node_modules/pdfjs-dist/standard_fonts/**/*'],
+    '/api/**': [
+      './node_modules/pdfjs-dist/standard_fonts/**/*',
+      './node_modules/pdfjs-dist/cmaps/**/*',
+    ],
   },
 };
 
