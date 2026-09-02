@@ -162,7 +162,7 @@
 
 #### 🎫 P0-1-1 · syllabus 上传入口 + Supabase Storage + 类型/大小校验
 - **做什么**：能上传一份 syllabus 并存进 Supabase Storage，能取回来；非法类型/超大小被拒绝且有提示。
-- **⚠️ 前置（Steven 手动）**：`supabase/migrations/20260902220000_storage_syllabi.sql` 必须先在 SQL Editor 执行 —— 建私有桶 `syllabi` + `storage.objects` 四条 RLS 策略。**不执行的话上传会 500**（RLS 拒绝一切 insert，且该检查发生在"桶是否存在"之前，所以报错文案是 `new row violates row-level security policy`，**不是** "bucket not found"，别被误导）。
+- **⚠️ 前置（Steven 手动，走 Dashboard UI，不走 SQL Editor）**：`supabase/migrations/20260902220000_storage_syllabi.sql` 的头部写了完整步骤。**不能在 SQL Editor 整段执行** —— `CREATE POLICY on storage.objects` 会报 `42501: must be owner of table objects`（该表 owner 是平台内部的 `supabase_storage_admin`，SQL Editor 的 postgres 角色不是 owner，而建策略要求 owner）。正确做法：① Dashboard → Storage → New bucket（`syllabi`，私有，limit 20MB）→ ② Storage → Policies 建四条。**不执行的话上传会 500**（RLS 拒绝一切 insert，且该检查发生在"桶是否存在"之前，报错文案是 `new row violates row-level security policy`，**不是** "bucket not found"，别被误导）。验收用的两条 SELECT 在 SQL Editor 可以正常跑，写在迁移文件末尾。
 - **改哪些文件**：
   - `supabase/migrations/20260902220000_storage_syllabi.sql` —— 桶 + 4 条 RLS 策略（**SSOT 是 `Database.md` 7.3，先补文档再出迁移**）
   - `types/syllabus.ts` —— `Syllabus` / `SyllabusUploadTicket` / `CreateSyllabusInput` / `SyllabusDownloadUrl`

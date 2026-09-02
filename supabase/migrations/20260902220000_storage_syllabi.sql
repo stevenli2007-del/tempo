@@ -7,82 +7,79 @@
 --   - ADR-009：syllabus 上传走浏览器直传，不走服务端转发
 --   - Security-Privacy.md：私有桶，文件可能含教师姓名 / office hour 地址 / 评分细则
 --
--- 执行方式：Supabase Dashboard → SQL Editor → 整段粘贴执行（Dashboard 默认以
---          postgres 角色执行，有权限写 storage schema）。
--- 幂等性：桶用 on conflict do update，策略先 drop if exists 再 create，可重复执行。
 -- =============================================================
-
--- -------------------------------------------------------------
--- 1. 建私有桶 syllabi
--- -------------------------------------------------------------
--- public = false：不生成永久可访问 URL，必须走签名 URL（见 Database.md 7.3）。
--- file_size_limit = 20971520（20MB），与 API-Contract.md §3 的大小上限一致。
--- allowed_mime_types = null：故意不设。docx / pptx 在真实浏览器里常报
---   application/octet-stream 或空值，桶层面做 MIME 白名单会把合法文件误拒。
---   类型校验改由服务端按扩展名做（lib/syllabi.ts），桶只卡大小。
-insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
-values ('syllabi', 'syllabi', false, 20971520, null)
-on conflict (id) do update
-  set public             = excluded.public,
-      file_size_limit    = excluded.file_size_limit,
-      allowed_mime_types = excluded.allowed_mime_types;
-
--- -------------------------------------------------------------
--- 2. storage.objects 的 RLS（4 条，按桶 + 路径首段判定）
--- -------------------------------------------------------------
--- 判定式：(storage.foldername(name))[1] = auth.uid()::text
---   对象路径约定为 {user_id}/{course_id}/{syllabus_id}.{ext}，
---   首段恒为上传者 uid，且该路径由服务端在签发上传票据时生成，前端不可伪造。
+-- 🔴 本文件不能整段在 SQL Editor 执行（2026-09-02 实测）：
+--    CREATE POLICY on storage.objects 报
+--    `42501: must be owner of table objects`
+--    原因：storage.objects 的 owner 是平台内部角色 supabase_storage_admin，
+--    SQL Editor 的 postgres 角色不是 owner，而 CREATE POLICY 要求 owner。
+--    业务表能这样建策略是因为它们的 owner 就是 postgres。
 --
--- 四条都带 bucket_id = 'syllabi' 限定，避免误伤其他桶。
--- 只授予 authenticated：未登录不允许碰文件。
-
-alter table storage.objects enable row level security;
-
--- SELECT（下载前服务端要签 URL；签名本身也要求有读权限）
-drop policy if exists syllabi_objects_select_own on storage.objects;
-create policy syllabi_objects_select_own on storage.objects
-  for select to authenticated
-  using (
-    bucket_id = 'syllabi'
-    and (storage.foldername(name))[1] = auth.uid()::text
-  );
-
--- INSERT（浏览器直传走的就是这条；签名上传 URL 同样受 RLS 约束）
-drop policy if exists syllabi_objects_insert_own on storage.objects;
-create policy syllabi_objects_insert_own on storage.objects
-  for insert to authenticated
-  with check (
-    bucket_id = 'syllabi'
-    and (storage.foldername(name))[1] = auth.uid()::text
-  );
-
--- UPDATE（覆盖重传；using 与 with check 都写，防止把文件挪到别人目录下）
-drop policy if exists syllabi_objects_update_own on storage.objects;
-create policy syllabi_objects_update_own on storage.objects
-  for update to authenticated
-  using (
-    bucket_id = 'syllabi'
-    and (storage.foldername(name))[1] = auth.uid()::text
-  )
-  with check (
-    bucket_id = 'syllabi'
-    and (storage.foldername(name))[1] = auth.uid()::text
-  );
-
--- DELETE（P0-3-2 一键删账号时按 user_id 前缀整段清理）
-drop policy if exists syllabi_objects_delete_own on storage.objects;
-create policy syllabi_objects_delete_own on storage.objects
-  for delete to authenticated
-  using (
-    bucket_id = 'syllabi'
-    and (storage.foldername(name))[1] = auth.uid()::text
-  );
+--    ✅ 正确执行方式是 Dashboard UI（背后走高权限接口）：
+--       第 1 步建桶   → Dashboard → Storage → New bucket
+--       第 2 步建策略 → Dashboard → Storage → Policies
+--    下方 UI 参数与 SQL 语义一一对应，SQL 仅作语义留档，勿在 SQL Editor 执行。
+-- =============================================================
 
 -- =============================================================
--- 验收（执行后跑一遍，确认建对了）
+-- 第 1 步 · 建桶（Dashboard → Storage → New bucket）
 -- =============================================================
--- 1) 桶已建且为私有、上限 20MB：
+--   Name:               syllabi
+--   Public bucket:      关闭（私有桶，不生成永久 URL，只走签名 URL）
+--   File size limit:    20971520（= 20MB，与 API-Contract.md §3 一致）
+--   Allowed MIME types: 留空（故意不设 —— docx/pptx 在真实浏览器常报
+--                       application/octet-stream，桶层白名单会误拒；
+--                       类型校验由服务端按扩展名做，见 lib/syllabi.ts）
+--
+-- SQL 语义留档（勿执行）：
+-- insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
+-- values ('syllabi', 'syllabi', false, 20971520, null);
+
+-- =============================================================
+-- 第 2 步 · 四条策略（Dashboard → Storage → Policies → New policy）
+-- =============================================================
+-- 每条填：Policy name / Allowed operation / Target roles / USING 或 WITH CHECK 表达式。
+-- 四条的 Target roles 都是 authenticated；表达式完全相同：
+--
+--   (storage.foldername(name))[1] = auth.uid()::text
+--
+-- 判定语义：对象路径约定为 {user_id}/{course_id}/{syllabus_id}.{ext}，
+-- 首段恒为上传者 uid，且该路径由服务端签发票据时生成，前端不可伪造。
+--
+-- ┌──────────────────┬───────────────────┬─────────────────────────────┐
+-- │ Policy name      │ Allowed operation │ 表达式填在哪里              │
+-- ├──────────────────┼───────────────────┼─────────────────────────────┤
+-- │ syllabi_objects_select_own  │ SELECT │ USING                    │
+-- │ syllabi_objects_insert_own  │ INSERT │ WITH CHECK               │
+-- │ syllabi_objects_update_own  │ UPDATE │ USING 和 WITH CHECK 都填 │
+-- │ syllabi_objects_delete_own  │ DELETE │ USING                    │
+-- └──────────────────┴───────────────────┴─────────────────────────────┘
+-- UPDATE 两条都填的原因：防止把文件「挪」到别人目录下（读得到 + 写进去的路径也得是自己的）。
+--
+-- 注意：Policies UI 里如果提供的是「给所有桶」的模板，确认 bucket_id 限定——
+-- 表达式如需显式带桶限定则写成：
+--   bucket_id = 'syllabi' and (storage.foldername(name))[1] = auth.uid()::text
+--
+-- SQL 语义留档（勿执行）：
+-- alter table storage.objects enable row level security;  -- 平台默认已开启
+-- create policy syllabi_objects_select_own on storage.objects
+--   for select to authenticated
+--   using (bucket_id = 'syllabi' and (storage.foldername(name))[1] = auth.uid()::text);
+-- create policy syllabi_objects_insert_own on storage.objects
+--   for insert to authenticated
+--   with check (bucket_id = 'syllabi' and (storage.foldername(name))[1] = auth.uid()::text);
+-- create policy syllabi_objects_update_own on storage.objects
+--   for update to authenticated
+--   using (bucket_id = 'syllabi' and (storage.foldername(name))[1] = auth.uid()::text)
+--   with check (bucket_id = 'syllabi' and (storage.foldername(name))[1] = auth.uid()::text);
+-- create policy syllabi_objects_delete_own on storage.objects
+--   for delete to authenticated
+--   using (bucket_id = 'syllabi' and (storage.foldername(name))[1] = auth.uid()::text);
+
+-- =============================================================
+-- 验收（这两条 SELECT 在 SQL Editor 可以正常跑）
+-- =============================================================
+-- 1) 桶已建且为私有、上限 20MB（顺便确认报错前 insert 有没有成功）：
 --    select id, public, file_size_limit, allowed_mime_types
 --    from storage.buckets where id = 'syllabi';
 --    期望：syllabi | false | 20971520 | null
@@ -92,7 +89,7 @@ create policy syllabi_objects_delete_own on storage.objects
 --    where schemaname = 'storage' and tablename = 'objects'
 --      and policyname like 'syllabi_objects_%'
 --    order by policyname;
---    期望：4 行（select / insert / update / delete）
+--    期望：4 行（delete / insert / select / update）
 --
 -- 3) 越权隔离（P0-1-1 冒烟时做）：用 B 账号拿 A 账号的 file_url 去签下载 URL，
 --    应失败或拿到空 —— RLS 挡在签名之前。

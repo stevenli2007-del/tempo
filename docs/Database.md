@@ -483,6 +483,8 @@ CREATE INDEX idx_sync_runs_user_started ON sync_runs(user_id, started_at DESC);
 
 四条都带 `bucket_id = 'syllabi'` 限定，避免误伤其他桶。
 
+> 🔴 **执行方式（2026-09-02 实测修正）**：这四条策略**不能在 Dashboard SQL Editor 用 `CREATE POLICY` 创建** —— 报 `42501: must be owner of table objects`。`storage.objects` 的 owner 是平台内部的 `supabase_storage_admin`，SQL Editor 的 postgres 角色不是 owner，而 `CREATE POLICY` 要求 owner（业务表能这样做是因为 owner 就是 postgres）。**正确做法：Dashboard → Storage → Policies UI 逐条创建**，具体参数见 `supabase/migrations/20260902220000_storage_syllabi.sql` 头部的步骤表。
+
 **为什么不设 `allowed_mime_types`**
 
 docx / pptx 的 MIME 类型在实际浏览器里极不稳定（常见 `application/octet-stream`、亦有空值）。若在桶层面做 MIME 白名单，会把**合法文件误拒**，且用户看到的错误与实际原因不符，排障成本高。
