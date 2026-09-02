@@ -160,7 +160,34 @@
 
 > 与 P0-0 一样：领 task 时只读对应执行卡 + `TechStack.md` 第 2 节版本矩阵，不必重读全部文档。
 
-#### 🎫 P0-1-7 · Workspace CRUD（课程创建 / 列表 / 编辑 / 删除）
+#### 🎫 P0-1-1 · syllabus 上传入口 + Supabase Storage + 类型/大小校验
+- **做什么**：能上传一份 syllabus 并存进 Supabase Storage，能取回来；非法类型/超大小被拒绝且有提示。
+- **⚠️ 前置（Steven 手动）**：`supabase/migrations/20260902220000_storage_syllabi.sql` 必须先在 SQL Editor 执行 —— 建私有桶 `syllabi` + `storage.objects` 四条 RLS 策略。**不执行的话上传会 500**（RLS 拒绝一切 insert，且该检查发生在"桶是否存在"之前，所以报错文案是 `new row violates row-level security policy`，**不是** "bucket not found"，别被误导）。
+- **改哪些文件**：
+  - `supabase/migrations/20260902220000_storage_syllabi.sql` —— 桶 + 4 条 RLS 策略（**SSOT 是 `Database.md` 7.3，先补文档再出迁移**）
+  - `types/syllabus.ts` —— `Syllabus` / `SyllabusUploadTicket` / `CreateSyllabusInput` / `SyllabusDownloadUrl`
+  - `lib/syllabi.ts` —— `SyllabusRow` + `SYLLABUS_COLUMNS`（**必须写字面量字符串，不能 `.join()`**，否则退化成 `string`，supabase 推不出返回行类型，`data` 会被推断成 `GenericStringError`）、`toSyllabus()`、`validateUploadInput()`、`buildStoragePath()`
+  - `lib/api/client-error.ts` —— `readApiErrorMessage()`，从错误响应取用户可读文案
+  - `app/api/v1/courses/[id]/syllabus/route.ts` —— 两步式直传第 1 步：校验 → 签 `createSignedUploadUrl` → 建 syllabi 行
+  - `app/api/v1/syllabi/[id]/download/route.ts` —— 签 60 秒下载 URL
+  - `components/courses/syllabus-upload.tsx` —— 选文件 → 前端预校验 → 取票据 → `uploadToSignedUrl` 直传 → `router.refresh()`
+  - `components/courses/course-card.tsx` / `app/(routes)/dashboard/page.tsx` —— 卡片嵌入上传入口；dashboard 按 `in(course_id)` **一次**取回 syllabi（避免 N+1），取每课最新一份
+- **关键约束**：
+  - **两步式直传（ADR-009）**：`POST .../syllabus` 收 JSON `{fileName, fileSize}`，不是 multipart。文件不经服务端。
+  - **服务端是唯一权威**：前端也校验一遍，但那只为体验 —— 前端上报的 `fileSize`/`fileName` 全不可信。
+  - **类型按扩展名判，不按 MIME**：docx/pptx 在真实浏览器里常报 `application/octet-stream`，桶层面设 `allowed_mime_types` 会误拒（`Database.md` 7.3）。
+  - **路径首段必须是 `auth.uid()`**：`storage.objects` 的 RLS 靠它判定归属，由服务端生成，前端不可控。
+  - **先签票据再建行**：签失败就不留悬挂行。
+  - **越权统一 404**（ADR-010），不返回 403。
+  - `file_url` 列存的是**对象路径不是 URL**（私有桶无永久 URL），对外字段改名 `filePath` 把语义纠正过来。
+- **自测（Bud，2026-09-02）**
+  - `NODE_OPTIONS= npx tsc --noEmit` ✅ ｜ `NODE_OPTIONS= npm run lint` ✅（0 warning）｜ `NODE_OPTIONS= npm run build` ✅（新增 2 个 ƒ 动态路由）
+  - **API 冒烟 19 项，18 项通过**：未登录 401 / 非法 uuid 400 / 非 JSON 400 / 5 项入参校验 400 / 2 项类型错误 415 / 超限 413 / 课程不存在 404 / **B 给 A 的课传文件 404（越权隔离 ✅）** / 下载端点 400·404·401 / `x-request-id` 回传 ✅
+  - **唯一未通过**：正常路径 201 —— 因 Storage 迁移未执行，`createSignedUploadUrl` 被 RLS 拒绝（500）。**等 Steven 执行迁移后复测。**
+- **尚未验证**：① 真实文件的端到端上传与下载（需迁移 + 浏览器）；② 浏览器 UI 交互（沙箱起不了 `next dev`）。
+- **已知留白**：`extractStatus` 恒为 `pending`（提取管线属 P0-1-2）；**上传中断会留悬挂行**，靠 P0-1-2 提取失败时置 `extract_status='failed'` 兜住可见性；未新增 `file_size`/`mime_type` 列（Diff First，需要时再加）；端点总表里 `GET /api/v1/health` 实际未实现（返回 404，属 P0-0-6 遗留）。
+
+#### 🎫 P0-1-7 · Workspace CRUD（课程创建 / 列表 / 编辑 / 删除）· ✅ 已完成，勿重做
 - **做什么**：课程 CRUD。列表按学期分组展示；删除 = 归档，带二次确认。
 - **改哪些文件**：
   - `types/course.ts` —— `Course`（对外形状，camelCase）/ `CreateCourseInput` / `UpdateCourseInput` / `ApiErrorBody`
@@ -261,4 +288,5 @@ P0-0 基础设施
 | 2026-09-02 | P0-0 基础设施全部完成：P0-0-3 Auth ✅（Next 16 middleware 改名为 proxy）+ P0-0-4 13 表迁移 ✅ + P0-0-5 RLS + handle_new_user ✅ + P0-0-6 Vercel 部署 ✅（生产 URL `tempo-six-neon.vercel.app`，Steven 实测生产冒烟通过）；进度指针推进至 P0-1 M1（syllabus 静态理解）。**记录四个部署坑**：git author 不匹配 GitHub / `cookies()` 顺序错 / env vars 保存≠注入 / `NEXT_PUBLIC_*` 别勾 Secret |
 | 2026-09-02 | **执行顺序调整（Steven 拍板）**：`P0-1-7` 课程 CRUD 提前至 `P0-1-1` 上传之前（`syllabi.course_id` 为 NOT NULL，无课则无上传落点）。**task 编号一律不变**，顺序以「当前进度指针」为准，表格行序仅服务编号可读性。同日决策：上传改浏览器直传（新增 [ADR-009](./Decisions.md#adr-009)）；Storage 桶规范并入 P0-1-1 交付 |
 | 2026-09-02 | **P0-1-7 交付并验收通过 ✅**（commit `494c9ec` + `f380ef0` + `8e466f7`，已推 origin/main 并自动部署）。API 层 16 项 curl 冒烟全过，浏览器 UI 由 Steven 本地验收通过。**403→404 契约偏离经 Steven 拍板接受，升格为 [ADR-010](./Decisions.md#adr-010)**，`API-Contract.md` §1.2 / §1.4 同步修改，适用于所有受 RLS 保护的资源端点。进度指针推进至 `P0-1-1` |
+| 2026-09-02 | **P0-1-1 开发完成（待 Steven 执行 Storage 迁移后终验）**：新增 `Database.md` 7.3 Storage 小节 + 迁移 `20260902220000_storage_syllabi.sql`；上传改两步式直传（[ADR-009](./Decisions.md#adr-009)）；新增 `GET /api/v1/syllabi/:id/download`；`API-Contract.md` §3 的 multipart 契约作废改写为两步式。**API 冒烟 19 项过 18 项，唯一未过的 201 正常路径卡在迁移未执行**（RLS 拒绝一切 `storage.objects` insert）。新增 P0-1-1 执行卡 |
 

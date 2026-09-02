@@ -5,13 +5,17 @@ import { useState } from 'react'
 
 import { Button } from '@/components/ui/button'
 import { CourseForm } from '@/components/courses/course-form'
+import { SyllabusUpload } from '@/components/courses/syllabus-upload'
 import type { Course } from '@/types/course'
+import type { Syllabus } from '@/types/syllabus'
 
 interface CourseCardProps {
   course: Course
+  /** 该课程最新一份 syllabus；没有则为 null（P0-1-1 起展示上传入口）。 */
+  syllabus: Syllabus | null
 }
 
-export function CourseCard({ course }: CourseCardProps) {
+export function CourseCard({ course, syllabus }: CourseCardProps) {
   const router = useRouter()
   const [isEditing, setIsEditing] = useState(false)
   const [isConfirmingDelete, setIsConfirmingDelete] = useState(false)
@@ -84,6 +88,8 @@ export function CourseCard({ course }: CourseCardProps) {
           </Button>
         </div>
       </div>
+
+      <SyllabusUpload courseId={course.id} syllabus={syllabus} />
 
       {isConfirmingDelete ? (
         <div className="mt-4 rounded-lg border border-border bg-muted/40 p-4">

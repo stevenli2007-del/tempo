@@ -6,8 +6,11 @@ import { CourseCreatePanel } from '@/components/courses/course-create-panel'
 import { signOut } from '@/lib/auth/actions'
 import { COURSE_COLUMNS, toCourse } from '@/lib/courses'
 import type { CourseRow } from '@/lib/courses'
+import { SYLLABUS_COLUMNS, toSyllabus } from '@/lib/syllabi'
+import type { SyllabusRow } from '@/lib/syllabi'
 import { createClient } from '@/lib/supabase/server'
 import type { Course } from '@/types/course'
+import type { Syllabus } from '@/types/syllabus'
 
 export const metadata = {
   title: '我的课程 · Tempo',
@@ -30,6 +33,44 @@ function groupBySemester(courses: Course[]): { semester: string; courses: Course
     }
   }
   return Array.from(groups, ([semester, list]) => ({ semester, courses: list }))
+}
+
+/**
+ * 取每门课**最新一份** syllabus。
+ *
+ * 只查一次（`in` + 按时间倒序）而不是每门课查一次，避免 N+1。
+ * 一门课允许有多份（重新上传会新增一行），展示时取最新的那份。
+ *
+ * 返回的错误单独带出来：syllabus 是次要数据，它查失败不该让整个课程列表白屏，
+ * 但也不能静默显示成"还没有 syllabus"（CodingRules 7）—— 所以降级成一条可见的提示。
+ */
+async function loadLatestSyllabi(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  courseIds: string[],
+): Promise<{ byCourse: Map<string, Syllabus>; error: string | null }> {
+  const byCourse = new Map<string, Syllabus>()
+  if (courseIds.length === 0) {
+    return { byCourse, error: null }
+  }
+
+  const { data, error } = await supabase
+    .from('syllabi')
+    .select(SYLLABUS_COLUMNS)
+    .in('course_id', courseIds)
+    .order('uploaded_at', { ascending: false })
+
+  if (error) {
+    return { byCourse, error: error.message }
+  }
+
+  for (const row of (data ?? []) as SyllabusRow[]) {
+    // 已按 uploaded_at 倒序，第一次出现的就是该课程最新一份。
+    if (!byCourse.has(row.course_id)) {
+      byCourse.set(row.course_id, toSyllabus(row))
+    }
+  }
+
+  return { byCourse, error: null }
 }
 
 export default async function DashboardPage() {
@@ -55,6 +96,11 @@ export default async function DashboardPage() {
   const courses = data ? (data as CourseRow[]).map(toCourse) : []
   const groups = groupBySemester(courses)
   const email = user.email ?? '（未设置邮箱）'
+
+  const { byCourse: syllabiByCourse, error: syllabusError } = await loadLatestSyllabi(
+    supabase,
+    courses.map((course) => course.id),
+  )
 
   return (
     <main className="min-h-screen bg-background text-foreground">
@@ -90,6 +136,15 @@ export default async function DashboardPage() {
           </div>
         ) : null}
 
+        {syllabusError ? (
+          <div role="alert" className="rounded-lg border border-destructive/40 bg-card p-4">
+            <p className="text-sm font-medium text-destructive">Syllabus 信息加载失败</p>
+            <p className="mt-1 text-sm text-muted-foreground">
+              课程列表不受影响，但上传状态可能显示不准。{syllabusError}
+            </p>
+          </div>
+        ) : null}
+
         {!error && courses.length === 0 ? (
           <div className="rounded-xl border border-dashed border-border p-10 text-center">
             <p className="text-sm text-muted-foreground">
@@ -103,7 +158,11 @@ export default async function DashboardPage() {
             <h2 className="text-sm font-medium text-muted-foreground">{group.semester}</h2>
             <div className="grid gap-4 sm:grid-cols-2">
               {group.courses.map((course) => (
-                <CourseCard key={course.id} course={course} />
+                <CourseCard
+                  key={course.id}
+                  course={course}
+                  syllabus={syllabiByCourse.get(course.id) ?? null}
+                />
               ))}
             </div>
           </section>

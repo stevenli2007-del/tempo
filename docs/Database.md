@@ -105,7 +105,7 @@ Supabase Auth 的 `auth.users` 管认证，本表放业务扩展字段，`id` �
 |---|---|---|
 | `id` | uuid (PK) | |
 | `course_id` | uuid (FK → courses.id) | |
-| `file_url` | text | Supabase Storage 中的文件地址 |
+| `file_url` | text | **Storage 对象路径**（`{user_id}/{course_id}/{syllabus_id}.{ext}`），**不是可直接 fetch 的 URL** —— 见下方说明 |
 | `file_name` | text | 原始文件名 |
 | `extract_method` | text (nullable) | `pdf_text` / `docx` / `pptx` / `manual`，为空表示尚未提取 |
 | `extract_status` | text | `pending` / `extracted` / `failed`，默认 `pending` |
@@ -118,6 +118,12 @@ Supabase Auth 的 `auth.users` 管认证，本表放业务扩展字段，`id` �
 | `created_at` / `updated_at` | timestamptz | |
 
 > **提取（extract）与解析（parse）分成两个状态**，是因为它们会分别失败：文件能读出文字但 LLM 调用失败 ≠ 文件本身读不出。用户在界面上要看到的信息完全不同 —— 前者提示重试，后者提示手动补充。
+
+> ⚠️ **`file_url` 存的是对象路径，不是 URL**（2026-09-02 澄清，P0-1-1）。
+> 桶 `syllabi` 是私有的，**不存在永久可访问的 URL**；签名 URL 会过期（本项目签 60 秒）。所以这里只能存路径，取文件时用 `storage.from('syllabi').createSignedUrl(file_url, 60)` **现签现用**。
+> 字段名沿用初版的 `file_url` 未作改名 —— Phase 0 无存量数据，改名成本极低，**若 Steven 认为 `storage_path` 更少歧义，一句话即可改**（一处迁移 + 本文件 + `lib/syllabi.ts`）。
+
+> ⚠️ **「上传未完成」的悬挂行**（P0-1-1 已知留白）：直传模式下先建行、后传文件（ADR-009），若上传中断会留下一条 `extract_status='pending'` 但没有实际文件的行。Phase 0 不额外做对账清理 —— P0-1-2 的提取步骤读不到文件时会把该行置为 `extract_status='failed'` + `extract_error`，由既有机制兜住**失败可见性**（CodingRules 7）。
 
 ### 3.4 `grade_components`（成绩构成）
 
@@ -438,6 +444,55 @@ CREATE INDEX idx_sync_runs_user_started ON sync_runs(user_id, started_at DESC);
 - `courses` 及其子表：策略基于**通过 `courses` 反查 `user_id`**（子表没有直接的 `user_id`）。
 - **验收标准**：用两个测试账号交叉验证，A 账号通过任何接口都取不到 B 账号的任何一行数据（P0-0-5）。
 
+### 7.3 Supabase Storage（syllabus 文件）
+
+> 本节 2026-09-02 随 P0-1-1 建立。此前 `Security-Privacy.md` 只写了「Supabase Storage（私有桶）」，桶名 / 路径 / 策略全是空白，而本文件第 1 节规定**未定义的表与字段一律不得创建** —— 先补 SSOT 再出迁移。
+
+**桶**
+
+| 项 | 值 | 说明 |
+|---|---|---|
+| 桶名 | `syllabi` | Phase 0 只有一个桶，不按课程分桶 |
+| `public` | **false**（私有桶） | 签名 URL 才能访问，见下 |
+| `file_size_limit` | `20971520`（20MB） | 与 `API-Contract.md` §3 的大小上限一致 |
+| `allowed_mime_types` | **null（不设）** | 见下方「为什么不设 MIME 白名单」 |
+
+**对象路径约定**
+
+```
+{user_id}/{course_id}/{syllabus_id}.{ext}
+例：3f2a…/b91c…/d84e….pdf
+```
+
+- **首段必须是 `auth.uid()`** —— 这是 RLS 判定的唯一依据，前端不可控，由服务端在签发上传票据时生成（ADR-009：前端上报的一切都不可信）。
+- 路径里带 `course_id` 是为了将来按课程批量清理（P0-3-2 删账号时按 `user_id` 前缀整段删即可，不需要逐条查库）。
+
+**`storage.objects` 的 RLS 策略（4 条）**
+
+```sql
+-- 判定式：路径首段 = 当前用户 uid
+(storage.foldername(name))[1] = auth.uid()::text
+```
+
+| 操作 | 策略名 |
+|---|---|
+| SELECT | `syllabi_objects_select_own` |
+| INSERT | `syllabi_objects_insert_own` |
+| UPDATE | `syllabi_objects_update_own` |
+| DELETE | `syllabi_objects_delete_own` |
+
+四条都带 `bucket_id = 'syllabi'` 限定，避免误伤其他桶。
+
+**为什么不设 `allowed_mime_types`**
+
+docx / pptx 的 MIME 类型在实际浏览器里极不稳定（常见 `application/octet-stream`、亦有空值）。若在桶层面做 MIME 白名单，会把**合法文件误拒**，且用户看到的错误与实际原因不符，排障成本高。
+
+因此：**类型校验以「文件扩展名」为准，在服务端做**（`lib/syllabi.ts`），桶层面只卡大小。
+
+**为什么不用公开桶**
+
+syllabus 可能含教师姓名、office hour 地址、评分细则等个人信息。公开桶 = 任何人拿到 URL 就能下载，等于把 RLS 绕过去了。私有桶 + 短时签名 URL 是唯一可接受方案。
+
 ---
 
 ## 8. Phase 2+ 预留（本次不建表）
@@ -463,3 +518,4 @@ CREATE INDEX idx_sync_runs_user_started ON sync_runs(user_id, started_at DESC);
 |---|---|---|
 | 2026-09-01 | 初版：10 张表 | — |
 | 2026-09-01 | 重写：新增 `sync_runs` / `llm_runs` / `parse_corrections`；新增派生规则章节（ADR-004）；新增同步语义章节；`courses` 增同步状态字段；`tasks` 增 `is_derived` / `external_updated_at` / `last_seen_at` / `is_deleted`；`canvas_credentials` 字段改名与状态机；token 有效期修正 | ADR-001（内核）、ADR-003（LLM 可插拔）、ADR-004（派生）、ADR-005（同步）、PRD F3/F4 |
+| 2026-09-02 | 新增 **7.3 Supabase Storage** 小节（桶 `syllabi`、路径约定、`storage.objects` 四条 RLS 策略、不设 MIME 白名单的理由）；澄清 §3.3 `file_url` 存的是**对象路径而非 URL**（私有桶无永久 URL）；记录「上传未完成的悬挂行」这一已知留白及其兜底机制 | P0-1-1、ADR-009（直传）、`Security-Privacy.md` 私有桶约定 |

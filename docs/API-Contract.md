@@ -145,23 +145,71 @@
 
 ## 3. Syllabus 上传与解析
 
-### `POST /api/v1/courses/:id/syllabus`
-`multipart/form-data`，字段 `file`。
+> ⚠️ **上传已改为两步式直传**（2026-09-02，[ADR-009](./Decisions.md#adr-009)）。初版写的 `multipart/form-data` 已作废：文件不再经过我们的服务端，否则平台请求体上限会让"20MB"这条约定立不住。
 
-校验：类型 `pdf | docx | pptx`；大小 **≤ 20MB**；失败分别返回 `415` / `413`。
+### `POST /api/v1/courses/:id/syllabus` — 第 1 步：取上传票据
+
+1. 本端点校验 → 签发 Storage 签名上传 URL → 建 `syllabi` 行；
+2. 浏览器拿票据直接 `uploadToSignedUrl` 传到 Storage（第 2 步，不经过本 API）。
+
+**请求**（`application/json`，不是 multipart）
 
 ```jsonc
-// response 201
+{ "fileName": "syllabus.pdf", "fileSize": 482133 }
+```
+
+**校验**：扩展名 `pdf | docx | pptx`（**不按 MIME 判定**，理由见 `Database.md` 7.3）；大小 **≤ 20MB**。
+
+| 失败情形 | 状态 | `code` |
+|---|---|---|
+| 缺字段 / 文件名或大小不合法 | 400 | `bad_request` |
+| 课程不存在或不属于当前用户 | 404 | `not_found`（[ADR-010](./Decisions.md#adr-010)） |
+| 扩展名不在白名单 | 415 | `unsupported_file_type` |
+| 超过 20MB | 413 | `file_too_large` |
+
+**响应 201**
+
+```jsonc
 {
-  "syllabusId": "…",
-  "fileName": "syllabus.pdf",
-  "extractStatus": "extracted",
-  "extractMethod": "pdf_text",
-  "pageCount": 6,
-  "previewText": "Course: Math 53 … (前 1000 字符)"   // 冷启动：立刻可见的文本预览
+  "syllabus": {
+    "id": "…",
+    "courseId": "…",
+    "filePath": "{user_id}/{course_id}/{syllabus_id}.pdf",   // Storage 对象路径，不是 URL
+    "fileName": "syllabus.pdf",
+    "extractMethod": null,
+    "extractStatus": "pending",
+    "extractError": null,
+    "pageCount": null,
+    "parseStatus": "pending",
+    "parseError": null,
+    "uploadedAt": "2026-09-02T…"
+  },
+  "upload": {
+    "bucket": "syllabi",
+    "path": "{user_id}/{course_id}/{syllabus_id}.pdf",
+    "token": "…",          // 有效期 2 小时（平台固定值）
+    "signedUrl": "https://…/storage/v1/object/upload/sign/…"
+  }
 }
 ```
-抽取失败（如扫描件）→ `extractStatus: "failed"` + `extractError`，**HTTP 仍返回 201**（文件是存下来了，只是抽不出文本）。前端据此走降级提示。
+
+> ⏳ **P0-1-2 待补**：文本提取（extract）做完后，本响应会多出 `previewText`（前 1000 字符），且 `extractStatus` 会变成 `extracted` / `failed`。
+> **P0-1-1 阶段这些恒为初始值**（`extractStatus: "pending"`），因为提取管线还没建。
+> 抽取失败（如扫描件）时 `extractStatus: "failed"` + `extractError`，**HTTP 仍返回 201** —— 文件是存下来了，只是抽不出文本。前端据此走降级提示，而不是当作上传失败。
+
+### `GET /api/v1/syllabi/:id/download` — 取回文件
+
+桶 `syllabi` 是私有的，**没有永久可访问的 URL**（`Database.md` 7.3），所以取文件必须现签短时签名 URL。
+
+```jsonc
+// response 200
+{
+  "downloadUrl": "https://…/storage/v1/object/sign/…",
+  "expiresAt": "2026-09-02T…"      // 签名 60 秒后过期，过期须重新请求本接口
+}
+```
+
+不存在或不属于当前用户 → `404`（[ADR-010](./Decisions.md#adr-010)）。
 
 ### `POST /api/v1/syllabi/:id/parse`
 触发 LLM 五板块抽取。**异步**：创建 `llm_runs` 记录后立即返回 `202`。
@@ -356,7 +404,8 @@
 | GET | `/api/v1/health` | 健康检查 | P0-0-6 |
 | GET/POST | `/api/v1/courses` | 课程列表 / 创建 | P0-1-7 |
 | GET/PATCH/DELETE | `/api/v1/courses/:id` | 课程详情 / 更新 / 归档 | P0-1-7, P0-1-8 |
-| POST | `/api/v1/courses/:id/syllabus` | 上传 syllabus | P0-1-1 |
+| POST | `/api/v1/courses/:id/syllabus` | 取上传票据（两步式直传第 1 步，**非 multipart**） | P0-1-1 |
+| GET | `/api/v1/syllabi/:id/download` | 签短时下载 URL（私有桶无永久 URL） | P0-1-1 |
 | POST | `/api/v1/syllabi/:id/parse` | 触发解析 | P0-1-4 |
 | GET | `/api/v1/syllabi/:id/parse-status` | 解析进度 | P0-1-11 |
 | POST | `/api/v1/syllabi/:id/reparse` | 重新解析 | P0-1-4 |
@@ -380,3 +429,5 @@
 | 日期 | 变更 | 依据 |
 |---|---|---|
 | 2026-09-01 | 初版 | `CodingRules.md`（Diff First、业务语义命名）、`Database.md`、`Sync-Strategy.md`、PRD F1-F6 |
+| 2026-09-02 | **§1.2 / §1.4 状态码调整**：Phase 0 不使用 403，「不属于当前用户」与「不存在」统一返回 404（文案「…不存在或无权访问」）。原「403 避免探测存在性」的**意图保留、手段改换** —— RLS 下要区分 403/404 必须用 service role 绕过 RLS 探测存在性，反而制造泄漏口子 | [ADR-010](./Decisions.md#adr-010)，Steven 拍板 |
+| 2026-09-02 | **§3 上传改为两步式直传**（multipart 作废）：`POST /api/v1/courses/:id/syllabus` 改为 JSON 入参 + 签发 Storage 签名上传 URL；新增 `GET /api/v1/syllabi/:id/download` 签短时下载 URL。同步标注 `extractStatus` / `previewText` 为 P0-1-2 待补 | [ADR-009](./Decisions.md#adr-009)、`Database.md` 7.3、P0-1-1 |
