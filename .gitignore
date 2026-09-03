@@ -33,3 +33,6 @@ next-env.d.ts
 
 # vercel
 .vercel
+
+# 临时脚本（冒烟 / 诊断路由 / 生成测试文件，一律 .tmp- 前缀，跑完即删）
+.tmp-*

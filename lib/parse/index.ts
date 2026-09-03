@@ -59,32 +59,32 @@ const MAX_SYLLABUS_CHARS = 30_000
 
 const SECTION_CONFIG: Record<
   ParseSection,
-  { schema: JSONSchema; schemaName: string; purpose: string }
+  { schema: JSONSchema; schemaName: string; purposeSuffix: string }
 > = {
   gradeComposition: {
     schema: GRADE_COMPOSITION_SCHEMA,
     schemaName: 'GradeComposition',
-    purpose: 'syllabus_parse_grade',
+    purposeSuffix: '_grade',
   },
   courseOutline: {
     schema: COURSE_OUTLINE_SCHEMA,
     schemaName: 'CourseOutline',
-    purpose: 'syllabus_parse_outline',
+    purposeSuffix: '_outline',
   },
   testDates: {
     schema: TEST_DATES_SCHEMA,
     schemaName: 'TestDates',
-    purpose: 'syllabus_parse_exam',
+    purposeSuffix: '_exam',
   },
   officeHours: {
     schema: OFFICE_HOURS_SCHEMA,
     schemaName: 'OfficeHours',
-    purpose: 'syllabus_parse_office_hours',
+    purposeSuffix: '_office_hours',
   },
   submissionPolicy: {
     schema: SUBMISSION_POLICY_SCHEMA,
     schemaName: 'SubmissionPolicy',
-    purpose: 'syllabus_parse_submission',
+    purposeSuffix: '_submission',
   },
 }
 
@@ -122,6 +122,14 @@ export type ParseSyllabusParams = {
   rawText: string | null
   /** 课程上下文，主要给考试日期提供年份锚点。 */
   context?: SyllabusContext
+  /**
+   * `llm_runs.purpose` 的前缀，默认 `syllabus_parse`，重解析时传 `syllabus_reparse`。
+   *
+   * 为什么要分开：重解析的典型场景是「换了 provider」或「改了 prompt」，
+   * 之后必须能回答"这次改动是变准了还是变糟了"。两类调用混在同一个 purpose 里，
+   * 就只能看到平均值，看不出改动前后。板块后缀由 `SECTION_CONFIG.purposeSuffix` 拼在后面。
+   */
+  purposePrefix?: string
 }
 
 /**
@@ -138,6 +146,8 @@ async function runSections(
   params: ParseSyllabusParams,
   text: string,
 ): Promise<ParsedSyllabusResult['sections']> {
+  const purposePrefix = params.purposePrefix ?? 'syllabus_parse'
+
   const runOne = async <T>(
     section: ParseSection,
     pick: (payload: Record<string, unknown>) => unknown,
@@ -145,7 +155,7 @@ async function runSections(
     const config = SECTION_CONFIG[section]
     const result = await runStructured<Record<string, unknown>>({
       userId: params.userId,
-      purpose: config.purpose,
+      purpose: `${purposePrefix}${config.purposeSuffix}`,
       promptVersion: PROMPT_VERSION,
       syllabusId: params.syllabusId ?? null,
       schema: config.schema,

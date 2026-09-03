@@ -4,6 +4,9 @@
  * 与 `API-Contract.md` §3 一致。DB 列名一律 snake_case，只出现在 `lib/syllabi.ts`。
  */
 
+import type { ParseSection } from '@/types/parse'
+import type { StoredSections } from '@/types/sections'
+
 /** 提取方式。为 null 表示尚未提取。 */
 export type ExtractMethod = 'pdf_text' | 'docx' | 'pptx' | 'manual'
 
@@ -80,4 +83,26 @@ export type SyllabusExtractResponse = {
    * 文件存下来了，只是读不出文字，不算请求失败。
    */
   previewText: string | null
+}
+
+/**
+ * `POST /api/v1/syllabi/:id/parse` 与 `/reparse` 的响应体（P0-1-5a）。
+ *
+ * ⚠️ HTTP 状态**恒为 200**（ADR-012）：五个板块部分失败也照常返回已成功的部分，
+ * 「解析失败」这件事体现在 `failedSections` 与 `syllabus.parseStatus` 上，不是 HTTP 错误。
+ */
+export type SyllabusParseResponse = {
+  /** 解析后的 syllabus 行（`parseStatus` / `parseError` 已更新）。 */
+  syllabus: Syllabus
+  /** 落库后的板块数据。**解析失败的板块没有键**，详见 `types/sections.ts`。 */
+  sections: StoredSections
+  /** 成功落库的板块名。前端据此决定展示哪几块、哪几块显示"解析失败，请手动补充"。 */
+  okSections: ParseSection[]
+  failedSections: Array<{ section: ParseSection; code: string; message: string }>
+  /** 输入文本的诊断信息。排查"为什么漏抽"的第一手资料。 */
+  meta: {
+    textLength: number
+    truncated: boolean
+    promptVersion: string
+  }
 }

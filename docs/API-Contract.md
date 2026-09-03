@@ -268,32 +268,58 @@
 **幂等**：已 `extracted` 的行**直接返回既有结果**，不重跑（提取只依赖文件内容，文件不可变）。
 
 ### `POST /api/v1/syllabi/:id/parse`
-触发 LLM 五板块抽取。**异步**：创建 `llm_runs` 记录后立即返回 `202`。
+
+触发 LLM 五板块抽取**并落库**。**同步返回 200**，不是 202 —— 见 [ADR-012](./Decisions.md#adr-012)。
 
 ```jsonc
-// response 202
-{ "runId": "…", "status": "processing" }
-```
-
-### `GET /api/v1/syllabi/:id/parse-status`
-前端**每 1.5 秒轮询一次**（P0-1-11 的进度可视化）。
-
-```jsonc
+// response 200
 {
-  "status": "processing",
-  "blocks": {
-    "gradeComponents":    "completed",
-    "outlineItems":       "processing",
-    "examDates":          "pending",
-    "officeHours":        "pending",
-    "submissionPolicies": "pending"
-  }
+  "syllabus": { "id": "…", "parseStatus": "completed", "parseError": null },
+  "sections": {
+    "gradeComposition": [
+      { "id": "…", "name": "Midterm", "weightPercent": 25, "notes": null,
+        "isConfirmed": false, "source": "syllabus", "sourceExcerpt": "Midterm: 25%" }
+    ],
+    "courseOutline": [ { "id": "…", "orderIndex": 1, "weekLabel": "Week 1", "topic": "…", "source": "syllabus", "sourceExcerpt": "…" } ],
+    "testDates":     [ { "id": "…", "examName": "Midterm 1", "examDate": "2026-10-15", "examTime": "7-9pm", "location": "…", "status": "confirmed", "isConfirmed": false, "source": "syllabus", "sourceExcerpt": "…" } ],
+    "officeHours":   [ { "id": "…", "personName": "GSI Lee", "dayOfWeek": "Tuesday", "startTime": "14:00", "endTime": "15:30", "location": "…", "source": "syllabus", "sourceExcerpt": "…" } ],
+    "submissionPolicy": [ { "id": "…", "description": "…", "platformName": "Gradescope", "source": "syllabus", "sourceExcerpt": "…" } ]
+  },
+  "okSections": ["gradeComposition", "courseOutline", "testDates", "officeHours", "submissionPolicy"],
+  "failedSections": [],
+  "meta": { "textLength": 5231, "truncated": false, "promptVersion": "v1" }
 }
 ```
-`status`: `pending` / `processing` / `completed` / `partial` / `failed`。**部分板块失败仍返回 `completed`/`partial`**，失败的板块前端显示"未能解析，请手动补充" —— 不允许整个解析失败就丢掉已成功的部分。
+
+> ⚠️ **`sections` 里只有解析成功的板块才有键。** 解析失败的板块**不给空数组** ——
+> 空数组会被前端当成"这份 syllabus 确实没有这块内容"，而"没解析出来"和"确实没有"是两件事。
+> 判断"有没有这块内容"请用 `okSections` + 数组长度，不要用 `"officeHours" in sections`。
+
+| 情况 | 状态 | code | 说明 |
+|---|---|---|---|
+| 未登录 | 401 | `unauthorized` | |
+| 非法 uuid | 400 | `bad_request` | |
+| 不存在或不属于当前用户 | 404 | `not_found` | [ADR-010](./Decisions.md#adr-010) |
+| 文本还没提取好 | 409 | `text_not_ready` | 上传流程第 3 拍没走完 |
+| 已解析完成 | 409 | `already_parsed` | 不再烧一次 LLM，要重跑走 `/reparse` |
+| 五个板块全失败 | **200** | — | `syllabus.parseStatus = "failed"`，原因在 `parseError` |
+| 部分板块失败 | **200** | — | `parseStatus = "completed"` + `parseError` 写明失败板块；成功部分照常落库 |
+
+> ⚠️ **`syllabi.parse_status` 只有 `completed` / `failed` 两态**，契约原写的 `partial` 不在 DB 的
+> CHECK 约束里（`pending / processing / completed / failed`），写进去会被数据库直接拒绝。
+> 部分失败的表达方式：`parse_status = 'completed'` + `parse_error` 写明失败了几块是哪几块。
+
+### `GET /api/v1/syllabi/:id/parse-status`
+
+⏸ **同步模式下本端点暂不实现**（归 P0-1-11）。同步返回时不存在"进行中"这个中间态，
+端点没有东西可查。若 P0-1-11 要做板块级进度可视化，需先改回异步编排，
+届时要先补一个「板块级进度」的存储落点（`llm_runs` 目前只有 `purpose` / `status`，
+没有板块维度）并解决 Vercel 上响应返回后 pending promise 被冻结的问题。
 
 ### `POST /api/v1/syllabi/:id/reparse`
-用当前 raw_text 重新解析（不重新上传文件），用于切了 LLM provider 或改了 prompt 之后重跑。响应同 `/parse`。
+用当前 raw_text 重新解析（不重新上传文件），用于切了 LLM provider 或改了 prompt 之后重跑。
+**无视 `parseStatus`，一定重跑**。响应同 `/parse`，但 `llm_runs.purpose` 的前缀是
+`syllabus_reparse`（首次解析是 `syllabus_parse`）—— 两类调用分开记，才能对比"这次改动是变准了还是变糟了"。
 
 ---
 
@@ -463,9 +489,9 @@
 | POST | `/api/v1/courses/:id/syllabus` | 取上传票据（两步式直传第 1 步，**非 multipart**） | P0-1-1 |
 | GET | `/api/v1/syllabi/:id/download` | 签短时下载 URL（私有桶无永久 URL） | P0-1-1 |
 | POST | `/api/v1/syllabi/:id/extract` | 提取文本（上传流程第 3 步，幂等） | P0-1-2 |
-| POST | `/api/v1/syllabi/:id/parse` | 触发解析 | P0-1-4 |
-| GET | `/api/v1/syllabi/:id/parse-status` | 解析进度 | P0-1-11 |
-| POST | `/api/v1/syllabi/:id/reparse` | 重新解析 | P0-1-4 |
+| POST | `/api/v1/syllabi/:id/parse` | 五板块抽取 + 落库（同步 200，[ADR-012](./Decisions.md#adr-012)） | P0-1-5a |
+| GET | `/api/v1/syllabi/:id/parse-status` | 解析进度 | ⏸ P0-1-11，同步模式下无中间态可查 |
+| POST | `/api/v1/syllabi/:id/reparse` | 强制重跑解析 | P0-1-5a |
 | PUT | `/api/v1/courses/:id/{grade-components,outline-items,exam-dates,office-hours,submission-policies}` | 五板块保存 + diff | P0-1-5, P0-1-6 |
 | GET | `/api/v1/tasks` | 总览任务列表 | P0-1-9, P0-2-11 |
 | POST/PATCH/DELETE | `/api/v1/tasks[/:id]` | 手动任务 CRUD / 标记完成 | P0-1-9 |

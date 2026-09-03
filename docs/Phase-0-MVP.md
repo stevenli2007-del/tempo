@@ -29,12 +29,15 @@
 
 ## 当前进度指针
 
-**当前 task**：`P0-1-5` 解析 API 路由 + 结果落库 + 修正 diff 存储
+**当前 task**：`P0-1-5a` 解析 API 路由 + 五板块落库（`/parse` / `/reparse`）
 
-> 🛑 **收工状态（2026-09-02 23:00，Steven 收工）**：P0-1-4 已验收通过，本日工作结束。
-> - **下一会话从 P0-1-5 开始**，开工提示见下方 P0-1-4 卡末尾（①②③④）。
-> - **⚠️ 本日有 3 个本地 commit 未 push**（`40d1f33` / `ebd9b8a` / 本条文档提交），下一会话开工前先 `git push origin main`。
-> - **P0-1-5 未动**：代码零改动，只在上一次会话里读过 `parse_corrections` DDL、`API-Contract.md` §parse/save、ADR-004、`tasks` 表 DDL。**开工时可重新评估是否拆卡**（面比较大：6 个端点 + 修正 diff + 考试派生任务）。
+> 🔵 **P0-1-5a 进行中（2026-09-03）** —— 代码已写完，tsc / lint / build 三项全绿，待 curl 冒烟 + Steven 验收。
+> - **P0-1-5 拆成 5a / 5b 两张卡（2026-09-03，Steven 拍板）**：5a = 解析 + 落库；5b = 5 个 `PUT` 保存端点 + `parse_corrections` diff + 考试派生任务。**task 编号不变**（P0-1-5 仍是一行），只在执行卡层面拆。
+> - **两个拍板**：① `/parse` **同步返回 200** 而非契约原写的 202 异步（[ADR-012](./Decisions.md#adr-012)）；② 拆卡，每卡做完等 Steven check 再做下一张。
+> - **`git push` 已完成**（2026-09-03 开工时）：`40d1f33` / `ebd9b8a` / `4dc8c3e` / `289f857` 已到 `origin/main`。
+
+> 🛑 **上一轮收工状态（2026-09-02 23:00，Steven 收工）**：P0-1-4 已验收通过。
+> - **P0-1-5a 已在 2026-09-03 开工**，开工提示见下方 P0-1-4 卡末尾（①②③④）。
 
 > 📌 **P0-1-4 五板块抽取 prompt v1 已验收通过 ✅（2026-09-02 晚，Steven 验收）**
 > - `types/parse.ts` + `lib/parse/`（schemas / prompts / index）已交付；`parseSyllabusSections()` 五板块并发调用、单块失败不影响其余。
@@ -162,7 +165,7 @@
 | **P0-1-2** | 文本提取管线（PDF / docx / pptx），抽不出时**明确降级提示**而非静默返回空 | Bud | P0-1-1 | 三种格式各测一份真实文件；扫描件走降级提示不崩溃 | ✅ |
 | **P0-1-3** | LLM provider 抽象层（`lib/llm`）：默认 DeepSeek adapter + JSON schema 结构化输出 + 错误处理 | Bud | P0-0-6 | 抽象层可用；切换 provider 只改配置不动业务代码（[ADR-003](./Decisions.md#adr-003)） | ✅ |
 | **P0-1-4** | 五板块抽取 prompt v1：Grade Composition / Course Outline / Test Dates / Office Hours / Submission Policy，**拆成独立抽取任务** | Bud | P0-1-3 | 每板块独立调用；输出符合 schema；缺失字段返回 null 不编造 | ✅ |
-| **P0-1-5** | 解析 API 路由 + 结果落库 + **修正 diff 存储**（保存原始解析 vs 修正后 + 差异字段） | Bud | P0-1-2, P0-1-4 | 数据库同时存有原始与修正版本，可追溯差异 | ⚪ |
+| **P0-1-5** | 解析 API 路由 + 结果落库 + **修正 diff 存储**（保存原始解析 vs 修正后 + 差异字段） | Bud | P0-1-2, P0-1-4 | 数据库同时存有原始与修正版本，可追溯差异 | 🔵 5a 进行中 / 5b 未开始 |
 | **P0-1-6** | 可编辑表单 UI：五个板块逐项编辑 / 补全 / 覆盖 + 保存 | Bud | P0-1-5 | 可修改任一字段并保存；TBD 状态可正常展示与编辑 | ⚪ |
 | **P0-1-7** | Workspace CRUD：创建（学期 + 课程名必填，编码/教师选填）、列表按学期分组、编辑、删除 | Bud | P0-0-6 | 建课后出现在总览页与列表；删除有二次确认 | ✅ |
 | **P0-1-8** | 课程详情页：展示五板块最终信息 | Bud | P0-1-6, P0-1-7 | 保存后的数据完整展示；缺失项显示 TBD 而非空白 | ⚪ |
@@ -305,6 +308,30 @@
   - **P0-1-5 验收时必须补做**：真实调一次 DeepSeek，确认 ① key 注入生效 ② adapter 在 Vercel runtime 跑通 ③ `llm_runs` 审计行落库。
 - **已知留白**：① 没有重试逻辑（Phase 0 由调用方决定是否重试，`retryable` 字段已给出依据）；② 没有并发/限流控制；③ `syllabus_parse` 的 prompt 本体在 P0-1-4。
 
+#### 🎫 P0-1-5a · 解析 API 路由 + 五板块落库（`/parse` / `/reparse`）
+
+- **做什么**：上传流程第 4 拍 —— 拿 `syllabi.raw_text` 调 LLM 抽五板块，**落进五张板块表**，返回带 id 的板块数据。
+- **依赖**：P0-1-2（文本）、P0-1-4（抽取）、P0-1-7（课程）。
+- **改哪些文件**：
+  - `types/sections.ts`（新）—— `StoredXxx` 五个「已落库记录」类型 + `StoredSections`（**键可选**：解析失败的板块不给空数组）
+  - `lib/{grade-components,course-outline-items,exam-dates,office-hours,submission-policies}.ts`（新）—— 各表的 `*_COLUMNS` 字面量 + `Row` 类型 + `toXxx()` + `toXxxInsert()`。**每张表只有自己这个文件知道 DB 列名**
+  - `lib/parse/persist.ts`（新）—— 落库编排：逐表「先删后插」，只处理 `sections.<k>.ok` 的板块
+  - `lib/parse/endpoint.ts`（新）—— `/parse` 与 `/reparse` 共用的处理逻辑（两个路由文件各 4 行）
+  - `app/api/v1/syllabi/[id]/{parse,reparse}/route.ts`（新）
+  - `lib/parse/index.ts` —— `SECTION_CONFIG.purpose` 拆成 `purposeSuffix`，新增 `purposePrefix` 入参（区分 `syllabus_parse` / `syllabus_reparse`）
+  - `types/syllabus.ts` —— 新增 `SyllabusParseResponse`
+- **🔴 关键约束（改动前必读）**：
+  1. **判断"有没有可落库的结果"看 `okSections.length`，不是 `ok`** —— 五块全成才 `ok=true`，部分成功是常态。
+  2. **`ExamDate.status` 由 `examDate` 派生**（`lib/parse/index.ts` 的 `normalizeExam()` 已做），落库时**不要重算**，直接沿用。同一件事算两遍迟早算出不一致。
+  3. **`lib/parse/index.ts` 不碰 DB** —— 落库只在 `persist.ts`。
+  4. **落库三条写入规则**：① 只对成功的板块动刀（失败的保留上一轮数据）；② 只删 `source='syllabus'` 的行（`manual` 是用户加的）；③ `is_confirmed=true` 的行不删（`grade_components` / `exam_dates` 两表有这个标记）。
+  5. **`parse_status` 只有 `completed` / `failed` 两态** —— 契约里的 `partial` 不在 DB CHECK 约束内，写进去会被拒。部分失败用 `parse_error` 表达。
+  6. **同步 200，不是 202**（[ADR-012](./Decisions.md#adr-012)）；`parseStatus` 已是 `completed` 时 `/parse` 返回 **409 `already_parsed`**，重跑走 `/reparse`。
+- **验收命令**：`NODE_OPTIONS= npx tsc --noEmit` ｜ `NODE_OPTIONS= npm run lint` ｜ `NODE_OPTIONS= npm run build`（新增 2 个 ƒ 路由）｜ `next start` + 会话 cookie 打 curl 冒烟。
+- **⚠️ 验收时必须补做 P0-1-3 / P0-1-4 的生产验证**：`lib/llm` 与 `lib/parse` 都是零 HTTP 出口的纯库层，此前只在本地验过，P0-1-5a 是第一个能打到它们的端点。要确认 ① key 注入生效 ② adapter 在 Vercel runtime 跑通 ③ `llm_runs` 审计行落库。
+- **已知留白**：① **无跨表事务**（supabase-js 不支持），逐表先删后插，中途失败会留下部分写入（失败即 500，重试可自愈）；② `llm_run_id` 归因不在五张板块表上（表无此列），只在 `parse_corrections`（P0-1-5b）；③ `GET /parse-status` 不实现（同步模式无中间态）。
+- **P0-1-5b 接着做**：5 个 `PUT` 板块保存端点 + `parse_corrections` diff + `exam-dates → tasks` 派生（`syncExamToTask()`）。
+
 #### 🎫 P0-1-7 · Workspace CRUD（课程创建 / 列表 / 编辑 / 删除）· ✅ 已完成，勿重做
 - **做什么**：课程 CRUD。列表按学期分组展示；删除 = 归档，带二次确认。
 - **改哪些文件**：
@@ -416,3 +443,4 @@ P0-0 基础设施
 | 2026-09-02 | **P0-1-3 LLM provider 抽象层完成 ✅**。新增 `lib/llm/` 六件套：`index.ts`（`getLLMProvider()`）/ `types.ts`（`LLMProvider` + `LLMResult<T>` + `LLMErrorCode` + JSON Schema 子集）/ `env.ts`（缺 key、坏 timeout 抛明确中文 `LLMConfigError`）/ `schema.ts`（`validateJsonSchema()`，报错带 JSON Pointer）/ `providers/deepseek.ts`（原生 fetch，不引厂商 SDK）/ `run.ts`（`runStructured()` 每次调用写 `llm_runs`，成功失败都写）。抽象层硬性要求 5 条全部满足（只依赖接口、切换只改配置、厂商异常不穿透、每次调用记审计、结构化输出走 schema 禁正则解析）。**实测踩到一个真教训**：请求 `deepseek-chat` 回来的是 `deepseek-v4-flash`，因此 `llm_runs.model` 记「实际服务的模型」而非「请求时填的模型」，否则按模型维度对比准确率会失真。自测全绿：配置 4 类错误各有明确中文报错、schema 校验器 7 用例、真实调用成功（MATH 53 权重 4 项全对）、`schema_mismatch` / `provider_error` / `request_failed` 三条错误分支的 `retryable` 判定正确、审计成功行与失败行都落库、**RLS 跨用户隔离**（user2 查得 0 行 / user1 得 3 行）。`TechStack.md` §5.2 同步补齐实际文件结构、环境变量表与错误码表。进度指针推进至 `P0-1-4` 五板块抽取 prompt v1 |
 
 | 2026-09-02 | **P0-1-4 五板块抽取 prompt v1 完成 ✅**。新增 `types/parse.ts` + `lib/parse/`（`schemas.ts` / `prompts.ts` / `index.ts`），`parseSyllabusSections()` 五板块**并发**独立调用、单块失败不影响其余。核心设计 **`sourceExcerpt`**：每个条目带 ≤200 字原文逐字摘录，逼模型给依据 + 用户可核对 + 直接对应五张表的 `source_excerpt` 列。日期处理三条硬规则：`ExamDate.status` 由 `examDate` **派生**（不让模型填，否则必出现"日期 null 但 status=confirmed"）、日期必须 `YYYY-MM-DD` 否则置 null 退化 TBD、文本少于 200 字符直接 `text_too_short` **不发起 LLM 调用**。**自测埋了两个反幻觉陷阱**（Final 只写"按校历安排"、practical exam 日期见 bCourses），模型两次都正确返回 null + tbd，未编造日期；缺 office hours 的 syllabus 该块返回空数组而非编造。**实测踩坑**：未写语言规则时模型把 submission policy 的 `description` 翻成中文，与逐字字段的英文不一致 —— 补铁律「保留原文语言不翻译」（翻译不可逆，抽取层丢的原文找不回来）。自测全绿，进度指针推进至 `P0-1-5` 解析 API 路由 + 落库 + 修正 diff |
+| 2026-09-03 | **P0-1-5 拆为 5a / 5b 两张执行卡**（Steven 拍板，编号不变）。**P0-1-5a 开工并完成代码**：新增 `types/sections.ts`、五张板块表的 DB 映射层 `lib/{grade-components,course-outline-items,exam-dates,office-hours,submission-policies}.ts`、落库编排 `lib/parse/persist.ts`、共用逻辑 `lib/parse/endpoint.ts`、`POST /api/v1/syllabi/:id/{parse,reparse}` 两个端点。**契约偏离两项并已升格为 [ADR-012](./Decisions.md#adr-012)**：① `/parse` 同步返回 200（契约原写 202 异步 + 轮询，但实测五板块并发仅 3.2s，且 `llm_runs` 没有板块级进度的存储落点）；② `syllabi.parse_status` 只有 completed/failed 两态，契约原写的 `partial` 不在 DB CHECK 约束内。`GET /parse-status` 标注为 P0-1-11 待定。落库三条写入规则写进 5a 卡：**只动成功的板块 / 只删 `source='syllabus'` 的行 / `is_confirmed=true` 的行不删**。开工前已 push 4 个本地 commit 到 `origin/main` |
