@@ -3,6 +3,7 @@ import { redirect } from 'next/navigation'
 import { Button } from '@/components/ui/button'
 import { CourseCard } from '@/components/courses/course-card'
 import type { UpcomingTaskView } from '@/components/courses/course-card'
+import { DemoControls } from '@/components/courses/demo-controls'
 import { CourseCreatePanel } from '@/components/courses/course-create-panel'
 import { TaskList } from '@/components/tasks/task-list'
 import type { TaskListItem } from '@/components/tasks/task-list'
@@ -170,6 +171,8 @@ export default async function DashboardPage() {
   const courses = data ? (data as CourseRow[]).map(toCourse) : []
   const groups = groupBySemester(courses)
   const email = user.email ?? '（未设置邮箱）'
+  /** 是否已有示例课程（决定展示「先看看效果」入口还是「清空示例数据」）。 */
+  const hasDemo = courses.some((course) => course.isDemo)
 
   const { byCourse: syllabiByCourse, error: syllabusError } = await loadLatestSyllabi(
     supabase,
@@ -198,6 +201,7 @@ export default async function DashboardPage() {
           <span className="text-sm font-semibold">Tempo</span>
           <div className="flex items-center gap-3">
             <span className="text-sm text-muted-foreground">{email}</span>
+            {hasDemo ? <DemoControls hasDemo={hasDemo} variant="inline" /> : null}
             <form action={signOut}>
               <Button type="submit" variant="outline" size="sm">
                 登出
@@ -261,11 +265,7 @@ export default async function DashboardPage() {
         ) : null}
 
         {!error && courses.length === 0 ? (
-          <div className="rounded-xl border border-dashed border-border p-10 text-center">
-            <p className="text-sm text-muted-foreground">
-              还没有课程。点右上角「新建课程」，从一门课开始。
-            </p>
-          </div>
+          <DemoControls hasDemo={hasDemo} variant="cta" />
         ) : null}
 
         {groups.map((group) => (

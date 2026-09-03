@@ -98,9 +98,16 @@ export function CourseCard({ course, syllabus, upcomingTasks }: CourseCardProps)
     <div className="rounded-xl border border-border bg-card p-5 shadow-sm">
       <div className="flex items-start justify-between gap-4">
         <Link href={`/courses/${course.id}`} className="min-w-0 flex-1">
-          <h3 className="truncate text-base font-semibold text-card-foreground underline-offset-4 hover:underline">
-            {course.courseName}
-          </h3>
+          <div className="flex items-center gap-2">
+            <h3 className="truncate text-base font-semibold text-card-foreground underline-offset-4 hover:underline">
+              {course.courseName}
+            </h3>
+            {course.isDemo ? (
+              <span className="shrink-0 rounded-full bg-primary/10 px-2 py-0.5 text-xs font-medium text-primary">
+                示例
+              </span>
+            ) : null}
+          </div>
           <p className="mt-1 truncate text-sm text-muted-foreground">
             {meta || '未填写编码与教师'}
           </p>
