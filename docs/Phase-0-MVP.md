@@ -29,15 +29,16 @@
 
 ## 当前进度指针
 
-**当前 task**：`P0-1-6` 五板块编辑 UI（P0-1-5b 已代码完成 + 本地冒烟 56/56，待 Steven 验收）
+**当前 task**：`P0-1-6` 五板块编辑 UI（P0-1-5b 已代码完成 + 本地 56/56 + 生产 18/18，待 Steven 验收）
 
 > 📌 **P0-1-5a 已验收通过 ✅（2026-09-03，Steven 验收；测试账号已清理）**。代码 commit `bcd5a20` + 文档 commit（生产验证 14/14 + §10 部署延迟条目），均已 push。本地冒烟 44/44、生产验证 14/14（真实调 DeepSeek 4.4s、`llm_runs` 落 5 条 success）。
 >
-> 🟦 **P0-1-5b 状态（2026-09-03，代码完成 / 本地自测通过 / Steven 验收待做）**：
+> 🟦 **P0-1-5b 状态（2026-09-03，代码完成 / 自测通过（本地 56/56 + 生产 18/18）/ Steven 验收待做）**：
 > - **已交付**：5 个 `PUT /api/v1/courses/:id/{板块}` 端点 + `lib/parse/save.ts`（编排）+ `lib/parse/corrections.ts`（字段级 diff + 归因）+ `lib/sync/exam-tasks.ts`（`syncExamToTask()`）+ 五张表的保存校验/映射函数 + `lib/parse/persist.ts` 接入派生（解析后也产 task）。
 > - **本地冒烟 56/56**（`next build` + `next start` + 两个测试账号）：五板块正常路径、幂等、diff 三类修正、exam 派生（tbd → null / status 保留 / 删除联动 / 当日 23:59:59）、真实 `/parse` 归因（`llm_run_id` 非 null 且真实存在）、7 条异常路径（401/400×4/404/越权）+ 归档 404。
+> - **生产验证 18/18**（2026-09-03，`a959d45` 已 push 且部署 success 后实跑 `tempo-six-neon.vercel.app`）：路由存在、grade-components 全流程含 edit 修正落库、exam 派生、真实 `/parse` + 归因、401/跨用户 404/非法日期 400、数据清理。临时冒烟脚本已删。
 > - **实现期决策（已写进 `API-Contract.md` §4 变更记录，无需 ADR）**：① request 不含 `status`（由 examDate 派生）；② 修正粒度 = 字段级（add/delete 也按字段拆，`order_index` 除外）；③ 归档课程保存 → 404；④ 归因取「最新 syllabus 最近一次成功解析」。
-> - **待办**：Steven push 后生产验证 + 测试账号 `p15b-a/p15b-b@test.dev` 留在 auth.users 待手动删（业务数据已清）。
+> - **待办**：Steven 验收 P0-1-5b；测试账号 `p15b-a/p15b-b@test.dev`（本地）+ `p15b-prod/p15b-prod2@test.dev`（生产）留在 auth.users 待手动删（业务数据均已清）。
 >
 > 🟦 **P0-1-6 开工提示**：后端全部就绪，纯前端 —— 编辑表单拿 `Stored*`（带 id），提交 `Save*Item`（见 `types/sections.ts`）；保存调 `PUT` 对应板块端点；`ExamDate.status` 不用表单里放字段（服务端派生，传了也忽略）；大纲条目不用做排序输入（数组顺序即 `orderIndex`）。`source='manual'` 的行要能看出"手动添加"标记。
 
@@ -343,7 +344,7 @@
 - **已知留白**：① **无跨表事务**（supabase-js 不支持），逐表先删后插，中途失败会留下部分写入（失败即 500，重试可自愈）；② `llm_run_id` 归因不在五张板块表上（表无此列），只在 `parse_corrections`（P0-1-5b）；③ `GET /parse-status` 不实现（同步模式无中间态）。
 - **P0-1-5b 接着做**：5 个 `PUT` 板块保存端点 + `parse_corrections` diff + `exam-dates → tasks` 派生（`syncExamToTask()`）。
 
-#### 🎫 P0-1-5b · 五板块保存端点 + 修正 diff + 考试派生 · 🟡 代码完成 / 本地自测通过 / 待 Steven 验收
+#### 🎫 P0-1-5b · 五板块保存端点 + 修正 diff + 考试派生 · 🟡 代码完成 / 本地 56/56 + 生产 18/18 / 待 Steven 验收
 - **做什么**：`PUT /api/v1/courses/:id/{grade-components,outline-items,exam-dates,office-hours,submission-policies}`（API-Contract §4），全量替换 + 幂等 + 字段级 diff 留痕 + exam → tasks 派生。
 - **改哪些文件**：
   - `lib/parse/save.ts`（新）—— 共用编排 `handleSectionSave()`：课程校验 → 解析输入 → 读现有行 → diff → 插/改/删 → 写修正 → exam 派生 → 返回 `{ data: [...] }`。路由文件只是 15 行的分发壳。
@@ -359,7 +360,8 @@
   3. **修正只在 `parse_corrections`**（五张板块表无 `llm_run_id` 列，ADR-012）；无 syllabus 的课程归因为 null，不阻断保存。
   4. **`syncExamToTask()` 是 `tasks` 里考试派生行的唯一写入口**（Database.md 5.3），别在别处零散 insert。
 - **自测（Bud，2026-09-03）**：`tsc` ✅ ｜ `lint` ✅ ｜ `build` ✅（5 个新 ƒ 路由）｜ 冒烟 **56/56**（真实 `/parse` 一条：syllabus 来源行编辑后修正带非 null `llm_run_id` 且在 `llm_runs` 真实存在）。
-- **已知留白**：① 无跨表事务（与 5a 同），插/改/删 + 修正 + 派生分步执行，中途 500 重试自愈；② 测试账号 `p15b-a/p15b-b@test.dev` 留在 auth.users 待 Steven 手动删（业务数据已清干净）；③ 生产验证待 push 后做（Vercel 部署延迟 10+ 分钟是常态）。
+- **✅ 生产验证（2026-09-03，`a959d45` 部署 success 后实跑）**：冒烟 **18/18**——路由存在、grade-components 全流程（含 edit 修正 `weight_percent 20→25` 落库）、exam 派生（23:59:59 / tbd→null / 派生标记）、真实 `/parse` + 归因（`llm_run_id` / `syllabus_id` 均 non-null）、未登录 401 / 跨用户 404 / 非法日期 400、测试数据清干净。本次部署创建很快（未复现 13 分钟延迟）。
+- **已知留白**：① 无跨表事务（与 5a 同），插/改/删 + 修正 + 派生分步执行，中途 500 重试自愈；② 测试账号 `p15b-a/p15b-b@test.dev` + 生产 `p15b-prod/p15b-prod2@test.dev` 留在 auth.users 待 Steven 手动删（业务数据已清干净）。
 
 #### 🎫 P0-1-7 · Workspace CRUD（课程创建 / 列表 / 编辑 / 删除）· ✅ 已完成，勿重做
 - **做什么**：课程 CRUD。列表按学期分组展示；删除 = 归档，带二次确认。
@@ -474,3 +476,4 @@ P0-0 基础设施
 | 2026-09-02 | **P0-1-4 五板块抽取 prompt v1 完成 ✅**。新增 `types/parse.ts` + `lib/parse/`（`schemas.ts` / `prompts.ts` / `index.ts`），`parseSyllabusSections()` 五板块**并发**独立调用、单块失败不影响其余。核心设计 **`sourceExcerpt`**：每个条目带 ≤200 字原文逐字摘录，逼模型给依据 + 用户可核对 + 直接对应五张表的 `source_excerpt` 列。日期处理三条硬规则：`ExamDate.status` 由 `examDate` **派生**（不让模型填，否则必出现"日期 null 但 status=confirmed"）、日期必须 `YYYY-MM-DD` 否则置 null 退化 TBD、文本少于 200 字符直接 `text_too_short` **不发起 LLM 调用**。**自测埋了两个反幻觉陷阱**（Final 只写"按校历安排"、practical exam 日期见 bCourses），模型两次都正确返回 null + tbd，未编造日期；缺 office hours 的 syllabus 该块返回空数组而非编造。**实测踩坑**：未写语言规则时模型把 submission policy 的 `description` 翻成中文，与逐字字段的英文不一致 —— 补铁律「保留原文语言不翻译」（翻译不可逆，抽取层丢的原文找不回来）。自测全绿，进度指针推进至 `P0-1-5` 解析 API 路由 + 落库 + 修正 diff |
 | 2026-09-03 | **P0-1-5 拆为 5a / 5b 两张执行卡**（Steven 拍板，编号不变）。**P0-1-5a 开工并完成代码**：新增 `types/sections.ts`、五张板块表的 DB 映射层 `lib/{grade-components,course-outline-items,exam-dates,office-hours,submission-policies}.ts`、落库编排 `lib/parse/persist.ts`、共用逻辑 `lib/parse/endpoint.ts`、`POST /api/v1/syllabi/:id/{parse,reparse}` 两个端点。**契约偏离两项并已升格为 [ADR-012](./Decisions.md#adr-012)**：① `/parse` 同步返回 200（契约原写 202 异步 + 轮询，但实测五板块并发仅 3.2s，且 `llm_runs` 没有板块级进度的存储落点）；② `syllabi.parse_status` 只有 completed/failed 两态，契约原写的 `partial` 不在 DB CHECK 约束内。`GET /parse-status` 标注为 P0-1-11 待定。落库最终规则（初版「`is_confirmed=true` 不删」被冒烟实测推翻，会造成重复数据）：**只动成功的板块 / 只删 `source='syllabus'` 的行整体替换 / `manual` 来源保留**。`GET /parse-status` 标注为 P0-1-11 待定。本地冒烟 44/44，生产验证 14/14（`/parse` 端到端 4.4s，`llm_runs` 落 5 条 success，`deepseek-v4-flash`），P0-1-3/1-4 挂账的生产验证就此关闭。**Steven 验收通过，测试账号已清理**，进度指针推进至 P0-1-5b（开工提示见进度指针区） |
 | 2026-09-03 | **P0-1-5b 代码完成（待 Steven 验收）**：5 个 `PUT` 板块保存端点 + 字段级 diff（`lib/parse/corrections.ts`，edit/add/delete 三类统一，`order_index` 除外）+ `syncExamToTask()`（`lib/sync/exam-tasks.ts`，ADR-004 唯一落点）+ `persist.ts` 接入派生（解析后也产 task）。实现期决策（写入 `API-Contract.md` §4 变更记录，无需 ADR）：request 不含 `status`（由 examDate 派生）、response 为 `{ data: [...] }`、归档课程保存 404、归因取「最新 syllabus 最近一次成功解析」。本地冒烟 56/56（含真实 `/parse` 归因验证）。进度指针推进至 P0-1-6（纯前端，后端全部就绪） |
+| 2026-09-03 | **P0-1-5b 生产验证通过**：两个 commit（代码 `638a331` + 文档）push 后 Vercel 部署 success，生产冒烟 **18/18**（路由存在 / grade-components 全流程含 edit 修正 / exam 派生 23:59:59 + tbd→null / 真实 `/parse` + `llm_run_id`·`syllabus_id` 归因 / 401 / 跨用户 404 / 非法日期 400 / 数据清理）。临时脚本已删，测试账号留 auth.users 待 Steven 手动删（本地 `p15b-a/b@test.dev`、生产 `p15b-prod/prod2@test.dev`） |
