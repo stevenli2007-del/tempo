@@ -9,7 +9,7 @@ import type { Course } from '@/types/course'
 import type { Syllabus } from '@/types/syllabus'
 
 /**
- * 课程卡片（P0-1-7 建，P0-1-8 瘦身）。
+ * 课程卡片（P0-1-7 建，P0-1-8 瘦身，P0-1-9 加近期任务）。
  *
  * P0-1-8 的拍板：**全部操作搬到详情页**（`app/(routes)/courses/[id]`）——
  * 上传 / 解析 / 五板块编辑 / 课程元信息编辑都在那儿，卡片只做摘要 + 入口。
@@ -19,13 +19,51 @@ import type { Syllabus } from '@/types/syllabus'
  * 且归档语义下风险可控（有二次确认）。
  */
 
+/**
+ * 卡片上「近期任务」的视图模型。
+ *
+ * 日期由服务端格式化成 label 传进来，而不是给 ISO 串让客户端自己转 ——
+ * 服务端（UTC）与浏览器（用户时区）渲染结果不同会导致 hydration mismatch。
+ */
+export interface UpcomingTaskView {
+  id: string
+  title: string
+  /** null = 日期待定（TBD）。 */
+  dueLabel: string | null
+  isOverdue: boolean
+}
+
 interface CourseCardProps {
   course: Course
   /** 该课程最新一份 syllabus；没有则为 null。 */
   syllabus: Syllabus | null
+  /**
+   * 近期未完成的任务（最多 2 条）。已完成的不算 —— 卡片的语义是"接下来要做什么"。
+   *
+   * `null` 表示**没能加载到**，不是"这门课没有任务"。两者在 UI 上必须分开：
+   * 把加载失败渲染成"没有任务"等于静默的错误数据（CodingRules 7）。
+   */
+  upcomingTasks: UpcomingTaskView[] | null
 }
 
-export function CourseCard({ course, syllabus }: CourseCardProps) {
+function UpcomingTasks({ tasks }: { tasks: UpcomingTaskView[] }) {
+  return (
+    <ul className="mt-2 space-y-1">
+      {tasks.map((task) => (
+        <li key={task.id} className="flex items-baseline gap-2 text-xs">
+          <span className="truncate text-foreground/80">{task.title}</span>
+          <span
+            className={`shrink-0 ${task.isOverdue ? 'text-destructive' : 'text-muted-foreground'}`}
+          >
+            {task.dueLabel ?? '日期待定'}
+          </span>
+        </li>
+      ))}
+    </ul>
+  )
+}
+
+export function CourseCard({ course, syllabus, upcomingTasks }: CourseCardProps) {
   const router = useRouter()
   const [isConfirmingDelete, setIsConfirmingDelete] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -67,6 +105,14 @@ export function CourseCard({ course, syllabus }: CourseCardProps) {
             {meta || '未填写编码与教师'}
           </p>
           <p className="mt-2 text-xs text-muted-foreground">{syllabusStatusText(syllabus)}</p>
+
+          {upcomingTasks === null ? (
+            <p className="mt-2 text-xs text-destructive">近期任务加载失败</p>
+          ) : upcomingTasks.length === 0 ? (
+            <p className="mt-2 text-xs text-muted-foreground/70">近期没有待办</p>
+          ) : (
+            <UpcomingTasks tasks={upcomingTasks} />
+          )}
         </Link>
 
         <button

@@ -13,6 +13,7 @@ import type {
   StoredSubmissionPolicy,
 } from '@/types/sections'
 import type { Syllabus } from '@/types/syllabus'
+import type { UpcomingTask } from '@/types/task'
 
 /** 同步状态。取值与 courses.sync_status 的 CHECK 约束一致（迁移 20260902003000 :59-60）。 */
 export type CourseSyncStatus = 'never' | 'success' | 'failed'
@@ -31,6 +32,17 @@ export type Course = {
   lastSyncedAt: string | null
   syncStatus: CourseSyncStatus
   syncError: string | null
+  /**
+   * 该课程近期未完成的任务（最多 2 条，契约 §2 列表响应字段）。
+   *
+   * P0-1-9 才真正返回 —— 契约里早写了这个字段，但端点此前一直没给。
+   *
+   * **为什么是可选的**：字段缺失表示「没能加载到」，而不是「这门课没有任务」。
+   * 这两件事在 UI 上必须分开（CodingRules 7：静默的空数据比明确的错误更危险），
+   * 所以查失败时宁可不填这个字段，也不能填 `[]` 假装没有任务。
+   * `toCourse()` 是纯行映射，不带这个字段；由调用方在查到后附加。
+   */
+  upcomingTasks?: UpcomingTask[]
 }
 
 /** 创建课程的输入：semester / courseName 必填，其余选填。 */

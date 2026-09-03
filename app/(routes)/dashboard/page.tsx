@@ -2,18 +2,90 @@ import { redirect } from 'next/navigation'
 
 import { Button } from '@/components/ui/button'
 import { CourseCard } from '@/components/courses/course-card'
+import type { UpcomingTaskView } from '@/components/courses/course-card'
 import { CourseCreatePanel } from '@/components/courses/course-create-panel'
+import { TaskList } from '@/components/tasks/task-list'
+import type { TaskListItem } from '@/components/tasks/task-list'
 import { signOut } from '@/lib/auth/actions'
 import { COURSE_COLUMNS, toCourse } from '@/lib/courses'
 import type { CourseRow } from '@/lib/courses'
 import { SYLLABUS_COLUMNS, toSyllabus } from '@/lib/syllabi'
 import type { SyllabusRow } from '@/lib/syllabi'
+import { loadTasks, loadUpcomingTasks } from '@/lib/tasks'
 import { createClient } from '@/lib/supabase/server'
 import type { Course } from '@/types/course'
 import type { Syllabus } from '@/types/syllabus'
+import type { Task, UpcomingTask } from '@/types/task'
 
 export const metadata = {
   title: '我的课程 · Tempo',
+}
+
+/** 总览页任务窗口（天）。与 `GET /api/v1/tasks` 的默认 range 一致。 */
+const OVERVIEW_RANGE_DAYS = 7
+/** 一次最多展示多少条。Phase 0 任务量在几十条以内，不做分页 UI。 */
+const OVERVIEW_LIMIT = 50
+
+/**
+ * 日期标签用固定时区（UTC）在**服务端**算好。
+ *
+ * 若把 ISO 串交给客户端组件用 `toLocaleDateString()` 渲染，服务端（UTC）与浏览器
+ * （用户本地时区）会得出不同结果 → hydration mismatch。
+ * 代价：处在 UTC-7 的用户看到的日期边界会与本地时间差至多几小时。
+ * Phase 0 接受 —— 考试派生时间统一是当日 23:59:59 UTC，按 UTC 取日期不会出现"差一天"。
+ */
+const DUE_FORMATTER = new Intl.DateTimeFormat('zh-CN', {
+  month: 'numeric',
+  day: 'numeric',
+  weekday: 'short',
+  timeZone: 'UTC',
+})
+
+function formatDue(
+  iso: string | null,
+  now: Date,
+): { label: string | null; isOverdue: boolean } {
+  if (iso === null) {
+    // null = 未知日期（考试 TBD）。返回 null 让展示层渲染成「日期待定」，
+    // 不编一个假日期出来（Database.md 3.9）。
+    return { label: null, isOverdue: false }
+  }
+  const due = new Date(iso)
+  if (Number.isNaN(due.getTime())) {
+    return { label: null, isOverdue: false }
+  }
+  return { label: DUE_FORMATTER.format(due), isOverdue: due.getTime() < now.getTime() }
+}
+
+/** 卡片近期任务 → 视图模型。`undefined`（没查到）与 `[]`（确实没有）要保持区分。 */
+function toUpcomingViews(
+  tasks: UpcomingTask[] | undefined,
+  now: Date,
+): UpcomingTaskView[] | null {
+  if (!tasks) {
+    return null
+  }
+  return tasks.map((task) => {
+    const { label, isOverdue } = formatDue(task.dueDate, now)
+    return { id: task.id, title: task.title, dueLabel: label, isOverdue }
+  })
+}
+
+function toListItems(tasks: Task[], now: Date): TaskListItem[] {
+  return tasks.map((task) => {
+    const { label, isOverdue } = formatDue(task.dueDate, now)
+    return {
+      id: task.id,
+      courseId: task.courseId,
+      courseName: task.courseName,
+      title: task.title,
+      dueLabel: label,
+      // 已完成的不标逾期：它已经是历史，不需要"催"。
+      isOverdue: isOverdue && task.status === 'pending',
+      status: task.status,
+      isDerived: task.isDerived,
+    }
+  })
 }
 
 // 依赖用户 session，绝不能被静态预渲染。
@@ -104,6 +176,21 @@ export default async function DashboardPage() {
     courses.map((course) => course.id),
   )
 
+  // 任务数据：总览列表 + 卡片近期任务。两者互不依赖，并行发。
+  // 课程 id 沿用上面已查到的未归档课程，不再单独查一次。
+  const now = new Date()
+  const courseIds = courses.map((course) => course.id)
+  const [{ byCourse: upcomingByCourse, error: upcomingError }, overview] = await Promise.all([
+    loadUpcomingTasks(supabase, courseIds),
+    loadTasks(supabase, {
+      courseIds,
+      until: new Date(now.getTime() + OVERVIEW_RANGE_DAYS * 86_400_000).toISOString(),
+      limit: OVERVIEW_LIMIT,
+      offset: 0,
+    }),
+  ])
+  const tasksError = upcomingError ?? overview.error
+
   return (
     <main className="min-h-screen bg-background text-foreground">
       <header className="border-b border-border">
@@ -147,6 +234,31 @@ export default async function DashboardPage() {
           </div>
         ) : null}
 
+        {tasksError ? (
+          <div role="alert" className="rounded-lg border border-destructive/40 bg-card p-4">
+            <p className="text-sm font-medium text-destructive">任务列表加载失败</p>
+            <p className="mt-1 text-sm text-muted-foreground">
+              课程与 syllabus 不受影响，但下面的近期任务可能不完整。{tasksError}
+            </p>
+          </div>
+        ) : null}
+
+        {!error && courses.length > 0 ? (
+          <section className="space-y-3">
+            <div className="flex items-baseline justify-between gap-4">
+              <h2 className="text-lg font-semibold">最近要做的事</h2>
+              <p className="text-xs text-muted-foreground">
+                {OVERVIEW_RANGE_DAYS} 天内到期 · 已逾期的也会留在这里
+              </p>
+            </div>
+            <TaskList items={toListItems(overview.tasks, now)} />
+            {overview.total > overview.tasks.length ? (
+              <p className="text-xs text-muted-foreground">
+                还有 {overview.total - overview.tasks.length} 条没显示（一次最多 {OVERVIEW_LIMIT} 条）
+              </p>
+            ) : null}
+          </section>
+        ) : null}
 
         {!error && courses.length === 0 ? (
           <div className="rounded-xl border border-dashed border-border p-10 text-center">
@@ -165,6 +277,12 @@ export default async function DashboardPage() {
                   key={course.id}
                   course={course}
                   syllabus={syllabiByCourse.get(course.id) ?? null}
+                  upcomingTasks={toUpcomingViews(
+                    // 任务查询失败时 byCourse 是空 Map，get 出来是 undefined → 传 null
+                    // → 卡片显示「加载失败」而不是「近期没有待办」。
+                    tasksError ? undefined : upcomingByCourse.get(course.id),
+                    now,
+                  )}
                 />
               ))}
             </div>

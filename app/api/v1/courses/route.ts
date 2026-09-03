@@ -1,12 +1,14 @@
 import { COURSE_COLUMNS, parseCreateCourseInput, toCourse, toCourseInsert } from '@/lib/courses'
 import type { CourseRow } from '@/lib/courses'
+import { loadUpcomingTasks } from '@/lib/tasks'
 import { getCurrentUser, internalError, jsonError, jsonOk } from '@/lib/api/response'
 
 /**
  * 课程集合端点（API-Contract.md 第 2 节）。
  *
- * GET  列出当前用户未归档的全部课程（扁平数组，前端按学期分组展示）
- * POST 新建课程
+ * GET  列出当前用户未归档的全部课程（扁平数组，前端按学期分组展示），
+ *      每门课附带 `upcomingTasks`（P0-1-9 补齐契约 §2 里早就声明但一直没返回的字段）
+ * POST 新建课程（新课程没有任务，响应里不带 `upcomingTasks`）
  */
 
 export async function GET(request: Request) {
@@ -27,6 +29,19 @@ export async function GET(request: Request) {
     }
 
     const courses = ((data ?? []) as CourseRow[]).map(toCourse)
+
+    // 每门课的近期任务：一次查齐再按课程分桶，不给每门课发一次查询。
+    const { byCourse, error: tasksError } = await loadUpcomingTasks(
+      supabase,
+      courses.map((course) => course.id),
+    )
+    if (tasksError) {
+      throw new Error(tasksError)
+    }
+    for (const course of courses) {
+      course.upcomingTasks = byCourse.get(course.id) ?? []
+    }
+
     return jsonOk(request, { data: courses, meta: { total: courses.length } })
   } catch (error) {
     return internalError(request, error)
