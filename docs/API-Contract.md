@@ -106,12 +106,18 @@
       "lastSyncedAt": "2026-09-20T14:03:00-07:00",
       "syncStatus": "success",
       "syncError": null,
-      "upcomingTasks": [ { "id": "…", "title": "HW 3", "dueDate": "…" } ]   // 最多 2 条
+      "upcomingTasks": [ { "id": "…", "title": "HW 3", "dueDate": "…" } ]   // 最多 2 条，见下方说明
     }
   ],
   "meta": { "total": 5 }
 }
 ```
+
+> **`upcomingTasks`（P0-1-9 补齐）**：每门课最多 2 条**未完成**任务，按 `dueDate` 升序
+> （`null` 排最后）。已完成的不算 —— 卡片的语义是"这门课接下来要做什么"。
+> **该字段可选**：缺失表示「没能加载到」，而不是「这门课没有任务」。
+> 两者在 UI 上必须分开，把加载失败渲染成"没有任务"等于静默的错误数据（CodingRules 7）。
+> `POST /api/v1/courses` 的响应不带这个字段（新建的课程还没有任务）。
 
 ### `POST /api/v1/courses`
 ```jsonc
@@ -391,8 +397,11 @@
 
 ## 5. 任务
 
+> **P0-1-9 交付范围**：`GET /api/v1/tasks` 与 `PATCH /api/v1/tasks/:id`。
+> 另两个（`POST` 手动任务、`DELETE`）按 P0-1-9「仅 syllabus 数据」的范围**不做**。
+
 ### `GET /api/v1/tasks?range=7d&limit=50&offset=0`
-总览页数据源，**合并 syllabus 考试与 Canvas 作业**，按 `dueDate` 升序，`dueDate` 为 `null` 的排最后。
+总览页数据源，**合并 syllabus 考试与 Canvas 作业**（Phase 0 目前只有 syllabus 考试），按 `dueDate` 升序，`dueDate` 为 `null` 的排最后。
 
 ```jsonc
 {
@@ -401,26 +410,73 @@
       "id": "…",
       "courseId": "…", "courseName": "Math 53",
       "title": "HW 3",
-      "dueDate": "2026-09-20T23:59:00-07:00",
+      "dueDate": "2026-09-20T23:59:00-07:00",   // null = 未知 / TBD
       "taskType": "assignment",
       "source": "canvas",
       "status": "pending",
       "isDerived": false
     }
   ],
-  "meta": { "total": 23, "staleWarning": false, "lastSuccessfulSyncAt": "2026-09-20T14:03:00-07:00" }
+  "meta": { "total": 23 }
 }
 ```
-`staleWarning: true` 表示**超过 24 小时未成功同步**（`Sync-Strategy.md` 的陈旧告警），前端据此渲染顶部警告条。
+
+**查询参数**
+
+| 参数 | 默认 | 说明 |
+|---|---|---|
+| `range` | `7d` | 时间**上界**：`<n>d`（1-365）或 `all`（不限）。**不设下界**，见下 |
+| `limit` | `50` | 上限 200（契约 1.5） |
+| `offset` | `0` | 非负整数 |
+
+> ⚠️ **`range` 只设上界，不设下界**（P0-1-9 实现期决策）。
+> `range=7d` 的语义是「**7 天内到期的 + 所有逾期未完成的**」，而不是字面上的「未来 7 天」。
+> 逾期未完成任务是总览页最该被看见的信号，按字面理解成"未来 7 天"会把它们藏起来，
+> 等于帮用户逃避 —— 与 Tempo「不隐藏问题」的原则冲突。
+>
+> ⚠️ **`dueDate` 为 `null` 的行必须保留**：`.lte('due_date', until)` 在 SQL 里对 NULL 求值
+> 结果是 NULL（不成立），会让 TBD 任务整批消失。实现用 `or(due_date.lte.X, due_date.is.null)`。
+
+**`meta` 暂不含 `staleWarning` / `lastSuccessfulSyncAt`**（原契约示例里有这两个字段）：
+它们描述的是 **Canvas 同步状态**（`Sync-Strategy.md` 的陈旧告警），而 Phase 0 的 P0-1-9 只有
+syllabus 数据、根本没有同步这回事。硬编码 `staleWarning: false` 等于告诉用户"数据很新鲜"——
+那是静默的错误数据，比缺字段危险得多（与 P0-1-7 对 `upcomingTasks` 的同一判断）。
+留到 **P0-2-7**（同步状态）与 **P0-2-11**（合并 Canvas 数据）再补。
+
+**可见性**：只返回**未归档**课程的任务 —— 归档课程的任务从总览页隐藏（§2 DELETE 的级联语义）。
+`tasks` 表没有 `user_id`，RLS 经 `courses.user_id` 判定（迁移 `20260902100000`），
+而该策略**不看 `is_archived`**，所以归档过滤必须在查询里显式做（`loadActiveCourseIds()`）。
 
 ### `PATCH /api/v1/tasks/:id`
-**只允许更新 `status`**（pending / done）。
+**只允许更新 `status`**（pending / done）—— 「标记任务完成」的唯一入口。
 
-- `isDerived = true` 的任务传 `title` / `dueDate` → **`422 derived_task_immutable`**，错误信息引导用户去课程页改 `exam_dates`。
-- 这是 ADR-004 在接口层的强制点。
+```jsonc
+// request
+{ "status": "done" }
+// response 200 → 完整的 task 对象（含 courseName）
+```
+
+| 情况 | 状态码 | `error.code` | 说明 |
+|---|---|---|---|
+| 未登录 | 401 | `unauthenticated` | |
+| 非法 uuid | 400 | `bad_request` | |
+| 请求体不是 JSON / 不是对象 | 400 | `bad_request` | |
+| 缺 `status` / 值不是 pending·done | 400 | `validation_failed` | |
+| **派生任务**传 `title` / `dueDate` | **422** | `derived_task_immutable` | 错误信息引导去课程页改 `exam_dates`；`details.immutableFields` 列出被拒字段 |
+| 非派生任务传 `title` / `dueDate` | 400 | `validation_failed` | 手动任务编辑不在 P0-1-9 范围，**明确拒绝而非静默忽略** |
+| 不存在 / 不属于当前用户 / **课程已归档** | 404 | `not_found` | [ADR-010](./Decisions.md#adr-010) |
+
+> **422 与 400 的分工**：422 是 ADR-004 在接口层的强制点 —— 派生任务的权威源是 `exam_dates`，
+> 改 task 的 title / dueDate 会在下次保存或同步时被覆盖回去，所以必须拦下来并把用户**引导到正确的地方**。
+> 非派生任务的情形只是"本阶段不支持"，用 400 就够。
+>
+> **已完成的任务不隐藏**：`GET` 照常返回（`status = "done"`），折叠由前端做
+> （Steven 拍板 2026-09-03：横线划掉 + 折叠，不是隐藏、不是置灰混排）。
 
 ### `POST /api/v1/tasks` — 创建手动任务（`source = manual`）
 ### `DELETE /api/v1/tasks/:id` — 软删除，**仅允许 `source = manual`**（同步来的任务不能被用户删，否则下次同步又回来）
+
+> 以上两个**未实现**：P0-1-9 范围是「仅 syllabus 数据」，手动任务的增删不在本卡。
 
 ---
 
@@ -532,8 +588,9 @@
 | GET | `/api/v1/syllabi/:id/parse-status` | 解析进度 | ⏸ P0-1-11，同步模式下无中间态可查 |
 | POST | `/api/v1/syllabi/:id/reparse` | 强制重跑解析 | P0-1-5a |
 | PUT | `/api/v1/courses/:id/{grade-components,outline-items,exam-dates,office-hours,submission-policies}` | 五板块保存 + diff | ✅ P0-1-5b（见第 4 节；前端表单 P0-1-6） |
-| GET | `/api/v1/tasks` | 总览任务列表 | P0-1-9, P0-2-11 |
-| POST/PATCH/DELETE | `/api/v1/tasks[/:id]` | 手动任务 CRUD / 标记完成 | P0-1-9 |
+| GET | `/api/v1/tasks` | 总览任务列表 | ✅ P0-1-9, P0-2-11 |
+| PATCH | `/api/v1/tasks/:id` | 标记完成（只改 status） | ✅ P0-1-9 |
+| POST/DELETE | `/api/v1/tasks[/:id]` | 手动任务增删 | ⚪ 未实现（P0-1-9 仅 syllabus 数据） |
 | POST/GET/DELETE | `/api/v1/canvas/credentials` | 凭证保存 / 元数据 / 撤销 | P0-2-2, P0-2-9 |
 | GET | `/api/v1/canvas/courses` | Canvas 课程列表（代理） | P0-2-3 |
 | POST/DELETE | `/api/v1/courses/:id/canvas-link` | 课程关联 / 解除 | P0-2-4 |
@@ -559,4 +616,6 @@
 | 2026-09-03 | **§3 `/parse` 改为同步 200 + 落库规则收敛**（[ADR-012](./Decisions.md#adr-012)，P0-1-5a）：不再 202+轮询；部分失败 = `parseStatus='completed'` + `parseError` 写明失败板块；`GET /parse-status` 归 P0-1-11 待定 | ADR-012 |
 | 2026-09-03 | **§4 五板块保存契约按实现收敛**（P0-1-5b）：① request 不再含 `status`（由 `examDate` 派生，防止"无日期但已确认"的矛盾数据）；② response 明确为 `{ data: [...] }`；③ 修正粒度定为**字段级**（edit/add/delete 三类统一，`order_index` 除外）；④ 归因规则明确为「最新 syllabus 的最近一次成功解析」；⑤ 错误码表补齐（含 `details.staleIds`、归档课程 404）。均为实现期决策，无行为层面的需求变更 | P0-1-5b |
 | 2026-09-03 | **§4 补「读取路径」说明**（P0-1-6）：五板块**不设 GET 端点** —— 编辑表单初值由 dashboard 服务端组件直查五表（`lib/sections.ts`，RLS 保护），完整接口 `GET /api/v1/courses/:id`（含五板块）归 P0-1-8。写清这一点是为了避免后续会话误以为读端点已存在 | P0-1-6 |
+| 2026-09-03 | **§5 任务端点按 P0-1-9 实现落地**（新增 `GET /api/v1/tasks`、`PATCH /api/v1/tasks/:id`，此前两个端点都不存在）：① `range` **只设上界不设下界** —— 逾期未完成的任务必须留在列表里；② `meta` **不返回** `staleWarning` / `lastSuccessfulSyncAt`（Canvas 同步状态，Phase 0 无同步，硬编码 false 是静默的错误数据），留 P0-2-7 / P0-2-11；③ PATCH 只允许改 `status`，派生任务传 title/dueDate → `422 derived_task_immutable`，非派生任务传 → `400 validation_failed`（明确拒绝而非静默忽略）；④ 归档课程的任务一律隐藏（tasks 的 RLS 不看 `is_archived`，必须显式过滤）；⑤ `POST` / `DELETE`（手动任务）明确标注未实现 | P0-1-9 |
+| 2026-09-03 | **§2 补 `upcomingTasks` 的实现说明**（P0-1-9）：契约早有此字段但端点一直没返回，本次补上（最多 2 条、只含未完成、按 dueDate 升序）。**字段可选**：缺失表示"没加载到"而非"没有任务"，两者在 UI 上必须分开 | P0-1-9 |
 | 2026-09-03 | **§2 `GET /api/v1/courses/:id` 按 P0-1-8 实现收敛**：① `syllabus` 由「只给 `{id,fileName,parseStatus}`」放宽为**返回完整 Syllabus 对象** —— UI 需要 `extractStatus` / `parseError` 才能渲染「解析失败可重试」；② 补错误码表（401 / 400 / 404），**已归档课程按 404 处理**（归档 = 删除，与 §4 保存端点一致）；③ 读逻辑收敛到 `lib/course-detail.ts`，端点与详情页服务端组件共用一份 | P0-1-8 |

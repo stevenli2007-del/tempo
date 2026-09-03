@@ -29,7 +29,12 @@
 
 ## 当前进度指针
 
-**当前 task**：`P0-1-9` 总览页 v1（P0-1-5b / P0-1-6 / P0-1-8 均已于 2026-09-03 验收通过 ✅）
+**当前 task**：`P0-1-9` 总览页 v1 —— 🟦 **代码完成，待 Steven 浏览器验收**（验收通过后 M1 收口，下一张卡是 P0-1-10 Demo Workspace）
+
+> 🟦 **P0-1-9 代码完成（2026-09-03 下午）**：`GET /api/v1/tasks` + `PATCH /api/v1/tasks/:id` 新建（此前两个端点都不存在）+ `lib/tasks.ts`（tasks 表唯一映射点）+ `components/tasks/task-list.tsx`（标记完成 + 已完成折叠）+ 卡片 `upcomingTasks`（契约 §2 补齐）+ dashboard「最近要做的事」区块。本地无头冒烟 **64/64**。
+> - **待 Steven 浏览器验收（本地 `npm run dev`）**：① 勾 checkbox 标记完成 → 列表刷新；② 点「已完成 N 项」展开 → 看到删除线的已完成任务；③ 卡片上显示近期任务。
+> - **验收通过后 M1 静态理解链路完整收口**，下一张卡是 **P0-1-10 Demo Workspace**（冷启动，PRD §6）。
+> - **待 Steven 手动**：删测试账号 `p19-a@test.dev` / `p19-b@test.dev`（业务数据已清）。
 
 > 📌 **P0-1-5b 已验收通过 ✅（2026-09-03 11:50，Steven 验收）**：5 个 `PUT /api/v1/courses/:id/{板块}` 端点 + `lib/parse/save.ts`（编排）+ `lib/parse/corrections.ts`（字段级 diff + 归因）+ `lib/sync/exam-tasks.ts`（`syncExamToTask()`）+ `persist.ts` 接入派生。本地冒烟 **56/56**、生产验证 **18/18**（真实 `/parse` 归因、`llm_run_id`/`syllabus_id` 非 null 且真实存在）。commit `638a331`/`a959d45`/`54590cd`。
 > - **实现期决策（已写进 `API-Contract.md` §4 变更记录，无需 ADR）**：① request 不含 `status`（由 examDate 派生）；② 修正粒度 = 字段级（add/delete 也按字段拆，`order_index` 除外）；③ 归档课程保存 → 404；④ 归因取「最新 syllabus 最近一次成功解析」。
@@ -48,17 +53,15 @@
 
 > 📌 **P0-1-5a 已验收通过 ✅（2026-09-03，Steven 验收；测试账号已清理）**。代码 commit `bcd5a20` + 文档 commit（生产验证 14/14 + §10 部署延迟条目），均已 push。本地冒烟 44/44、生产验证 14/14（真实调 DeepSeek 4.4s、`llm_runs` 落 5 条 success）。
 
-> 🟦 **P0-1-9 开工提示**：总览页要「每门课近期 1-2 个任务 + 跨课程近期任务列表（按日期排序，仅 syllabus 数据）」。
-> - **数据**：考试派生 task 已经在 `tasks` 表里（`syncExamToTask()` 写入，ADR-004）。**但读它的端点还不存在，要新建**（见下方 ⚠️）。
+> ✅ **P0-1-9 开工提示（2026-09-03 已执行完毕，以下为留档）**：总览页要「每门课近期 1-2 个任务 + 跨课程近期任务列表（按日期排序，仅 syllabus 数据）」。**两个端点已新建、`upcomingTasks` 已补、卡片与 dashboard 已接线**，当前状态是代码完成待浏览器验收。
+> - **数据**：考试派生 task 由 `syncExamToTask()` 写入（ADR-004）；**读它的两个端点此前不存在，本卡新建**。
 > - **契约**：`GET /api/v1/tasks?range=7d&limit=50&offset=0`（§5）、`PATCH /api/v1/tasks/:id`（§5）。
-> - **卡片**：要加 `upcomingTasks`（§2 列表响应里预留了这个字段，目前**没返回**，别误以为已实现）。
-> - **范围边界**：仅 syllabus 数据 —— **不做**手动任务的新增 / 删除（§5 的 `POST` / `DELETE` 不在本卡）。
+> - **卡片**：`upcomingTasks`（§2 列表响应字段）已补上 —— **此前确实没返回**，不是"已实现"。
+> - **范围边界**：仅 syllabus 数据 —— **未做**手动任务的新增 / 删除（§5 的 `POST` / `DELETE` 不在本卡）。
 >
-> ✅ **两个产品问题已拍板（2026-09-03 11:58，Steven）**：
-> ① **包含「标记任务完成」** → 走契约 §5 的 `PATCH /api/v1/tasks/:id`，**只允许改 `status`**；`isDerived = true` 的任务传 `title` / `dueDate` → `422 derived_task_immutable`，错误信息引导去课程页改 `exam_dates`（ADR-004 在接口层的强制点）。
+> ✅ **两个产品问题拍板结论（2026-09-03 11:58，Steven）—— 已按此实现**：
+> ① **包含「标记任务完成」** → `PATCH /api/v1/tasks/:id`，**只允许改 `status`**；`isDerived = true` 的任务传 `title` / `dueDate` → `422 derived_task_immutable`，错误信息引导去课程页改 `exam_dates`（ADR-004 在接口层的强制点）。
 > ② **已完成的任务：横线划掉 + 折叠起来**（不是隐藏，也不是置灰混排）。
->
-> ⚠️ **开工前必须知道的实现事实（2026-09-03 核实）**：`app/api/v1/` 下目前**只有 `courses` 和 `syllabi` 两个目录** —— 契约 §5 的 `GET /api/v1/tasks` 与 `PATCH /api/v1/tasks/:id` **都还不存在，P0-1-9 要新建**。契约 §5 另有 `POST`（手动任务）与 `DELETE`（仅 `source=manual`），但 P0-1-9 范围是「**仅 syllabus 数据**」，**这两个不在本卡**。
 
 > 🛑 **上一轮收工状态（2026-09-03 12:00，Steven 收工）**：**P0-1-5b / P0-1-6 / P0-1-8 已验收通过 ✅**。M1 静态理解链路（syllabus 上传 → 提取 → 解析 → 落库 → 编辑 → 展示）全部打通，下一 task 为 **P0-1-9 总览页 v1**。
 > - ⚠️ **本轮发生过一次越界**：Steven 的停止指令是 P0-1-5b，Bud 收到模糊的「continue」后一路做到 P0-1-8。已写进协作约定 —— **Done Report 之后的模糊指令一律回读原始停止点**。
@@ -198,7 +201,7 @@
 | **P0-1-6** | 可编辑表单 UI：五个板块逐项编辑 / 补全 / 覆盖 + 保存 | Bud | P0-1-5 | 可修改任一字段并保存；TBD 状态可正常展示与编辑 | ✅ 已验收（2026-09-03；验收点在详情页，见 P0-1-8） |
 | **P0-1-7** | Workspace CRUD：创建（学期 + 课程名必填，编码/教师选填）、列表按学期分组、编辑、删除 | Bud | P0-0-6 | 建课后出现在总览页与列表；删除有二次确认 | ✅ |
 | **P0-1-8** | 课程详情页：展示五板块最终信息 | Bud | P0-1-6, P0-1-7 | 保存后的数据完整展示；缺失项显示 TBD 而非空白 | ✅ 已验收（2026-09-03 11:50） |
-| **P0-1-9** | 总览页 v1：课程卡片（显示近期 1-2 个任务）+ 跨课程近期任务列表（仅 syllabus 数据，按日期排序） | Bud | P0-1-8 | 能看到"最近 7 天所有课程要做的事"；可跳转课程详情 | 🔵 未开工（阻塞已清，等 Steven 开工指令） |
+| **P0-1-9** | 总览页 v1：课程卡片（显示近期 1-2 个任务）+ 跨课程近期任务列表（仅 syllabus 数据，按日期排序） | Bud | P0-1-8 | 能看到"最近 7 天所有课程要做的事"；可跳转课程详情 | 🟦 代码完成（本地 64/64），待 Steven 验收 |
 | **P0-1-10** | 冷启动：**Demo Workspace**（预置示例课程，含已解析 syllabus 与示例任务） | Bud | P0-1-9 | 新用户从进入站点到看到有内容的总览页 ≤ 30 秒 | ⚪ |
 | **P0-1-11** | 解析过程可视化：上传后先显示文本预览，再逐步填充五个板块 + 进度提示 | Bud | P0-1-6 | 用户不再干等；每一步有明确状态反馈 | ⚪ |
 
@@ -405,6 +408,33 @@
 - **自测（Bud，2026-09-03）**：`tsc` ✅ ｜ `lint` ✅ ｜ `build` ✅ ｜ 无头冒烟 **17/17**（dashboard SSR 带板块数据、跨用户隔离、PUT 回包结构、清理）。
 - **已知留白**：① **浏览器交互未验**（展开/切 tab/打字/保存/上移下移/解析按钮）—— `next dev` 在 WorkBuddy 起不来（`CodingRules.md` §5），只能 Steven 本地验收；② dashboard 一次性加载所有课程的五板块（Phase 0 课程数少，P0-1-8 详情页可按需加载）；③ 解析触发是同步等待（约 3-5 秒），过程动画归 P0-1-11；④ 测试账号 `p16-a-*/p16-b-*@test.dev` 待 Steven 手动删。
 
+#### 🎫 P0-1-9 · 总览页 v1 · 🟦 代码完成（本地 64/64）/ 浏览器交互待 Steven 验收
+- **做什么**：跨课程近期任务列表（按日期排序）+ 卡片近期 1-2 个任务 + 「标记完成」。**这是 M1 的最后一张卡**，做完 M1 静态理解链路完整收口。
+- **改哪些文件**：
+  - `types/task.ts`（新）—— `Task` / `UpcomingTask` + 三个枚举收窄
+  - `lib/tasks.ts`（新）—— `TaskRow` + `TASK_COLUMNS`（唯一知道 DB 列名的地方）、`toTask()`、`loadActiveCourseIds()` / `loadTasks()` / `loadUpcomingTasks()` / `loadTaskById()`
+  - `app/api/v1/tasks/route.ts`（新）—— `GET`（契约 §5）
+  - `app/api/v1/tasks/[id]/route.ts`（新）—— `PATCH`（契约 §5，只允许改 status）
+  - `components/tasks/task-list.tsx`（新）—— 任务列表（标记完成 + 已完成折叠）
+  - `types/course.ts` —— `Course` 加**可选** `upcomingTasks`
+  - `app/api/v1/courses/route.ts` —— 列表响应补 `upcomingTasks`（契约 §2 早有此字段但一直没返回）
+  - `components/courses/course-card.tsx` —— 新增 `UpcomingTaskView`（视图模型，日期已格式化）+ 卡片显示近期任务
+  - `app/(routes)/dashboard/page.tsx` —— 加载任务数据 + 「最近要做的事」区块 + 日期格式化
+- **🔴 关键约束（改动前必读）**：
+  1. **`tasks` 表没有 `user_id`，且它的 RLS 策略不看 `is_archived`** —— 所有查询都必须先取「当前用户未归档的课程 id」（`loadActiveCourseIds()`）再用 `.in('course_id', …)` 收口，否则归档课程的任务会漏进总览页。
+  2. **`dueDate` 为 null 的行必须显式保留**：`.lte('due_date', X)` 在 SQL 里对 NULL 求值为 NULL（不成立），TBD 任务会整批消失。用 `or('due_date.lte."X",due_date.is.null')`（值含 `:` `+`，要双引号包住）。
+  3. **不要把 PostgREST 的查询构造器抽成带泛型的公共函数**（本次 `applyTaskOrder()` 直接触发 `TS2589: Type instantiation is excessively deep`）。排序那两行在两个查询里各写一份，比绕类型便宜得多。
+  4. **日期在服务端按 UTC 格式化成 label 再传给客户端组件** —— 客户端 `toLocaleDateString()` 会让服务端（UTC）与浏览器（用户时区）渲染不一致 → hydration mismatch。
+  5. **`upcomingTasks` 字段可缺，不可假**：查失败时不填这个字段（`undefined` → 卡片显示「加载失败」），**绝不填 `[]`**。同理 `meta` 不返回 `staleWarning` / `lastSuccessfulSyncAt`（Canvas 同步状态，Phase 0 无同步，硬编码 false 是静默的错误数据）。
+  6. **「已完成」= 折叠 + 删除线，不是隐藏**：GET 照常返回 `status=done` 的任务。折叠用条件渲染，收起时条目不在 DOM 里（因此 SSR HTML 里没有 `line-through`，这是对的）。
+- **三个 P0-1-9 的实现期决策（已写进 `API-Contract.md` §5 变更记录，无需 ADR）**：
+  1. **`range` 只设上界，不设下界** —— 逾期未完成的必须留在列表里（藏起来 = 帮用户逃避）。
+  2. **PATCH 两类拒绝分开**：派生任务传 `title`/`dueDate` → `422 derived_task_immutable`（ADR-004 接口层强制点，错误信息引导去课程页）；非派生任务传 → `400 validation_failed`（本阶段不支持，**明确拒绝而非静默忽略**）。
+  3. **`POST` / `DELETE`（手动任务）明确不做** —— P0-1-9 范围是「仅 syllabus 数据」。
+- **自测（Bud，2026-09-03）**：`tsc` ✅ ｜ `lint` ✅ ｜ `build` ✅（`/api/v1/tasks`、`/api/v1/tasks/[id]` 均为 ƒ 动态路由）｜ 无头冒烟 **64/64**。
+  覆盖：7d 窗口内/外、逾期保留、TBD 保留、排序（升序 + null 最后）、`range` 五种取值（含 3 条非法 → 400）、分页（limit/offset/total 独立）、`x-request-id` 回传、跨用户隔离、`upcomingTasks`（最多 2 条 / 只含未完成 / 排除已完成）、PATCH 标记完成与取消、派生任务 422（含 code / message / `details.immutableFields`）、非派生任务 400、**7 条入参与越权路径**、归档课程任务消失、dashboard SSR、清理。
+- **已知留白**：① **浏览器交互未验**（勾选 checkbox、展开折叠区块后看到删除线、`router.refresh()` 后列表刷新）—— `next dev` 在 WorkBuddy 起不来（`CodingRules.md` §5），只能 Steven 本地验收；② 测试账号 `p19-a@test.dev` / `p19-b@test.dev` 留在 auth.users 待手动删（业务数据已清）；③ 手动任务的新增/删除未做（本卡范围外）；④ 逾期任务只标红显示，不做"顺延"逻辑（Phase 2）。
+
 #### 🎫 P0-1-8 · 课程详情页 · 🟡 代码完成 / 服务端自测通过 / 浏览器交互待 Steven 验收
 - **做什么**：`/courses/[id]` 展示课程 + 五板块最终信息（缺失项显示 TBD），并把一门课的全部操作集中到这里。
 - **改哪些文件**：
@@ -543,3 +573,4 @@ P0-0 基础设施
 | 2026-09-03 | **P0-1-8 课程详情页代码完成（浏览器交互待 Steven 验收）**：`GET /api/v1/courses/:id`（契约 §2）+ `lib/course-detail.ts`（读逻辑唯一一份）+ `app/(routes)/courses/[id]` + `section-view.tsx`（TBD 展示层）+ SectionEditor 加查看/编辑双模式 + **卡片瘦身为摘要**（删除也集中到详情页）。**两个 Steven 拍板**：全部操作搬详情页（卡片只留摘要+入口+删除）、路由 `/courses/[id]`。**契约收敛**：`syllabus` 返回完整 Syllabus 对象（超集，UI 需要 extractStatus/parseError）、归档课程 404。**顺手消除** P0-1-6 的「dashboard 一次性加载所有课程五板块」开销。tsc/lint/build 全绿，无头冒烟 34/34。进度指针推进至 P0-1-9 |
 | 2026-09-03 | **收工 + 三张卡 signoff（Steven 11:50 验收通过）**：**P0-1-5b ✅**（本地 56/56 + 生产 18/18）· **P0-1-6 ✅**（无头 17/17，浏览器验收）· **P0-1-8 ✅**（无头 34/34，浏览器验收）。1-6 与 1-8 的浏览器验收是同一次会话 —— 1-8 把编辑器从课程卡片搬到详情页后，1-6 的验收标准改为在 `/courses/[id]` 上验。任务表状态列与进度指针全部更新，指针停在 **P0-1-9（🔵 未开工，两个产品问题待拍板）**。⚠️ **本轮越界记录**：Steven 的停止指令原为 P0-1-5b，Bud 收到模糊的「Please continue.」后一路做到 P0-1-8；已写进协作约定（Done Report 之后的模糊指令一律回读原始停止点）。**待 Steven 手动**：删 8 个测试账号 | 
 | 2026-09-03 | **P0-1-9 两个产品问题拍板（Steven 11:58）+ 测试账号清理完毕**：① **包含「标记任务完成」** —— 走契约 §5 `PATCH /api/v1/tasks/:id`，只允许改 `status`，派生任务改 title/dueDate 返 `422 derived_task_immutable`（ADR-004 接口层强制点）；② **已完成的任务：横线划掉 + 折叠起来**（不隐藏、不置灰混排）。同时核实到一个实现事实：`app/api/v1/` 下**只有 `courses` 和 `syllabi`**，契约 §5 的 `GET /api/v1/tasks` 与 `PATCH /api/v1/tasks/:id` **都不存在，P0-1-9 要新建**；`POST`/`DELETE`（手动任务）因范围是「仅 syllabus 数据」**不在本卡**。8 个 `@test.dev` 测试账号已由 Steven 手动删除。**Bud 未开工** —— 未收到开工指令 | 
+| 2026-09-03 | **P0-1-9 总览页 v1 代码完成（浏览器交互待 Steven 验收）**：新建 `types/task.ts` + `lib/tasks.ts` + `GET /api/v1/tasks` + `PATCH /api/v1/tasks/:id`（此前两个端点都不存在）+ `components/tasks/task-list.tsx`；`Course` 加可选 `upcomingTasks` 并由 `GET /api/v1/courses` 补上（契约 §2 早有此字段但一直没返回）；卡片显示近期 1-2 个任务；dashboard 加「最近要做的事」区块。**三个实现期决策（写入 `API-Contract.md` §5 变更记录）**：① `range` **只设上界不设下界** —— 逾期未完成的任务必须留在列表里（藏起来等于帮用户逃避）；② PATCH 两类拒绝分开 —— 派生任务传 title/dueDate → `422 derived_task_immutable`（ADR-004 接口层强制点），非派生任务 → `400 validation_failed`（明确拒绝而非静默忽略）；③ `meta` **不返回** `staleWarning`/`lastSuccessfulSyncAt`（Canvas 同步状态，Phase 0 无同步，硬编码 false 是静默的错误数据），留 P0-2-7 / P0-2-11。**两个技术约束**：tasks 的 RLS 不看 `is_archived`（归档过滤必须显式做）、`.lte()` 对 null 求值不成立（TBD 任务要显式 `or` 保留）。**踩坑**：把 PostgREST 查询构造器抽成带泛型函数触发 `TS2589`，排序改为各写一份。tsc/lint/build 全绿，本地无头冒烟 **64/64**。测试账号 `p19-a/b@test.dev` 待 Steven 手动删 |
