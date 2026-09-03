@@ -31,9 +31,16 @@
 
 **当前 task**：`P0-1-5` 解析 API 路由 + 结果落库 + 修正 diff 存储
 
-> 📌 **P0-1-4 五板块抽取 prompt v1 已完成 ✅（2026-09-02）**
+> 🛑 **收工状态（2026-09-02 23:00，Steven 收工）**：P0-1-4 已验收通过，本日工作结束。
+> - **下一会话从 P0-1-5 开始**，开工提示见下方 P0-1-4 卡末尾（①②③④）。
+> - **⚠️ 本日有 3 个本地 commit 未 push**（`40d1f33` / `ebd9b8a` / 本条文档提交），下一会话开工前先 `git push origin main`。
+> - **P0-1-5 未动**：代码零改动，只在上一次会话里读过 `parse_corrections` DDL、`API-Contract.md` §parse/save、ADR-004、`tasks` 表 DDL。**开工时可重新评估是否拆卡**（面比较大：6 个端点 + 修正 diff + 考试派生任务）。
+
+> 📌 **P0-1-4 五板块抽取 prompt v1 已验收通过 ✅（2026-09-02 晚，Steven 验收）**
 > - `types/parse.ts` + `lib/parse/`（schemas / prompts / index）已交付；`parseSyllabusSections()` 五板块并发调用、单块失败不影响其余。
 > - **核心设计：`sourceExcerpt`** —— 每个条目都带≤200 字的原文逐字摘录，逼模型给依据、让用户可核对，且直接对应五张表都有的 `source_excerpt` 列。
+> - **验收证据**：CS 61B 风格 syllabus 现场实跑，五板块全 ok、3.2s，反幻觉两个陷阱（「按校历安排」/「见 bCourses」）均正确返回 `null` + `tbd`，未编造日期。
+> - **留白 ④ 已裁定**：提交政策粒度偏粗（一个 section 内的两条规则被合并成 1 条）**Steven 接受**，Phase 0 不改，不升 `PROMPT_VERSION`。若日后真实 syllabus 显示粒度影响可用性，再升 `v2` 单独立项。
 > - **`P0-1-5` 开工提示**：① 调用方看 `okSections.length`（不是 `ok`）判断有没有可落库的结果 —— **部分成功是常态**；② `ExamDate.status` 由 `examDate` 派生，别让模型填；③ 五张表的 snake_case 映射写在各自的 `lib/*.ts` 里，`lib/parse/index.ts` 不碰 DB；④ **验收时必须补做 P0-1-3 / P0-1-4 的生产验证** —— 这两个都是纯库层，此前只在本地验过，P0-1-5 是第一个能打到它们的端点。
 
 > 📌 **P0-1-3 代码验收通过 ✅（2026-09-02，Steven 按 Option A 收口）**
@@ -239,7 +246,7 @@
 - **✅ 浏览器 UI 已由 Steven 本地验收通过（2026-09-02，与 P0-1-1 合并验收）**。
 - **已知留白**：① 提取失败的行没有「重试提取」入口（Phase 0 无存量数据，重新上传即可）；② `maxDuration = 60` 是为 20MB PDF 留的，Vercel 套餐若更低需下调。
 
-#### 🎫 P0-1-4 · 五板块抽取 prompt v1 · ✅ 已完成，勿重做
+#### 🎫 P0-1-4 · 五板块抽取 prompt v1 · ✅ 已验收通过（2026-09-02 晚，Steven 验收），勿重做
 - **做什么**：把 syllabus 全文解析成五个结构化板块（Grade Composition / Course Outline / Test Dates / Office Hours / Submission Policy）。**只做抽取，不碰 DB**（落库是 P0-1-5）。
 - **改哪些文件（全部新增）**：
   - `types/parse.ts` —— 五个板块的对外类型（camelCase），字段与五张表一一对齐
@@ -265,7 +272,7 @@
   - 其余：权重 20/25/25/30 全对且「drop the lowest score」正确进 `notes`；15 周 `orderIndex` 1-15 全对；office hours 时间正确转 24h（2:00-3:30 PM → `14:00-15:30`、4:00-5:00 PM → `16:00-17:00`）；submission policy 的 `description` **保留英文原文未翻译**（语言铁律生效），`platformName: Gradescope`。
   - ⚠️ 本次审计行**没写进 `llm_runs`**（脚本用假 userId、无会话，RLS 拒掉）—— 属预期，审计落库与 RLS 隔离已由 P0-1-3 单独验过。
   - **没有 tsx / ts-node / esbuild**（devDeps 只有 typescript + eslint + tailwind），直接跑 TS 会引入新依赖违反 Diff First，所以走临时路由 + `next build`/`next start` 这条路。
-- **已知留白**：① 超长文本（>30000 字符）从尾部截断，而 office hours / 提交政策常写在文末 —— 正确做法是分块 + 合并，Phase 0 先只做 `meta.truncated` 标记；② 没有"占比之和≠100"的校验提示（留给 P0-1-5 的 UI）；③ 没有单块重试（Phase 0 由调用方按 `retryable` 决定）；④ **提交政策粒度偏粗**：验收实测里 syllabus 的 HOMEWORK POLICY 段含两条规则（迟交扣分 + 代码格式），模型**合并成 1 条** policy。可辩护（同属一个 section），但粒度偏粗，**待 Steven 判断是否接受**（不是正确性问题）。
+- **已知留白**：① 超长文本（>30000 字符）从尾部截断，而 office hours / 提交政策常写在文末 —— 正确做法是分块 + 合并，Phase 0 先只做 `meta.truncated` 标记；② 没有"占比之和≠100"的校验提示（留给 P0-1-5 的 UI）；③ 没有单块重试（Phase 0 由调用方按 `retryable` 决定）；④ **提交政策粒度偏粗（2026-09-02 晚 Steven 裁定：接受，Phase 0 不改）**：验收实测里 syllabus 的 HOMEWORK POLICY 段含两条规则（迟交扣分 + 代码格式），模型**合并成 1 条** policy。可辩护（同属一个 section），不是正确性问题。**不升 `PROMPT_VERSION`**（仍为 `v1`）。触发重开条件：真实 syllabus 跑下来显示粒度影响可用性 —— 届时单独立项升 `v2`，不在本卡里改。
 
 #### 🎫 P0-1-3 · LLM provider 抽象层（`lib/llm`）· ✅ 已完成，勿重做
 - **做什么**：按 [ADR-003](./Decisions.md#adr-003) 建可插拔 LLM 抽象层，默认 DeepSeek；结构化输出走 JSON schema；每次调用落 `llm_runs` 审计。
