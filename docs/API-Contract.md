@@ -336,17 +336,39 @@
 | `PUT /api/v1/courses/:id/submission-policies` | 提交政策 |
 
 ```jsonc
-// request
-{ "items": [ { "id": "…(可选，新增时省略)", "examName": "Midterm 1", "examDate": "2026-10-15", "examTime": "7-9pm", "location": "…", "status": "confirmed" } ] }
-// response 200 → 该板块的完整最新列表
+// request（以 exam-dates 为例；items 允许为空数组 = 清空该板块）
+{
+  "items": [
+    { "id": "…(可选，不带 = 新增)", "examName": "Midterm 1", "examDate": "2026-10-15", "examTime": "7-9pm", "location": "…" },
+    { "examName": "Final", "examDate": null, "examTime": null, "location": null }
+  ]
+}
+// response 200 → { "data": [ 该板块的完整最新列表（含 id / source / isConfirmed）] }
 ```
 
-**服务端必须做的三件事（在同一事务内）**：
-1. 与库中现有值逐字段比对，**每一处差异写一条 `parse_corrections`**（`originalValue` / `correctedValue` / `fieldName` / `correctionType`）；
-2. 更新 `llm_run_id` 归因（关联最近一次该 syllabus 的解析）；
-3. 若板块是 **`exam-dates`** → **同步派生 `tasks` 记录**（ADR-004，见 `Database.md` 第 5 节）。
+**保存语义（P0-1-5b 已实现）**：
+- 带 `id` 且库里存在 → 整行内容以表单更新；不带 `id` → 插入，`source = 'manual'`（活过重解析）；库里有、表单没有 → 删除。表单里带着库里已不存在的 `id` → 400（并发修改，请刷新重填）。
+- `grade_components` / `exam_dates` 的所有提交行置 `is_confirmed = true`（保存 = 用户确认）。
+- **`exam-dates` 不接受 `status`**：由 `examDate` 派生（有合法日期 = `confirmed`，否则 `tbd`），与解析侧 `normalizeExam()` 同一条规则。请求里传了 status 会被忽略而不是采信 —— 否则会出现"日期为空但状态是已确定"的矛盾数据。
+- `outline-items` 的 `orderIndex` 由数组位置派生（从 1 开始），不接受客户端自报的序号。
+- 归档课程返回 404（归档在本项目里就是删除，见 §2 的 DELETE 语义）。
 
-> 第 3 条是"课程页和总览页日期对不上"的唯一防线。派生逻辑集中在 `syncExamToTask()` 一处。
+**服务端做的三件事（`lib/parse/save.ts` + `lib/parse/corrections.ts`，无跨表事务）**：
+1. 与库中现有值逐字段比对，**每一处差异写一条 `parse_corrections`**：
+   - `edit` = 匹配行的每个变更字段一条（original → corrected）；`add` = 新增行每个有值字段一条；`delete` = 被删行每个原有值字段一条。`field_name` 存 DB 列名（如 `weight_percent`），值一律存 text；`outline` 的 `order_index` 不进 diff（重排序不算解析错误）。
+   - 幂等保存（无差异）不写任何修正行。
+2. **归因**：`syllabus_id` / `llm_run_id` 取「该课程最新一份 syllabus 的最近一次**成功**解析」（无则均为 null）。
+3. 若板块是 **`exam-dates`** → **同步派生 `tasks` 记录**（ADR-004，`lib/sync/exam-tasks.ts`）：
+   `source_id` 指向 `exam_dates.id`、`is_derived = true`、`tbd`/日期为空 → `due_date = null` 禁止编造；有日期 → 当日 23:59:59（`exam_time` 是自由文本，Phase 0 不解析）；用户改过的 `status`（pending/done）**不被重置**；考试行被删 → 派生 task 物理删除。
+
+> 第 3 条是"课程页和总览页日期对不上"的唯一防线。派生逻辑集中在 `syncExamToTask()` 一处；解析落库（`/parse` `/reparse`）也会调用它，不只是保存端点。
+
+| 错误 | 状态码 | `error.code` | 说明 |
+|---|---|---|---|
+| 未登录 | 401 | `unauthenticated` | |
+| 非法 uuid / 请求体不是 JSON / 校验失败 | 400 | `bad_request` / `validation_failed` | 文案带条目序号 |
+| 课程不存在、不属于当前用户或已归档 | 404 | `not_found` | [ADR-010](./Decisions.md#adr-010) |
+| 条目 id 不在库中 | 400 | `validation_failed` | `details.staleIds` 列出过期 id |
 
 ---
 
@@ -492,7 +514,7 @@
 | POST | `/api/v1/syllabi/:id/parse` | 五板块抽取 + 落库（同步 200，[ADR-012](./Decisions.md#adr-012)） | P0-1-5a |
 | GET | `/api/v1/syllabi/:id/parse-status` | 解析进度 | ⏸ P0-1-11，同步模式下无中间态可查 |
 | POST | `/api/v1/syllabi/:id/reparse` | 强制重跑解析 | P0-1-5a |
-| PUT | `/api/v1/courses/:id/{grade-components,outline-items,exam-dates,office-hours,submission-policies}` | 五板块保存 + diff | P0-1-5, P0-1-6 |
+| PUT | `/api/v1/courses/:id/{grade-components,outline-items,exam-dates,office-hours,submission-policies}` | 五板块保存 + diff | ✅ P0-1-5b（见第 4 节；前端表单 P0-1-6） |
 | GET | `/api/v1/tasks` | 总览任务列表 | P0-1-9, P0-2-11 |
 | POST/PATCH/DELETE | `/api/v1/tasks[/:id]` | 手动任务 CRUD / 标记完成 | P0-1-9 |
 | POST/GET/DELETE | `/api/v1/canvas/credentials` | 凭证保存 / 元数据 / 撤销 | P0-2-2, P0-2-9 |
@@ -517,3 +539,5 @@
 | 2026-09-02 | **§3 新增 `POST /api/v1/syllabi/:id/extract`**（P0-1-2）：上传流程拆成「取票据 → 直传 → 提取」三拍，**修正原「201 响应带 previewText」的设计错误** —— 签票据时文件还没传上来，服务端无法提取。提取失败返回 **200 + `extractStatus: "failed"`**（不是 HTTP 错误），悬挂行返回 `409 file_missing`，已提取的行幂等返回既有结果 | P0-1-2、[ADR-010](./Decisions.md#adr-010) |
 | 2026-09-02 | **PDF 提取器定为 `unpdf` 1.8.1**（中间态曾换到 `pdfjs-dist` legacy，**已作废**）：`pdf-parse` 2.4.5、`pdfjs-dist` 的现代构建**和 legacy 构建**，在 Node 下都于模块作用域 `new DOMMatrix()`，而 DOMMatrix 靠 `require('@napi-rs/canvas')` 补，canvas 加载失败时只 warn 不赋值 → **Vercel 上该路由 import 即 500（空响应体，连不碰 PDF 的分支也 500）**；本地 macOS 装有 23MB 原生二进制而全绿，是典型「本地全绿、线上全红」。unpdf 自带为 serverless 重打包的 pdfjs（worker 内联 + 剥浏览器 API），**零运行时依赖、不需要 canvas**，线上实测通过。响应体与错误语义不变，仅换提取器实现；同时修正响应示例里 `extractMethod` 注释误写的 `docx_text` / `pptx_text` | 生产事故复盘、`TechStack.md` 第 2 节 ⚠️、[ADR-011](./Decisions.md#adr-011) |
 | 2026-09-02 | **§3 download 端点补 `404 file_missing`**：行在、文件不在（悬挂行）时，原本把 Storage 的 `NoSuchKey` 直接抛成 **500**。判定谓词抽到 `lib/syllabi.ts` 的 `isStorageObjectNotFoundError()`，由 download 与 extract 共用，避免两处各写一份再漏一次 | 端到端冒烟抓到的真 bug |
+| 2026-09-03 | **§3 `/parse` 改为同步 200 + 落库规则收敛**（[ADR-012](./Decisions.md#adr-012)，P0-1-5a）：不再 202+轮询；部分失败 = `parseStatus='completed'` + `parseError` 写明失败板块；`GET /parse-status` 归 P0-1-11 待定 | ADR-012 |
+| 2026-09-03 | **§4 五板块保存契约按实现收敛**（P0-1-5b）：① request 不再含 `status`（由 `examDate` 派生，防止"无日期但已确认"的矛盾数据）；② response 明确为 `{ data: [...] }`；③ 修正粒度定为**字段级**（edit/add/delete 三类统一，`order_index` 除外）；④ 归因规则明确为「最新 syllabus 的最近一次成功解析」；⑤ 错误码表补齐（含 `details.staleIds`、归档课程 404）。均为实现期决策，无行为层面的需求变更 | P0-1-5b |
