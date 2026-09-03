@@ -8,10 +8,8 @@ import { COURSE_COLUMNS, toCourse } from '@/lib/courses'
 import type { CourseRow } from '@/lib/courses'
 import { SYLLABUS_COLUMNS, toSyllabus } from '@/lib/syllabi'
 import type { SyllabusRow } from '@/lib/syllabi'
-import { loadCourseSections } from '@/lib/sections'
 import { createClient } from '@/lib/supabase/server'
 import type { Course } from '@/types/course'
-import type { StoredSections } from '@/types/sections'
 import type { Syllabus } from '@/types/syllabus'
 
 export const metadata = {
@@ -24,13 +22,8 @@ export const metadata = {
 export const dynamic = 'force-dynamic'
 
 /**
- * 课程没有任何板块数据时的兜底（模块级常量，身份稳定）。
- *
- * `StoredSections` 的键全是可选的，空对象在这里是正确的 —— 表单会把每个板块当空数组渲染。
+ * 按学期分组。Map 保持插入顺序，配合 SQL 的 created_at 升序，分组顺序稳定可预期。
  */
-const EMPTY_SECTIONS: StoredSections = {}
-
-/** 按学期分组。Map 保持插入顺序，配合 SQL 的 created_at 升序，分组顺序稳定可预期。 */
 function groupBySemester(courses: Course[]): { semester: string; courses: Course[] }[] {
   const groups = new Map<string, Course[]>()
   for (const course of courses) {
@@ -111,13 +104,6 @@ export default async function DashboardPage() {
     courses.map((course) => course.id),
   )
 
-  // 五板块（P0-1-6 编辑表单的初值）。契约没有「读板块」的端点，
-  // 走服务组件直查 —— 与 loadLatestSyllabi 同一模式。
-  const { byCourse: sectionsByCourse, error: sectionsError } = await loadCourseSections(
-    supabase,
-    courses.map((course) => course.id),
-  )
-
   return (
     <main className="min-h-screen bg-background text-foreground">
       <header className="border-b border-border">
@@ -161,15 +147,6 @@ export default async function DashboardPage() {
           </div>
         ) : null}
 
-        {sectionsError ? (
-          <div role="alert" className="rounded-lg border border-destructive/40 bg-card p-4">
-            <p className="text-sm font-medium text-destructive">五板块内容加载失败</p>
-            <p className="mt-1 text-sm text-muted-foreground">
-              课程列表不受影响，但展开的板块会是空的 —— 此时保存会把板块清空，
-              请刷新重试后再编辑。{sectionsError}
-            </p>
-          </div>
-        ) : null}
 
         {!error && courses.length === 0 ? (
           <div className="rounded-xl border border-dashed border-border p-10 text-center">
@@ -188,7 +165,6 @@ export default async function DashboardPage() {
                   key={course.id}
                   course={course}
                   syllabus={syllabiByCourse.get(course.id) ?? null}
-                  sections={sectionsByCourse.get(course.id) ?? EMPTY_SECTIONS}
                 />
               ))}
             </div>

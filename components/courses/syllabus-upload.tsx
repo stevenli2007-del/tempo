@@ -4,6 +4,7 @@ import { useRouter } from 'next/navigation'
 import { useRef, useState } from 'react'
 
 import { readApiErrorMessage } from '@/lib/api/client-error'
+import { syllabusStatusText } from '@/components/courses/syllabus-status'
 import { createClient } from '@/lib/supabase/browser'
 import { ALLOWED_EXTENSIONS, MAX_FILE_SIZE_BYTES, extractExtension, isAllowedExtension } from '@/lib/syllabi'
 import { Button } from '@/components/ui/button'
@@ -211,7 +212,9 @@ export function SyllabusUpload({ courseId, syllabus }: SyllabusUploadProps) {
             <p className="truncate text-sm font-medium text-foreground" title={syllabus.fileName}>
               {syllabus.fileName}
             </p>
-            <p className="mt-0.5 text-xs text-muted-foreground">{statusText(syllabus)}</p>
+            <p className="mt-0.5 text-xs text-muted-foreground">
+              {syllabusStatusText(syllabus)}
+            </p>
           </div>
 
           <div className="flex shrink-0 items-center gap-1">
@@ -343,22 +346,4 @@ export function SyllabusUpload({ courseId, syllabus }: SyllabusUploadProps) {
       ) : null}
     </div>
   )
-}
-
-/** syllabus 一行的状态文案（extract 与 parse 两层分开表达）。 */
-function statusText(syllabus: Syllabus): string {
-  if (syllabus.extractStatus === 'pending') return '已上传，等待文本提取'
-  if (syllabus.extractStatus === 'failed') {
-    return syllabus.extractError ?? '文本提取失败，可手动补充'
-  }
-  switch (syllabus.parseStatus) {
-    case 'completed':
-      return '已解析完成，可点下方「五个板块」查看和编辑'
-    case 'processing':
-      return '解析中…'
-    case 'failed':
-      return syllabus.parseError ?? '解析失败，可重试或手动补充'
-    default:
-      return '已提取文本，等待解析'
-  }
 }

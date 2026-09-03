@@ -1,11 +1,13 @@
 import { COURSE_COLUMNS, parseUpdateCourseInput, toCourse, toCourseUpdate } from '@/lib/courses'
 import type { CourseRow } from '@/lib/courses'
+import { loadCourseDetail } from '@/lib/course-detail'
 import { getCurrentUser, internalError, jsonError, jsonOk } from '@/lib/api/response'
 import { UUID_PATTERN } from '@/lib/api/params'
 
 /**
  * 单个课程端点（API-Contract.md 第 2 节）。
  *
+ * GET    课程详情 + 五个板块（合成一个大对象，P0-1-8）
  * PATCH  更新课程元信息
  * DELETE 归档（is_archived = true），不是物理删除
  *
@@ -21,6 +23,34 @@ import { UUID_PATTERN } from '@/lib/api/params'
 interface RouteContext {
   // Next 15+ 起 params 是 Promise，必须 await。
   params: Promise<{ id: string }>
+}
+
+export async function GET(request: Request, { params }: RouteContext) {
+  try {
+    const { id } = await params
+    if (!UUID_PATTERN.test(id)) {
+      return jsonError(request, 400, 'bad_request', '课程 ID 格式不正确')
+    }
+
+    const { supabase, user } = await getCurrentUser()
+    if (!user) {
+      return jsonError(request, 401, 'unauthenticated', '请先登录')
+    }
+
+    // 读逻辑在 lib/course-detail.ts，与详情页服务端组件共用一份。
+    const { found, detail, error } = await loadCourseDetail(supabase, id)
+    if (error) {
+      throw new Error(error)
+    }
+    if (!found || !detail) {
+      // ADR-010：不存在与越权统一 404；归档课程同样当不存在。
+      return jsonError(request, 404, 'not_found', '课程不存在或无权访问')
+    }
+
+    return jsonOk(request, detail)
+  } catch (error) {
+    return internalError(request, error)
+  }
 }
 
 export async function PATCH(request: Request, { params }: RouteContext) {

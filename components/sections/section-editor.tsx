@@ -6,15 +6,26 @@ import { ExamDatesForm } from '@/components/sections/exam-dates-form'
 import { GradeComponentsForm } from '@/components/sections/grade-components-form'
 import { OfficeHoursForm } from '@/components/sections/office-hours-form'
 import { OutlineItemsForm } from '@/components/sections/outline-items-form'
+import {
+  ExamDatesView,
+  GradeComponentsView,
+  OfficeHoursView,
+  OutlineItemsView,
+  SubmissionPoliciesView,
+} from '@/components/sections/section-view'
 import { SubmissionPoliciesForm } from '@/components/sections/submission-policies-form'
 import type { StoredSections } from '@/types/sections'
 
 /**
- * 课程卡片内的五板块编辑器（P0-1-6）。
+ * 五板块区块（P0-1-6 建、P0-1-8 加查看模式）。
  *
- * 结构：折叠面板 + 五个 tab（每板块一个 `PUT` 端点，独立保存）。
- * 数据初值由 dashboard 服务端直查（`lib/sections.ts`），保存走契约 §4 的 PUT。
- * 正式课程详情页是 P0-1-8 —— 这里刻意不新增路由。
+ * 两种模式：
+ * - **查看**：只读展示，缺失项显示 TBD（P0-1-8 验收标准：缺失项显示 TBD 而非空白）。
+ * - **编辑**：五个表单，每板块一个 `PUT` 端点，独立保存（P0-1-5b）。
+ *
+ * 数据初值由服务端直查下发（`lib/sections.ts` / `lib/course-detail.ts`），
+ * 契约里五板块**没有 GET 端点**，完整接口 `GET /api/v1/courses/:id` 由 P0-1-8 提供，
+ * 只给外部消费用 —— 页面本身不 fetch 自己的 API。
  */
 
 const TABS = [
@@ -26,18 +37,23 @@ const TABS = [
 ] as const
 
 type TabKey = (typeof TABS)[number]['key']
+type Mode = 'view' | 'edit'
 
 export function SectionEditor({
   courseId,
   sections,
   parseStatus,
+  defaultOpen = false,
 }: {
   courseId: string
   sections: StoredSections
   /** 最新 syllabus 的解析状态：未解析过就提示先解析/手动补。 */
   parseStatus: 'none' | 'pending' | 'processing' | 'completed' | 'failed'
+  /** 详情页默认展开（总览卡片里默认折叠）。 */
+  defaultOpen?: boolean
 }) {
-  const [open, setOpen] = useState(false)
+  const [open, setOpen] = useState(defaultOpen)
+  const [mode, setMode] = useState<Mode>('view')
   const [tab, setTab] = useState<TabKey>('grade')
 
   const counts: Record<TabKey, number> = {
@@ -57,24 +73,35 @@ export function SectionEditor({
 
   return (
     <div className="mt-3 rounded-lg border border-border bg-muted/40 p-3">
-      <button
-        type="button"
-        onClick={() => setOpen((v) => !v)}
-        className="flex w-full items-center justify-between text-left"
-      >
-        <span className="text-sm font-medium text-foreground">五个板块</span>
-        <span className="text-xs text-muted-foreground">{open ? '收起 ▴' : '编辑 / 查看 ▾'}</span>
-      </button>
+      <div className="flex items-center justify-between gap-2">
+        <button
+          type="button"
+          onClick={() => setOpen((v) => !v)}
+          className="flex items-center gap-2 text-left"
+        >
+          <span className="text-sm font-medium text-foreground">五个板块</span>
+          <span className="text-xs text-muted-foreground">{open ? '收起 ▴' : '展开 ▾'}</span>
+        </button>
+        {open ? (
+          <button
+            type="button"
+            onClick={() => setMode((m) => (m === 'view' ? 'edit' : 'view'))}
+            className="h-7 rounded-md border border-border bg-background px-2.5 text-xs text-foreground"
+          >
+            {mode === 'view' ? '编辑' : '完成'}
+          </button>
+        ) : null}
+      </div>
 
       {open && parseStatus === 'none' ? (
         <p className="mt-3 text-sm text-muted-foreground">
-          还没有解析过的数据。可以先上传并解析 syllabus，也可以直接在下面手动补条目。
+          还没有解析过的数据。可以先上传并解析 syllabus，也可以点「编辑」手动补条目。
         </p>
       ) : null}
 
       {open && parseStatus === 'failed' ? (
         <p className="mt-3 text-sm text-muted-foreground">
-          上次解析失败了（换模型或改 prompt 后可重新解析）。你也可以直接在下面手动补条目。
+          上次解析失败了（换模型或改 prompt 后可重新解析）。你也可以点「编辑」手动补条目。
         </p>
       ) : null}
 
@@ -101,41 +128,61 @@ export function SectionEditor({
           </div>
 
           <div className="mt-3">
-            {tab === 'grade' ? (
-              <GradeComponentsForm
-                key={keyOf(sections.gradeComposition)}
-                courseId={courseId}
-                items={sections.gradeComposition ?? []}
-              />
-            ) : null}
-            {tab === 'outline' ? (
-              <OutlineItemsForm
-                key={keyOf(sections.courseOutline)}
-                courseId={courseId}
-                items={sections.courseOutline ?? []}
-              />
-            ) : null}
-            {tab === 'exams' ? (
-              <ExamDatesForm
-                key={keyOf(sections.testDates)}
-                courseId={courseId}
-                items={sections.testDates ?? []}
-              />
-            ) : null}
-            {tab === 'officeHours' ? (
-              <OfficeHoursForm
-                key={keyOf(sections.officeHours)}
-                courseId={courseId}
-                items={sections.officeHours ?? []}
-              />
-            ) : null}
-            {tab === 'policies' ? (
-              <SubmissionPoliciesForm
-                key={keyOf(sections.submissionPolicy)}
-                courseId={courseId}
-                items={sections.submissionPolicy ?? []}
-              />
-            ) : null}
+            {mode === 'view' ? (
+              <>
+                {tab === 'grade' ? (
+                  <GradeComponentsView items={sections.gradeComposition ?? []} />
+                ) : null}
+                {tab === 'outline' ? (
+                  <OutlineItemsView items={sections.courseOutline ?? []} />
+                ) : null}
+                {tab === 'exams' ? <ExamDatesView items={sections.testDates ?? []} /> : null}
+                {tab === 'officeHours' ? (
+                  <OfficeHoursView items={sections.officeHours ?? []} />
+                ) : null}
+                {tab === 'policies' ? (
+                  <SubmissionPoliciesView items={sections.submissionPolicy ?? []} />
+                ) : null}
+              </>
+            ) : (
+              <>
+                {tab === 'grade' ? (
+                  <GradeComponentsForm
+                    key={keyOf(sections.gradeComposition)}
+                    courseId={courseId}
+                    items={sections.gradeComposition ?? []}
+                  />
+                ) : null}
+                {tab === 'outline' ? (
+                  <OutlineItemsForm
+                    key={keyOf(sections.courseOutline)}
+                    courseId={courseId}
+                    items={sections.courseOutline ?? []}
+                  />
+                ) : null}
+                {tab === 'exams' ? (
+                  <ExamDatesForm
+                    key={keyOf(sections.testDates)}
+                    courseId={courseId}
+                    items={sections.testDates ?? []}
+                  />
+                ) : null}
+                {tab === 'officeHours' ? (
+                  <OfficeHoursForm
+                    key={keyOf(sections.officeHours)}
+                    courseId={courseId}
+                    items={sections.officeHours ?? []}
+                  />
+                ) : null}
+                {tab === 'policies' ? (
+                  <SubmissionPoliciesForm
+                    key={keyOf(sections.submissionPolicy)}
+                    courseId={courseId}
+                    items={sections.submissionPolicy ?? []}
+                  />
+                ) : null}
+              </>
+            )}
           </div>
         </>
       ) : null}
