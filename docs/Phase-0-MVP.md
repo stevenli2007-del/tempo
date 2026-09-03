@@ -34,7 +34,11 @@
 > 📌 **P0-1-4 五板块抽取 prompt v1 已完成 ✅（2026-09-02）**
 > - `types/parse.ts` + `lib/parse/`（schemas / prompts / index）已交付；`parseSyllabusSections()` 五板块并发调用、单块失败不影响其余。
 > - **核心设计：`sourceExcerpt`** —— 每个条目都带≤200 字的原文逐字摘录，逼模型给依据、让用户可核对，且直接对应五张表都有的 `source_excerpt` 列。
-> - **`P0-1-5` 开工提示**：① 调用方看 `okSections.length`（不是 `ok`）判断有没有可落库的结果 —— **部分成功是常态**；② `ExamDate.status` 由 `examDate` 派生，别让模型填；③ 五张表的 snake_case 映射写在各自的 `lib/*.ts` 里，`lib/parse/index.ts` 不碰 DB。
+> - **`P0-1-5` 开工提示**：① 调用方看 `okSections.length`（不是 `ok`）判断有没有可落库的结果 —— **部分成功是常态**；② `ExamDate.status` 由 `examDate` 派生，别让模型填；③ 五张表的 snake_case 映射写在各自的 `lib/*.ts` 里，`lib/parse/index.ts` 不碰 DB；④ **验收时必须补做 P0-1-3 / P0-1-4 的生产验证** —— 这两个都是纯库层，此前只在本地验过，P0-1-5 是第一个能打到它们的端点。
+
+> 📌 **P0-1-3 代码验收通过 ✅（2026-09-02，Steven 按 Option A 收口）**
+> - **状态**：`lib/llm` 六件套已交付，本地自测全绿；Steven 手动项（Vercel key + Redeploy、删测试账号、push）**全部完成**。
+> - **⚠️ 生产验证并入 P0-1-5**：`lib/llm` 是纯库层、零 HTTP 出口，现有 6 个端点无一 import 它，打生产域名验不到。第一个真正调 LLM 的端点是 P0-1-5，**届时必须补做**（key 注入 / adapter 在 Vercel 跑通 / 审计落库）。详见 P0-1-3 执行卡。
 
 > 📌 **P0-1-7 / P0-1-1 / P0-1-2 / P0-1-3 / P0-1-4 均已完成 ✅（2026-09-02）**
 > - **ADR-010 已拍板接受**：RLS 保护的资源，「越权」与「不存在」统一返回 `404`，Phase 0 不用 403。契约文档已同步改（§1.2 / §1.4），**后续所有资源端点按此执行，不再逐个论证**。
@@ -278,9 +282,14 @@
   2. **环境变量覆写做分支测试时，每个 case 前必须先恢复原值。** 本次诊断路由的循环只在中途恢复一次，导致「缺 key」「坏 timeout」两个 case 实际测到的都是上一个 case 泄漏的 `LLM_PROVIDER=openai`，报错全变成「provider 名不合法」，把真实错误掩盖了。
   3. **改完路由要重建再测**：删掉路由后 `.next/types/validator.ts` 仍留着旧引用，`tsc --noEmit` 会报 `Cannot find module '.../diag-tmp-llm/route.js'`。这不是代码问题，重建一次即可。
 - **自测（Bud，2026-09-02）：全绿**。配置读取、schema 校验器 7 个用例（含可空字段 / 数组项 / 枚举 / integer 当 number）、4 类配置错误各有明确中文报错、真实调用成功（MATH 53 样例抽出 4 项权重全对，920ms）、`schema_mismatch`（retryable=true）、错误 key → `provider_error`（retryable=false）、1ms 超时 → `request_failed`（retryable=true）、审计成功行与失败行都落库、**RLS 跨用户隔离**（user2 查 `llm_runs` 得 0 行，user1 得 3 行）。
-- **⚠️ 未完成项（需 Steven 手动）**：
-  1. **Vercel 环境变量**：Production + Preview 各加 `DEEPSEEK_API_KEY`，**加完必须手动 Redeploy**（否则已完成的 build 不带新变量）。
-  2. **Supabase 里留了 2 个测试账号**（`llm-diag@test.dev` / `llm-diag2@test.dev`）删不掉——没有 service role key，需 Dashboard 手动删。`llm_runs` 的测试行已清空（本人可见 0 行）。
+- **✅ Steven 手动项已完成（2026-09-02）**：
+  1. **Vercel 环境变量**：`DEEPSEEK_API_KEY` 已加（Production），已 Redeploy。
+  2. **测试账号已删**：`llm-diag@test.dev` / `llm-diag2@test.dev`（Bud 无 service role key，删不掉）。`llm_runs` 测试行已清空。
+  3. **已 push**：`de7c02d`（P0-1-3）+ `85ab88f`（P0-1-4）已到 `origin/main`。
+- **⚠️ 生产验证并入 P0-1-5（2026-09-02，Steven 拍板 Option A）**：
+  - **原因**：`lib/llm` 是**纯库层，零 HTTP 出口** —— 现有 6 个端点没有任何一个 import 它，唯一引用方是 `lib/parse/index.ts`（同样无路由引用）。**打生产域名验证不到它**，第一个真正调 LLM 的端点是 P0-1-5。
+  - **为什么可以延后**：`lib/llm` 用原生 `fetch`，**无原生二进制、无浏览器 API、无 worker/wasm** —— 与当初 PDF 那个坑（缺 `@napi-rs/canvas` 原生二进制导致 import 即 500）性质完全不同，本地绿但线上炸的概率低。残留风险只剩「key 是否真注入 deployment」，而它的失败方式是**响亮的**（抛中文 `LLMConfigError`），不是静默错误数据。
+  - **P0-1-5 验收时必须补做**：真实调一次 DeepSeek，确认 ① key 注入生效 ② adapter 在 Vercel runtime 跑通 ③ `llm_runs` 审计行落库。
 - **已知留白**：① 没有重试逻辑（Phase 0 由调用方决定是否重试，`retryable` 字段已给出依据）；② 没有并发/限流控制；③ `syllabus_parse` 的 prompt 本体在 P0-1-4。
 
 #### 🎫 P0-1-7 · Workspace CRUD（课程创建 / 列表 / 编辑 / 删除）· ✅ 已完成，勿重做
