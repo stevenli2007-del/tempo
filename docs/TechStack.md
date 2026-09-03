@@ -105,24 +105,66 @@ Next.js App（前端页面 + Route Handlers 后端逻辑）
 ```
 lib/llm/
   index.ts          → 对外统一入口：getLLMProvider()
-  types.ts          → LLMProvider 接口 + 请求/响应类型
+  types.ts          → LLMProvider 接口 + 请求/响应类型 + JSON Schema 子集
+  env.ts            → 环境变量读取与校验（缺 key / 坏值立刻抛明确中文错误）
+  schema.ts         → validateJsonSchema()：校验模型输出是否符合 schema
+  run.ts            → runStructured()：调模型 + 每次调用写 llm_runs 审计
   providers/
-    deepseek.ts     → 默认 provider
-    claude.ts       → 兜底 provider（自带多模态能力）
+    deepseek.ts     → 默认 provider（原生 fetch，不引厂商 SDK）
+    claude.ts       → 兜底 provider，**尚未实现**
 ```
 
-**统一接口（示意）**
+> **P0-1-3 已交付 `index/types/env/schema/run` + `providers/deepseek.ts`。**
+> `providers/claude.ts` **故意不写** —— 一段从未真正调通过的死代码比明确报错更危险。
+> `LLM_PROVIDER=claude` 时 `getLLMEnv()` 直接抛："claude adapter 尚未实现…要启用需先补 adapter 并自测"。
+
+**统一接口（已实现）**
 
 ```ts
 interface LLMProvider {
-  name: string;
-  /** 结构化抽取：传入 prompt + JSON schema，返回符合 schema 的对象 */
+  readonly name: string;   // 写进 llm_runs.provider
+  readonly model: string;  // 写进 llm_runs.model
   extractStructured<T>(params: {
-    schema: JSONSchema;
-    messages: Message[];
-  }): Promise<Result<T>>;   // Result，不抛裸异常
+    schema: JSONSchema;       // 同时用于约束模型输出 + 校验返回值
+    schemaName?: string;      // 拼进指令帮模型理解，如 GradeComposition
+    messages: LLMMessage[];
+    temperature?: number;     // 抽取场景默认 0（要稳定不要发散）
+    maxOutputTokens?: number;
+  }): Promise<LLMResult<T>>;  // 判别联合，不抛裸异常
 }
+
+type LLMResult<T> =
+  | { ok: true;  data: T;     usage: LLMUsage }
+  | { ok: false; error: LLMError; usage: LLMUsage | null }
 ```
+
+**错误码**（全部收敛为 `LLMErrorCode`，`LLMError.retryable` 标明能否重试）
+
+| code | 含义 | 可重试 |
+|---|---|---|
+| `config_error` | 环境变量缺失 / provider 名不认识 / adapter 未实现 | ❌ |
+| `request_failed` | 网络不可达或超时 | ✅ |
+| `provider_error` | 厂商非 2xx（401 key 无效 / 429 限流 / 5xx）；429 与 5xx 可重试 | 视状态码 |
+| `invalid_response` | 响应结构不对或内容不是合法 JSON | ✅ |
+| `schema_mismatch` | JSON 合法但不符合 schema（模型跑偏） | ✅ |
+| `refused` | 被内容安全策略拦截 | ❌ |
+
+**环境变量**（均无 `NEXT_PUBLIC_` 前缀 —— LLM key 是密钥，打了前缀就进前端产物）
+
+| 变量 | 默认 | 说明 |
+|---|---|---|
+| `LLM_PROVIDER` | `deepseek` | 只接受 `deepseek` / `claude` |
+| `DEEPSEEK_API_KEY` | — | provider 为 deepseek 时**必填** |
+| `ANTHROPIC_API_KEY` | — | provider 为 claude 时必填（adapter 未实现，暂用不到） |
+| `LLM_MODEL` | `deepseek-chat` | 换模型不改代码 |
+| `LLM_TIMEOUT_MS` | `120000` | 必须是正整数毫秒 |
+
+> ⚠️ **Vercel 上新增/修改环境变量后必须手动 Redeploy**，已完成的 build 不会带新变量（P0-0-6 踩过）。
+
+**⚠️ `llm_runs.model` 记的是「实际服务的模型」而不是「请求时填的模型」（2026-09-02 实测）**
+`deepseek-chat` 这类别名会静默指向不同底座 —— 本次实测请求 `deepseek-chat`，响应里回来的
+是 `deepseek-v4-flash`。记别名的话，将来按模型维度对比解析准确率会失真。
+因此 `run.ts` 优先取 provider 返回的 usage 里的模型名，只有拿不到 usage（配置错误等）才退回配置值。
 
 **硬性要求**
 

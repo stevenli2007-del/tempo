@@ -29,9 +29,14 @@
 
 ## 当前进度指针
 
-**当前 task**：`P0-1-3` LLM provider 抽象层（`lib/llm`）：DeepSeek adapter + 结构化输出 + 错误处理
+**当前 task**：`P0-1-4` 五板块抽取 prompt v1（Grade Composition / Course Outline / Test Dates / Office Hours / Submission Policy）
 
-> 📌 **P0-1-7 / P0-1-1 / P0-1-2 均已完成 ✅（2026-09-02）**
+> 📌 **P0-1-3 LLM 抽象层已完成 ✅（2026-09-02）**
+> - `lib/llm/` 六件套（index / types / env / schema / run + providers/deepseek）已交付，抽象层硬性要求 5 条全部满足。
+> - **⚠️ 未收口的两件事（Steven 手动）**：① Vercel Production + Preview 各加 `DEEPSEEK_API_KEY`，**加完必须 Redeploy**；② Supabase 里 2 个测试账号（`llm-diag@test.dev` / `llm-diag2@test.dev`）需在 Dashboard 手动删（无 service role key 删不掉）。
+> - **`P0-1-4` 开工提示**：直接用 `runStructured()`，别用 `getLLMProvider()` —— 前者自动落 `llm_runs` 审计。抽板 prompt 的 schema 用模块级 `as const` 常量（类型已接受 readonly 数组）。
+
+> 📌 **P0-1-7 / P0-1-1 / P0-1-2 / P0-1-3 均已完成 ✅（2026-09-02）**
 > - **ADR-010 已拍板接受**：RLS 保护的资源，「越权」与「不存在」统一返回 `404`，Phase 0 不用 403。契约文档已同步改（§1.2 / §1.4），**后续所有资源端点按此执行，不再逐个论证**。
 > - **P0-1-1 / P0-1-2 的浏览器 UI 已由 Steven 本地验收通过（2026-09-02，合并验收）**：两者共用 `syllabus-upload.tsx` 一个组件，上传 → 提取状态 → 文本预览 → 错误提示文案走一遍覆盖两个 task。M1 前三个 task 全部收口，下一 task 为 P0-1-3。
 
@@ -144,7 +149,7 @@
 |---|---|---|---|---|---|
 | **P0-1-1** | 文件存储：syllabus 上传入口 + Supabase Storage + 类型/大小校验（PDF / docx / pptx） | Bud | P0-0-6, **P0-1-7** | 可上传并取回文件；非法类型被拒绝且有提示 | ✅ |
 | **P0-1-2** | 文本提取管线（PDF / docx / pptx），抽不出时**明确降级提示**而非静默返回空 | Bud | P0-1-1 | 三种格式各测一份真实文件；扫描件走降级提示不崩溃 | ✅ |
-| **P0-1-3** | LLM provider 抽象层（`lib/llm`）：默认 DeepSeek adapter + JSON schema 结构化输出 + 错误处理 | Bud | P0-0-6 | 抽象层可用；切换 provider 只改配置不动业务代码（[ADR-003](./Decisions.md#adr-003)） | ⚪ |
+| **P0-1-3** | LLM provider 抽象层（`lib/llm`）：默认 DeepSeek adapter + JSON schema 结构化输出 + 错误处理 | Bud | P0-0-6 | 抽象层可用；切换 provider 只改配置不动业务代码（[ADR-003](./Decisions.md#adr-003)） | ✅ |
 | **P0-1-4** | 五板块抽取 prompt v1：Grade Composition / Course Outline / Test Dates / Office Hours / Submission Policy，**拆成独立抽取任务** | Bud | P0-1-3 | 每板块独立调用；输出符合 schema；缺失字段返回 null 不编造 | ⚪ |
 | **P0-1-5** | 解析 API 路由 + 结果落库 + **修正 diff 存储**（保存原始解析 vs 修正后 + 差异字段） | Bud | P0-1-2, P0-1-4 | 数据库同时存有原始与修正版本，可追溯差异 | ⚪ |
 | **P0-1-6** | 可编辑表单 UI：五个板块逐项编辑 / 补全 / 覆盖 + 保存 | Bud | P0-1-5 | 可修改任一字段并保存；TBD 状态可正常展示与编辑 | ⚪ |
@@ -229,6 +234,32 @@
   - 测试文件用 python `zipfile` 手工生成最小合法 pdf / docx / pptx（docx、pptx 本质都是 zip + XML），不依赖任何 Office 工具。
 - **✅ 浏览器 UI 已由 Steven 本地验收通过（2026-09-02，与 P0-1-1 合并验收）**。
 - **已知留白**：① 提取失败的行没有「重试提取」入口（Phase 0 无存量数据，重新上传即可）；② `maxDuration = 60` 是为 20MB PDF 留的，Vercel 套餐若更低需下调。
+
+#### 🎫 P0-1-3 · LLM provider 抽象层（`lib/llm`）· ✅ 已完成，勿重做
+- **做什么**：按 [ADR-003](./Decisions.md#adr-003) 建可插拔 LLM 抽象层，默认 DeepSeek；结构化输出走 JSON schema；每次调用落 `llm_runs` 审计。
+- **改哪些文件（全部新增）**：
+  - `lib/llm/types.ts` —— `LLMProvider` 接口 + `LLMResult<T>` 判别联合 + `LLMErrorCode` + JSON Schema 子集
+  - `lib/llm/env.ts` —— 环境变量读取与校验，缺 key / 坏值抛 `LLMConfigError`（明确中文，可直接照做）
+  - `lib/llm/schema.ts` —— `validateJsonSchema()`，校验模型输出是否符合 schema，返回带 JSON Pointer 的中文错误
+  - `lib/llm/providers/deepseek.ts` —— DeepSeek adapter，**原生 `fetch`，不引厂商 SDK**
+  - `lib/llm/index.ts` —— `getLLMProvider()` 唯一入口
+  - `lib/llm/run.ts` —— `runStructured()`：调模型 + **每次调用写 `llm_runs`**（成功与失败都写）
+  - `.env.example` / `.env.local` —— 登记 `LLM_PROVIDER` / `DEEPSEEK_API_KEY` / `LLM_MODEL` / `LLM_TIMEOUT_MS`
+- **关键约束**：
+  - **业务代码只依赖 `LLMProvider` 接口**，不许 import 厂商 SDK —— 换 provider 只改 `LLM_PROVIDER`。
+  - **厂商异常绝不穿透**：配置错误 / 网络失败 / 非 2xx / 非法 JSON / 不符 schema，一律收敛成 `LLMResult` 的 error 分支。
+  - **`llm_runs` 只存元数据，不存 prompt 与响应原文**（`Security-Privacy.md` 第 8 节）；`error_message` 只有错误分类 + 精简说明，截断 500 字符，不含 syllabus 内容。
+  - **审计失败不影响调用结果**：度量表写不进去，不该让用户这次解析白跑一遍。用会话 client（不是 service role），即便 `user_id` 传错也只是写不进去，不污染别人数据。
+  - **`providers/claude.ts` 故意不写**：一段从未调通过的死代码比明确报错更危险。要切 Claude 时先写 adapter + 自测。
+- **🔴 踩过的坑（下一个人别再踩）**：
+  1. 🔥 **`llm_runs.model` 必须记「实际服务的模型」，不能记「请求时填的模型」。** 实测请求 `deepseek-chat`，响应里回来的是 `deepseek-v4-flash`。别名会静默指向不同底座，记别名的话将来按模型维度对比解析准确率就失真了。只有拿不到 usage 时才退回配置值。
+  2. **环境变量覆写做分支测试时，每个 case 前必须先恢复原值。** 本次诊断路由的循环只在中途恢复一次，导致「缺 key」「坏 timeout」两个 case 实际测到的都是上一个 case 泄漏的 `LLM_PROVIDER=openai`，报错全变成「provider 名不合法」，把真实错误掩盖了。
+  3. **改完路由要重建再测**：删掉路由后 `.next/types/validator.ts` 仍留着旧引用，`tsc --noEmit` 会报 `Cannot find module '.../diag-tmp-llm/route.js'`。这不是代码问题，重建一次即可。
+- **自测（Bud，2026-09-02）：全绿**。配置读取、schema 校验器 7 个用例（含可空字段 / 数组项 / 枚举 / integer 当 number）、4 类配置错误各有明确中文报错、真实调用成功（MATH 53 样例抽出 4 项权重全对，920ms）、`schema_mismatch`（retryable=true）、错误 key → `provider_error`（retryable=false）、1ms 超时 → `request_failed`（retryable=true）、审计成功行与失败行都落库、**RLS 跨用户隔离**（user2 查 `llm_runs` 得 0 行，user1 得 3 行）。
+- **⚠️ 未完成项（需 Steven 手动）**：
+  1. **Vercel 环境变量**：Production + Preview 各加 `DEEPSEEK_API_KEY`，**加完必须手动 Redeploy**（否则已完成的 build 不带新变量）。
+  2. **Supabase 里留了 2 个测试账号**（`llm-diag@test.dev` / `llm-diag2@test.dev`）删不掉——没有 service role key，需 Dashboard 手动删。`llm_runs` 的测试行已清空（本人可见 0 行）。
+- **已知留白**：① 没有重试逻辑（Phase 0 由调用方决定是否重试，`retryable` 字段已给出依据）；② 没有并发/限流控制；③ `syllabus_parse` 的 prompt 本体在 P0-1-4。
 
 #### 🎫 P0-1-7 · Workspace CRUD（课程创建 / 列表 / 编辑 / 删除）· ✅ 已完成，勿重做
 - **做什么**：课程 CRUD。列表按学期分组展示；删除 = 归档，带二次确认。
@@ -338,4 +369,5 @@ P0-0 基础设施
 | 2026-09-02 | 🔥 **生产事故修复：PDF 提取器由 `pdf-parse` 2.4.5 换成 `pdfjs-dist` 5.4.296（legacy 构建）**。`pdf-parse` 模块顶层无条件 `new DOMMatrix()`，DOMMatrix 靠 `require('@napi-rs/canvas')` 补、加载失败只 warn 不赋值 → **Vercel 上 extract 路由 import 即 500（空响应体）**，本地 macOS 因装有 23MB 原生二进制而全绿。排查手段：临时诊断路由逐个 `import` 抓错误消息（**下划线目录 `_diag` 是私有目录不建路由，改名 `diag-tmp` 才生效**）。连带把 `isStorageObjectNotFoundError()` 抽到 `lib/syllabi.ts` 共用，并修掉 **download 端点漏判 `NoSuchKey` 导致悬挂行返回 500** 的真 bug（冒烟抓到）。`API-Contract.md` 补 download 的 `404 file_missing` 语义与提取器换版记录。**端到端冒烟 41/41 全绿** |
 | 2026-09-02 | 🔥🔥 **生产事故修复（第二轮，最终方案）：PDF 提取器定为 `unpdf` 1.8.1**。上一轮的 `pdfjs-dist` legacy 构建**在 Vercel 上同样 500** —— 我此前「legacy 自带 DOMMatrix polyfill」的判断是错的，本地看到的 `DOMMatrix` 其实仍由 `@napi-rs/canvas` 提供，**本地测试环境被同一个「只存在于本地的依赖」污染**。三者（pdf-parse、pdfjs 现代构建、pdfjs legacy 构建）死在同一处：模块作用域 `new DOMMatrix()`，canvas 缺失时只 warn 不赋值。unpdf 自带为 serverless 重打包的 pdfjs（worker 内联 + 剥浏览器 API + 补全局对象），**零运行时依赖、不需要 canvas**。`pdfjs-dist` 保留为**纯数据依赖**（`standard_fonts/` + `cmaps/`，靠 `outputFileTracingIncludes` 打进函数包）。同步新增 [ADR-011](./Decisions.md#adr-011)。**本地端到端冒烟 57/57 全绿；生产实测（linux / node 24 / DOMMatrix 未定义）提取正常，extract 与 download 端点 401/400 均恢复正常** |
 | 2026-09-02 | **P0-1-1 + P0-1-2 浏览器 UI 验收通过 ✅（Steven 本地，合并验收，共用 `syllabus-upload.tsx`）**。M1 前三个 task（P0-1-7 / P0-1-1 / P0-1-2）全部收口，两张执行卡标注「勿重做」。进度指针维持 `P0-1-3` LLM provider 抽象层（下一 task） |
+| 2026-09-02 | **P0-1-3 LLM provider 抽象层完成 ✅**。新增 `lib/llm/` 六件套：`index.ts`（`getLLMProvider()`）/ `types.ts`（`LLMProvider` + `LLMResult<T>` + `LLMErrorCode` + JSON Schema 子集）/ `env.ts`（缺 key、坏 timeout 抛明确中文 `LLMConfigError`）/ `schema.ts`（`validateJsonSchema()`，报错带 JSON Pointer）/ `providers/deepseek.ts`（原生 fetch，不引厂商 SDK）/ `run.ts`（`runStructured()` 每次调用写 `llm_runs`，成功失败都写）。抽象层硬性要求 5 条全部满足（只依赖接口、切换只改配置、厂商异常不穿透、每次调用记审计、结构化输出走 schema 禁正则解析）。**实测踩到一个真教训**：请求 `deepseek-chat` 回来的是 `deepseek-v4-flash`，因此 `llm_runs.model` 记「实际服务的模型」而非「请求时填的模型」，否则按模型维度对比准确率会失真。自测全绿：配置 4 类错误各有明确中文报错、schema 校验器 7 用例、真实调用成功（MATH 53 权重 4 项全对）、`schema_mismatch` / `provider_error` / `request_failed` 三条错误分支的 `retryable` 判定正确、审计成功行与失败行都落库、**RLS 跨用户隔离**（user2 查得 0 行 / user1 得 3 行）。`TechStack.md` §5.2 同步补齐实际文件结构、环境变量表与错误码表。进度指针推进至 `P0-1-4` 五板块抽取 prompt v1 |
 
