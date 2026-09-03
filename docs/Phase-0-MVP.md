@@ -45,18 +45,18 @@
 
 > 📌 **P0-1-5b 已验收通过 ✅（2026-09-03 11:50，Steven 验收）**：5 个 `PUT /api/v1/courses/:id/{板块}` 端点 + `lib/parse/save.ts`（编排）+ `lib/parse/corrections.ts`（字段级 diff + 归因）+ `lib/sync/exam-tasks.ts`（`syncExamToTask()`）+ `persist.ts` 接入派生。本地冒烟 **56/56**、生产验证 **18/18**（真实 `/parse` 归因、`llm_run_id`/`syllabus_id` 非 null 且真实存在）。commit `638a331`/`a959d45`/`54590cd`。
 > - **实现期决策（已写进 `API-Contract.md` §4 变更记录，无需 ADR）**：① request 不含 `status`（由 examDate 派生）；② 修正粒度 = 字段级（add/delete 也按字段拆，`order_index` 除外）；③ 归档课程保存 → 404；④ 归因取「最新 syllabus 最近一次成功解析」。
-> - **留白**：测试账号 `p15b-a/b@test.dev`（本地）+ `p15b-prod/prod2@test.dev`（生产）留在 auth.users 待 Steven 手动删（业务数据已清）。
+> - ~~**留白**：测试账号待删~~ ✅ **已于 2026-09-03 11:58 由 Steven 删除**。
 >
 > 📌 **P0-1-6 已验收通过 ✅（2026-09-03 11:50，Steven 浏览器验收）**：`lib/sections.ts`（服务端直查五表）+ `components/sections/`（编辑器 + 五个表单 + 共用 hook）+ `syllabus-upload.tsx` 补解析触发（开始 / 重试 / 重新解析带二次确认）。无头冒烟 17/17。commit `953658a`/`515807c`。
 > - **两个 Steven 拍板**：① 编辑 UI 放**课程卡片内折叠面板**（不新增路由）—— ⚠️ 此决策已被 P0-1-8 推翻，编辑器现居详情页；② **「重新解析」带上、带二次确认**。
-> - **留白**：测试账号 `p16-a-*/p16-b-*@test.dev` 留在 auth.users 待手动删（业务数据已清）。
+> - ~~**留白**：测试账号待删~~ ✅ **已于 2026-09-03 11:58 由 Steven 删除**。
 >
 > 📌 **P0-1-8 已验收通过 ✅（2026-09-03 11:50，Steven 浏览器验收）**：`GET /api/v1/courses/:id`（契约 §2，合成大对象）+ `lib/course-detail.ts`（读逻辑唯一一份，端点与页面共用）+ `app/(routes)/courses/[id]/page.tsx` + `components/sections/section-view.tsx`（TBD 展示层）+ SectionEditor 双模式 + 卡片瘦身。无头冒烟 34/34。commit `1796d56`/`3331b06`。
 > - **两个 Steven 拍板**：① **全部操作搬到详情页**（上传 / 解析 / 五板块编辑 / 课程信息编辑），卡片只留摘要 + 入口 + 删除；② 路由 `/courses/[id]`（列表页仍在 `/dashboard`）。
 > - **契约收敛（§2）**：`syllabus` 返回**完整 Syllabus 对象**（超集，UI 需要 `extractStatus` / `parseError`）；已归档课程按 404 处理。
 > - **顺手解决**：P0-1-6 留下的「dashboard 一次性加载所有课程五板块」开销随卡片瘦身一起消失。
 > - ⚠️ **1-6 与 1-8 的验收是同一次会话** —— 1-8 把编辑器从卡片搬到详情页后，1-6 的验收标准（改任一字段并保存 / TBD 展示与编辑）在详情页上验。
-> - **留白**：测试账号 `p18-a-*/p18-b-*@test.dev` 留在 auth.users 待手动删（业务数据已清）。
+> - ~~**留白**：测试账号待删~~ ✅ **已于 2026-09-03 11:58 由 Steven 删除**。
 
 > 📌 **P0-1-5a 已验收通过 ✅（2026-09-03，Steven 验收；测试账号已清理）**。代码 commit `bcd5a20` + 文档 commit（生产验证 14/14 + §10 部署延迟条目），均已 push。本地冒烟 44/44、生产验证 14/14（真实调 DeepSeek 4.4s、`llm_runs` 落 5 条 success）。
 
@@ -377,7 +377,7 @@
 - **已知留白**：① **无跨表事务**（supabase-js 不支持），逐表先删后插，中途失败会留下部分写入（失败即 500，重试可自愈）；② `llm_run_id` 归因不在五张板块表上（表无此列），只在 `parse_corrections`（P0-1-5b）；③ `GET /parse-status` 不实现（同步模式无中间态）。
 - **P0-1-5b 接着做**：5 个 `PUT` 板块保存端点 + `parse_corrections` diff + `exam-dates → tasks` 派生（`syncExamToTask()`）。
 
-#### 🎫 P0-1-5b · 五板块保存端点 + 修正 diff + 考试派生 · 🟡 代码完成 / 本地 56/56 + 生产 18/18 / 待 Steven 验收
+#### 🎫 P0-1-5b · 五板块保存端点 + 修正 diff + 考试派生 · ✅ **已验收通过（2026-09-03 11:50）· 勿重做**
 - **做什么**：`PUT /api/v1/courses/:id/{grade-components,outline-items,exam-dates,office-hours,submission-policies}`（API-Contract §4），全量替换 + 幂等 + 字段级 diff 留痕 + exam → tasks 派生。
 - **改哪些文件**：
   - `lib/parse/save.ts`（新）—— 共用编排 `handleSectionSave()`：课程校验 → 解析输入 → 读现有行 → diff → 插/改/删 → 写修正 → exam 派生 → 返回 `{ data: [...] }`。路由文件只是 15 行的分发壳。
@@ -394,9 +394,9 @@
   4. **`syncExamToTask()` 是 `tasks` 里考试派生行的唯一写入口**（Database.md 5.3），别在别处零散 insert。
 - **自测（Bud，2026-09-03）**：`tsc` ✅ ｜ `lint` ✅ ｜ `build` ✅（5 个新 ƒ 路由）｜ 冒烟 **56/56**（真实 `/parse` 一条：syllabus 来源行编辑后修正带非 null `llm_run_id` 且在 `llm_runs` 真实存在）。
 - **✅ 生产验证（2026-09-03，`a959d45` 部署 success 后实跑）**：冒烟 **18/18**——路由存在、grade-components 全流程（含 edit 修正 `weight_percent 20→25` 落库）、exam 派生（23:59:59 / tbd→null / 派生标记）、真实 `/parse` + 归因（`llm_run_id` / `syllabus_id` 均 non-null）、未登录 401 / 跨用户 404 / 非法日期 400、测试数据清干净。本次部署创建很快（未复现 13 分钟延迟）。
-- **已知留白**：① 无跨表事务（与 5a 同），插/改/删 + 修正 + 派生分步执行，中途 500 重试自愈；② 测试账号 `p15b-a/p15b-b@test.dev` + 生产 `p15b-prod/p15b-prod2@test.dev` 留在 auth.users 待 Steven 手动删（业务数据已清干净）。
+- **已知留白**：无跨表事务（与 5a 同），插/改/删 + 修正 + 派生分步执行，中途 500 重试自愈（已确认可接受）。测试账号已于 2026-09-03 11:58 由 Steven 删除。
 
-#### 🎫 P0-1-6 · 五板块编辑 UI · 🟡 代码完成 / 服务端自测通过 / 浏览器交互待 Steven 验收
+#### 🎫 P0-1-6 · 五板块编辑 UI · ✅ **已验收通过（2026-09-03 11:50）· 勿重做**
 - **做什么**：课程卡片内的五板块折叠编辑器（五个 tab）+ 上传流程缺失的第 5 拍「解析」触发。
 - **改哪些文件**：
   - `lib/sections.ts`（新）—— `loadCourseSections()`：服务端直查五张表（每张表一个 `in` 查询，无 N+1），返回 `Map<courseId, StoredSections>`。
@@ -413,7 +413,8 @@
   5. `ExamDate.status` 不在表单里（服务端由 `examDate` 派生）；考试行无日期 → 显示 `TBD` chip，date input 留空即可。
   6. 大纲的 `orderIndex` 由数组位置派生，上移/下移直接操作数组，不进 diff（重排序不算解析错误）。
 - **自测（Bud，2026-09-03）**：`tsc` ✅ ｜ `lint` ✅ ｜ `build` ✅ ｜ 无头冒烟 **17/17**（dashboard SSR 带板块数据、跨用户隔离、PUT 回包结构、清理）。
-- **已知留白**：① **浏览器交互未验**（展开/切 tab/打字/保存/上移下移/解析按钮）—— `next dev` 在 WorkBuddy 起不来（`CodingRules.md` §5），只能 Steven 本地验收；② dashboard 一次性加载所有课程的五板块（Phase 0 课程数少，P0-1-8 详情页可按需加载）；③ 解析触发是同步等待（约 3-5 秒），过程动画归 P0-1-11；④ 测试账号 `p16-a-*/p16-b-*@test.dev` 待 Steven 手动删。
+- **✅ Steven 验收（2026-09-03 11:50，在 P0-1-8 详情页上验）**：展开 / 切 tab / 打字 / 保存 / 上移下移 / 解析按钮全部通过。测试账号已删。
+- **剩余留白**（已确认可接受）：① dashboard 一次性加载所有课程的五板块 —— **已随 P0-1-8 卡片瘦身消失**；② 解析触发是同步等待（约 3-5 秒），过程动画归 P0-1-11。
 
 #### 🎫 P0-1-9 · 总览页 v1 · ✅ **已验收通过（2026-09-03 16:10，Steven 浏览器验收）· 勿重做**
 - **做什么**：跨课程近期任务列表（按日期排序）+ 卡片近期 1-2 个任务 + 「标记完成」。**这是 M1 的最后一张卡**，做完 M1 静态理解链路完整收口。
@@ -445,7 +446,7 @@
 - **剩余留白**（已确认可接受，非阻塞）：① 手动任务的新增/删除未做（本卡范围外，契约 §5 的 `POST` / `DELETE`）；② 逾期任务只标红显示，不做"顺延"逻辑（Phase 2）；③ `meta.staleWarning` / `lastSuccessfulSyncAt` 待 P0-2-7 / P0-2-11 才有真实数据。
 - **🔜 下一张卡 P0-1-10（Demo Workspace）的唯一阻塞**：**示例数据来源**（真实公开 syllabus vs 合成示例），见「当前进度指针」。
 
-#### 🎫 P0-1-8 · 课程详情页 · 🟡 代码完成 / 服务端自测通过 / 浏览器交互待 Steven 验收
+#### 🎫 P0-1-8 · 课程详情页 · ✅ **已验收通过（2026-09-03 11:50）· 勿重做**
 - **做什么**：`/courses/[id]` 展示课程 + 五板块最终信息（缺失项显示 TBD），并把一门课的全部操作集中到这里。
 - **改哪些文件**：
   - `lib/course-detail.ts`（新）—— `loadCourseDetail()`：课程 + 最新 syllabus + 五板块，一次合成。**端点与页面共用同一份读逻辑**，避免「页面一套查询、接口另一套」的漂移。
@@ -463,7 +464,8 @@
   3. **缺失项返回 `[]` 不是 `null`**（契约 §2 原文）；**展示层必须把 null 值渲染成 TBD**（验收标准原文：缺失项显示 TBD 而非空白）—— 空白会让用户分不清「syllabus 没写」和「还没解析」。
   4. **列表页在 `/dashboard`，详情页在 `/courses/[id]`** —— 不新增 `/courses` 列表路由（P0-1-7 定的）。
 - **自测（Bud，2026-09-03）**：`tsc` ✅ ｜ `lint` ✅ ｜ `build` ✅（新增 `/courses/[id]` 动态路由）｜ 无头冒烟 **34/34**。
-- **已知留白**：① **浏览器交互未验**（查看/编辑切换、点卡片进详情、从详情页删除后跳回）—— 只能 Steven 本地 `npm run dev`；② 详情页没有 syllabus 文本预览（契约 §3 的 `previewText` 只在上传响应里，P0-1-11 再做）；③ 测试账号 `p18-a-*/p18-b-*@test.dev` 待手动删。
+- **✅ Steven 验收（2026-09-03 11:50）**：查看/编辑切换、点卡片进详情、从详情页删除后跳回全部通过。测试账号已删。
+- **剩余留白**（已确认可接受）：详情页没有 syllabus 文本预览（契约 §3 的 `previewText` 只在上传响应里，P0-1-11 再做）。
 
 #### 🎫 P0-1-7 · Workspace CRUD（课程创建 / 列表 / 编辑 / 删除）· ✅ 已完成，勿重做
 - **做什么**：课程 CRUD。列表按学期分组展示；删除 = 归档，带二次确认。
