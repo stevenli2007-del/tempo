@@ -31,9 +31,11 @@
 
 **当前 task**：`P0-1-5a` 解析 API 路由 + 五板块落库（`/parse` / `/reparse`）
 
-> 🔵 **P0-1-5a 代码完成（2026-09-03），待 Steven check** —— tsc / lint / build 全绿，**本地 curl 冒烟 44/44**。
-> - ⚠️ **生产验证被卡（交接点）**：commit `bcd5a20` 已推到 `origin/main`，但 **Vercel 没有为它创建部署**（最新部署仍停在 `289f857`，15:19Z success）。等了 20 分钟 + 绕过 CDN 缓存重试，生产 `/parse` 与 `/reparse` 仍 404，同目录 `/extract` 是 401（说明服务的是旧部署）。**需 Steven 去 Vercel Dashboard 看 Git 集成 / 手动 Redeploy**，之后跑生产验证脚本确认 ① key 注入 ② adapter 跑通 ③ `llm_runs` 落库。
-> - 查部署状态不用登 Vercel：`gh api repos/stevenli2007-del/tempo/deployments --jq '.[0] | {sha, created_at}'` + `.../deployments/<id>/statuses`。
+> 🔵 **P0-1-5a 代码完成 + 自测全绿（2026-09-03），待 Steven check**
+> - **本地 curl 冒烟 44/44**（上传→提取→解析全链路、五板块内容含反幻觉陷阱、幂等 409、reparse 强制重跑、覆盖规则、5 条异常路径、跨用户 404、短文本全失败）。
+> - **✅ 生产验证 14/14 已补做（2026-09-03，验收提示 ④）**：打生产域名真实调 DeepSeek —— `/parse` 端到端 **4.4 秒**，五板块全成功，反幻觉陷阱两个仍返回 null + tbd，`llm_runs` 落 **5 条 success** 审计行（`prompt_version = v1`，实际服务模型 `deepseek-v4-flash`，单块 2.3~3.5 秒）。**key 注入 ✅ / adapter 在 Vercel runtime 跑通 ✅ / 审计落库 ✅**。
+> - ⏸️ **部署曾延迟约 13 分钟**：`bcd5a20` 推上去后 Vercel 迟迟没建部署（生产 `/parse` 一直 404，同目录 `/extract` 是 401），后来自动补上了。**下次遇到先别急着判定是代码问题** —— 用 `gh api repos/stevenli2007-del/tempo/deployments --jq '.[0] | {sha, created_at}'` 看部署是否真的建了，比反复 curl 猜快。
+> - 遗留：测试账号 `p15a-a@test.dev` / `p15a-b@test.dev` 需 Steven 在 Dashboard 手动删（无 service role key）。
 > - **P0-1-5 拆成 5a / 5b 两张卡（2026-09-03，Steven 拍板）**：5a = 解析 + 落库；5b = 5 个 `PUT` 保存端点 + `parse_corrections` diff + 考试派生任务。**task 编号不变**（P0-1-5 仍是一行），只在执行卡层面拆。
 > - **两个拍板**：① `/parse` **同步返回 200** 而非契约原写的 202 异步（[ADR-012](./Decisions.md#adr-012)）；② 拆卡，每卡做完等 Steven check 再做下一张。
 > - **`git push` 已完成**（2026-09-03 开工时）：`40d1f33` / `ebd9b8a` / `4dc8c3e` / `289f857` 已到 `origin/main`。
@@ -329,8 +331,14 @@
   4. **落库三条写入规则**：① 只对成功的板块动刀（失败的保留上一轮数据）；② 只删 `source='syllabus'` 的行（`manual` 是用户加的）；③ `is_confirmed=true` 的行不删（`grade_components` / `exam_dates` 两表有这个标记）。
   5. **`parse_status` 只有 `completed` / `failed` 两态** —— 契约里的 `partial` 不在 DB CHECK 约束内，写进去会被拒。部分失败用 `parse_error` 表达。
   6. **同步 200，不是 202**（[ADR-012](./Decisions.md#adr-012)）；`parseStatus` 已是 `completed` 时 `/parse` 返回 **409 `already_parsed`**，重跑走 `/reparse`。
-- **验收命令**：`NODE_OPTIONS= npx tsc --noEmit` ｜ `NODE_OPTIONS= npm run lint` ｜ `NODE_OPTIONS= npm run build`（新增 2 个 ƒ 路由）｜ `next start` + 会话 cookie 打 curl 冒烟。
-- **⚠️ 验收时必须补做 P0-1-3 / P0-1-4 的生产验证**：`lib/llm` 与 `lib/parse` 都是零 HTTP 出口的纯库层，此前只在本地验过，P0-1-5a 是第一个能打到它们的端点。要确认 ① key 注入生效 ② adapter 在 Vercel runtime 跑通 ③ `llm_runs` 审计行落库。
+- **验收命令**：`NODE_OPTIONS= npx tsc --noEmit` ｜ `NODE_OPTIONS= npm run lint` ｜ `NODE_OPTIONS= npm run build`（新增 2 个 ƒ 路由）｜ `next start` + 会话 cookie 打 curl 冒烟 ｜ 生产域名实跑一次。
+- **✅ 自测结果（2026-09-03）**：本地 curl 冒烟 **44/44**；生产验证 **14/14**。
+  - 正常路径：建课 → 上传 → 提取 → 解析全链路通；成绩 4 项、考试 4 项（**反幻觉陷阱 2 项仍返回 null + tbd**）、大纲 15 周、OH 3 条（时间转 24h）、提交政策带 Gradescope；每条都带 `sourceExcerpt`；`x-request-id` 回传。
+  - 幂等 / 覆盖：重复 parse → **409 already_parsed**；`reparse` 强制重跑；`source='manual'` 的行不被冲掉；`syllabus` 来源的行整体替换旧 id 全部消失且**无重复**。
+  - 异常路径：未登录 401 / 非法 uuid 400 / 不存在 uuid 404 / B 解析 A 的 syllabus 404 / extract 未完成 **409 text_not_ready**。
+  - 全失败路径：文本 47 字符 → **HTTP 200** + `parseStatus='failed'` + 五块全 `text_too_short`（不发起 LLM 调用）。
+  - 生产：`/parse` 端到端 **4.4 秒**，`llm_runs` 落 5 条 success（模型 `deepseek-v4-flash`，单块 2.3~3.5 秒）。
+- **⚠️ 验收时必须补做 P0-1-3 / P0-1-4 的生产验证**：`lib/llm` 与 `lib/parse` 都是零 HTTP 出口的纯库层，此前只在本地验过，P0-1-5a 是第一个能打到它们的端点。已于 2026-09-03 补做完毕（见上）。
 - **已知留白**：① **无跨表事务**（supabase-js 不支持），逐表先删后插，中途失败会留下部分写入（失败即 500，重试可自愈）；② `llm_run_id` 归因不在五张板块表上（表无此列），只在 `parse_corrections`（P0-1-5b）；③ `GET /parse-status` 不实现（同步模式无中间态）。
 - **P0-1-5b 接着做**：5 个 `PUT` 板块保存端点 + `parse_corrections` diff + `exam-dates → tasks` 派生（`syncExamToTask()`）。
 

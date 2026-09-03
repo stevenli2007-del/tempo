@@ -200,6 +200,18 @@ Canvas token、LLM API Key、Supabase 密钥、加密密钥——**只允许存�
    起后台服务**必须用 `run_in_background: true`**；写成 `(cmd &)` 的话，工具调用一结束进程就被回收，下一轮 curl 全是 502（不是代码问题）。关服务用 `lsof -ti:3000 | xargs kill`（沙箱里 `ps` 被拒）。
    临时路由 / 脚本**用完必须删除**，提交前 `git status` 复查。
 
+7. 🔴 **新端点在生产 404，先确认「部署到底建了没」，别急着查代码。**
+   Vercel 偶发延迟（实测最长约 13 分钟才创建部署），期间生产服务的是**旧 build**：
+   新路由 404，而同目录的旧路由正常（如 `/extract` 仍返回 401）。反复 curl + 加 cache-busting 参数都无用。
+   **正确姿势（不用登 Vercel）**：
+   ```bash
+   gh api repos/stevenli2007-del/tempo/deployments --jq '.[0] | {sha: .sha[0:7], created_at}'
+   gh api repos/stevenli2007-del/tempo/deployments/<id>/statuses --jq '.[] | {state, description}'
+   ```
+   看不到刚推的 commit → 是部署延迟，等或让 Steven 手动 Redeploy；
+   `state: success` 但端点仍 404 → 才是代码 / 构建问题。
+   另注：临时脚本与生成的测试文件一律 `.tmp-` 前缀（`.gitignore` 已忽略），否则 `git add -A` 会把它们误暂存。
+
 ### 10.2 坑索引（细节在各自文档）
 
 | 坑 | 一句话 | 权威位置 |
@@ -208,6 +220,7 @@ Canvas token、LLM API Key、Supabase 密钥、加密密钥——**只允许存�
 | Vercel git author 不匹配 | commit 邮箱 ≠ GitHub 主邮箱 → Vercel 判冒名顶替 **Blocked**（不报 build 错） | `Phase-0-MVP.md` P0-0-6 执行卡 |
 | env vars 保存 ≠ 已注入 | 加完/改完环境变量 **必须手动 Redeploy**，否则旧 build 不带变量 → 生产全站 500。**build 绿 ≠ runtime 通** | `TechStack.md` §5.2、`Phase-0-MVP.md` P0-0-6 执行卡 |
 | Vercel Environment 只能单选 | 新增变量时 Production / Preview **不能两个都勾**。本项目只需 Production（部署流程是 push main → 自动部署到 Production，没有 Preview 环节） | 本节（无其他归属） |
+| Vercel 部署延迟 | 新端点生产 404 但同目录旧端点正常 = 部署还没建，不是代码问题。**先用 `gh api .../deployments` 确认，别反复 curl 猜** | 本节 10.1 第 7 条 |
 | PDF 提取只能用 `unpdf` | `pdf-parse` / `pdfjs-dist`（现代与 legacy）在 Vercel 上一律 import 即 500；释放文档用 `pdf.cleanup()`（v5 改名，非 `destroy()`） | `Decisions.md` **ADR-011**、`TechStack.md` §2、`Phase-0-MVP.md` P0-1-2 执行卡 |
 | Storage 平台 schema DDL 走 UI | `storage.objects` 建策略报 `42501 must be owner`（owner 是 `supabase_storage_admin`）→ 只能 Dashboard UI。UI 会加策略名后缀，验收看 `pg_policies` 语义 | `Database.md` §7.3、`Phase-0-MVP.md` P0-1-1 执行卡 |
 | `createSignedUrl` 会检查存在性 | 对象不存在返回 `NoSuchKey`，`statusCode` 是**字符串** `'404'` —— 这是「悬挂行」判定信号，别当 500 抛。谓词收在 `lib/syllabi.ts` 的 `isStorageObjectNotFoundError()` | `API-Contract.md` §download、`Phase-0-MVP.md` P0-1-2 执行卡 |
