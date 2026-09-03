@@ -29,16 +29,18 @@
 
 ## 当前进度指针
 
-**当前 task**：`P0-1-5a` 解析 API 路由 + 五板块落库（`/parse` / `/reparse`）
+**当前 task**：`P0-1-5b` 五板块保存端点（5 个 `PUT`）+ `parse_corrections` diff + 考试派生任务
 
-> 🔵 **P0-1-5a 代码完成 + 自测全绿（2026-09-03），待 Steven check**
-> - **本地 curl 冒烟 44/44**（上传→提取→解析全链路、五板块内容含反幻觉陷阱、幂等 409、reparse 强制重跑、覆盖规则、5 条异常路径、跨用户 404、短文本全失败）。
-> - **✅ 生产验证 14/14 已补做（2026-09-03，验收提示 ④）**：打生产域名真实调 DeepSeek —— `/parse` 端到端 **4.4 秒**，五板块全成功，反幻觉陷阱两个仍返回 null + tbd，`llm_runs` 落 **5 条 success** 审计行（`prompt_version = v1`，实际服务模型 `deepseek-v4-flash`，单块 2.3~3.5 秒）。**key 注入 ✅ / adapter 在 Vercel runtime 跑通 ✅ / 审计落库 ✅**。
-> - ⏸️ **部署曾延迟约 13 分钟**：`bcd5a20` 推上去后 Vercel 迟迟没建部署（生产 `/parse` 一直 404，同目录 `/extract` 是 401），后来自动补上了。**下次遇到先别急着判定是代码问题** —— 用 `gh api repos/stevenli2007-del/tempo/deployments --jq '.[0] | {sha, created_at}'` 看部署是否真的建了，比反复 curl 猜快。
-> - 遗留：测试账号 `p15a-a@test.dev` / `p15a-b@test.dev` 需 Steven 在 Dashboard 手动删（无 service role key）。
-> - **P0-1-5 拆成 5a / 5b 两张卡（2026-09-03，Steven 拍板）**：5a = 解析 + 落库；5b = 5 个 `PUT` 保存端点 + `parse_corrections` diff + 考试派生任务。**task 编号不变**（P0-1-5 仍是一行），只在执行卡层面拆。
-> - **两个拍板**：① `/parse` **同步返回 200** 而非契约原写的 202 异步（[ADR-012](./Decisions.md#adr-012)）；② 拆卡，每卡做完等 Steven check 再做下一张。
-> - **`git push` 已完成**（2026-09-03 开工时）：`40d1f33` / `ebd9b8a` / `4dc8c3e` / `289f857` 已到 `origin/main`。
+> 📌 **P0-1-5a 已验收通过 ✅（2026-09-03，Steven 验收；测试账号已清理）**。代码 commit `bcd5a20` + 文档 commit（生产验证 14/14 + §10 部署延迟条目），均已 push。本地冒烟 44/44、生产验证 14/14（真实调 DeepSeek 4.4s、`llm_runs` 落 5 条 success）。
+>
+> 🟦 **P0-1-5b 开工提示（新会话先读这个，不必重读 5a 卡）**：
+> 1. **契约 §4 三件事**：① 与库中现有值逐字段比对，**每处差异写一条 `parse_corrections`**（`correction_type` 只有 `edit` / `delete` / `add`，`entity_type` 五个枚举与表对齐，值一律存 text）；② `llm_run_id` 归因**只写 `parse_corrections`**（五张板块表没有此列，5a 已确认无法按契约字面实现）；③ `exam-dates` 保存后走 **`syncExamToTask()`**（ADR-004，`Database.md` §5：`exam_dates` 是权威源，task 的 `source_id` 指向 `exam_dates.id`、`is_derived=true`、`tbd`/日期 null → `due_date` null **禁止编造**）。
+> 2. **PUT 全量替换、幂等**：前端表单整体提交；带 `id` 的行做 update，不带 `id` 的做 insert，库里多出来的行删除。删掉的 `syllabus` 行也写 `parse_corrections`（`delete` 类型）。
+> 3. **保存 = 用户确认**：`grade_components` / `exam_dates` 两表置 `is_confirmed = true`。但记住 5a 的教训 —— **重解析会整体替换 `syllabus` 来源的行，`is_confirmed` 不保护**（试过，会造成重复数据，已在 `persist.ts` 头部记录）。确认保护如果要做，得靠 5b 的 diff 留痕，不是靠不删行。
+> 4. **同一件事只算一遍**：`ExamDate.status` 继续由 `examDate` 派生（沿用 `normalizeExam()`），PUT 端点不重算。
+> 5. **五张表映射已就位**：5a 建好的 `lib/{grade-components,course-outline-items,exam-dates,office-hours,submission-policies}.ts`（`toXxxInsert()` / `Row` / `COLUMNS`）直接复用；diff 比对逻辑新建 `lib/parse/corrections.ts`（或类似），**别散在 5 个路由文件里**。
+> 6. **测试账号已被 Steven 删除**（`p15a-a/p15a-b@test.dev`），冒烟脚本要重建账号。
+> 7. **部署延迟是常态**：push 后 Vercel 可能 10+ 分钟才建部署，先用 `gh api repos/stevenli2007-del/tempo/deployments --jq '.[0] | {sha, created_at}'` 确认，别反复 curl 猜（§10.1 有条目）。
 
 > 🛑 **上一轮收工状态（2026-09-02 23:00，Steven 收工）**：P0-1-4 已验收通过。
 > - **P0-1-5a 已在 2026-09-03 开工**，开工提示见下方 P0-1-4 卡末尾（①②③④）。
@@ -169,7 +171,7 @@
 | **P0-1-2** | 文本提取管线（PDF / docx / pptx），抽不出时**明确降级提示**而非静默返回空 | Bud | P0-1-1 | 三种格式各测一份真实文件；扫描件走降级提示不崩溃 | ✅ |
 | **P0-1-3** | LLM provider 抽象层（`lib/llm`）：默认 DeepSeek adapter + JSON schema 结构化输出 + 错误处理 | Bud | P0-0-6 | 抽象层可用；切换 provider 只改配置不动业务代码（[ADR-003](./Decisions.md#adr-003)） | ✅ |
 | **P0-1-4** | 五板块抽取 prompt v1：Grade Composition / Course Outline / Test Dates / Office Hours / Submission Policy，**拆成独立抽取任务** | Bud | P0-1-3 | 每板块独立调用；输出符合 schema；缺失字段返回 null 不编造 | ✅ |
-| **P0-1-5** | 解析 API 路由 + 结果落库 + **修正 diff 存储**（保存原始解析 vs 修正后 + 差异字段） | Bud | P0-1-2, P0-1-4 | 数据库同时存有原始与修正版本，可追溯差异 | 🔵 5a 进行中 / 5b 未开始 |
+| **P0-1-5** | 解析 API 路由 + 结果落库 + **修正 diff 存储**（保存原始解析 vs 修正后 + 差异字段） | Bud | P0-1-2, P0-1-4 | 数据库同时存有原始与修正版本，可追溯差异 | 🔵 5a ✅ 已验收 / 5b 进行中 |
 | **P0-1-6** | 可编辑表单 UI：五个板块逐项编辑 / 补全 / 覆盖 + 保存 | Bud | P0-1-5 | 可修改任一字段并保存；TBD 状态可正常展示与编辑 | ⚪ |
 | **P0-1-7** | Workspace CRUD：创建（学期 + 课程名必填，编码/教师选填）、列表按学期分组、编辑、删除 | Bud | P0-0-6 | 建课后出现在总览页与列表；删除有二次确认 | ✅ |
 | **P0-1-8** | 课程详情页：展示五板块最终信息 | Bud | P0-1-6, P0-1-7 | 保存后的数据完整展示；缺失项显示 TBD 而非空白 | ⚪ |
@@ -312,7 +314,7 @@
   - **P0-1-5 验收时必须补做**：真实调一次 DeepSeek，确认 ① key 注入生效 ② adapter 在 Vercel runtime 跑通 ③ `llm_runs` 审计行落库。
 - **已知留白**：① 没有重试逻辑（Phase 0 由调用方决定是否重试，`retryable` 字段已给出依据）；② 没有并发/限流控制；③ `syllabus_parse` 的 prompt 本体在 P0-1-4。
 
-#### 🎫 P0-1-5a · 解析 API 路由 + 五板块落库（`/parse` / `/reparse`）
+#### 🎫 P0-1-5a · 解析 API 路由 + 五板块落库（`/parse` / `/reparse`）· ✅ 已完成，勿重做
 
 - **做什么**：上传流程第 4 拍 —— 拿 `syllabi.raw_text` 调 LLM 抽五板块，**落进五张板块表**，返回带 id 的板块数据。
 - **依赖**：P0-1-2（文本）、P0-1-4（抽取）、P0-1-7（课程）。
@@ -328,7 +330,7 @@
   1. **判断"有没有可落库的结果"看 `okSections.length`，不是 `ok`** —— 五块全成才 `ok=true`，部分成功是常态。
   2. **`ExamDate.status` 由 `examDate` 派生**（`lib/parse/index.ts` 的 `normalizeExam()` 已做），落库时**不要重算**，直接沿用。同一件事算两遍迟早算出不一致。
   3. **`lib/parse/index.ts` 不碰 DB** —— 落库只在 `persist.ts`。
-  4. **落库三条写入规则**：① 只对成功的板块动刀（失败的保留上一轮数据）；② 只删 `source='syllabus'` 的行（`manual` 是用户加的）；③ `is_confirmed=true` 的行不删（`grade_components` / `exam_dates` 两表有这个标记）。
+  4. **落库写入规则（最终版，③ 被 5a 冒烟实测推翻后修订）**：① 只对成功的板块动刀（失败的保留上一轮数据）；② 只删 `source='syllabus'` 的行，整体替换；③ `source='manual'` 的行保留。~~原第三条「`is_confirmed=true` 不删」已废弃~~ —— 它会导致同一条目在重解析后出现两份（旧行保留 + 新行插入），完整理由见 `persist.ts` 头部注释与 ADR-012。
   5. **`parse_status` 只有 `completed` / `failed` 两态** —— 契约里的 `partial` 不在 DB CHECK 约束内，写进去会被拒。部分失败用 `parse_error` 表达。
   6. **同步 200，不是 202**（[ADR-012](./Decisions.md#adr-012)）；`parseStatus` 已是 `completed` 时 `/parse` 返回 **409 `already_parsed`**，重跑走 `/reparse`。
 - **验收命令**：`NODE_OPTIONS= npx tsc --noEmit` ｜ `NODE_OPTIONS= npm run lint` ｜ `NODE_OPTIONS= npm run build`（新增 2 个 ƒ 路由）｜ `next start` + 会话 cookie 打 curl 冒烟 ｜ 生产域名实跑一次。
@@ -453,4 +455,4 @@ P0-0 基础设施
 | 2026-09-02 | **P0-1-3 LLM provider 抽象层完成 ✅**。新增 `lib/llm/` 六件套：`index.ts`（`getLLMProvider()`）/ `types.ts`（`LLMProvider` + `LLMResult<T>` + `LLMErrorCode` + JSON Schema 子集）/ `env.ts`（缺 key、坏 timeout 抛明确中文 `LLMConfigError`）/ `schema.ts`（`validateJsonSchema()`，报错带 JSON Pointer）/ `providers/deepseek.ts`（原生 fetch，不引厂商 SDK）/ `run.ts`（`runStructured()` 每次调用写 `llm_runs`，成功失败都写）。抽象层硬性要求 5 条全部满足（只依赖接口、切换只改配置、厂商异常不穿透、每次调用记审计、结构化输出走 schema 禁正则解析）。**实测踩到一个真教训**：请求 `deepseek-chat` 回来的是 `deepseek-v4-flash`，因此 `llm_runs.model` 记「实际服务的模型」而非「请求时填的模型」，否则按模型维度对比准确率会失真。自测全绿：配置 4 类错误各有明确中文报错、schema 校验器 7 用例、真实调用成功（MATH 53 权重 4 项全对）、`schema_mismatch` / `provider_error` / `request_failed` 三条错误分支的 `retryable` 判定正确、审计成功行与失败行都落库、**RLS 跨用户隔离**（user2 查得 0 行 / user1 得 3 行）。`TechStack.md` §5.2 同步补齐实际文件结构、环境变量表与错误码表。进度指针推进至 `P0-1-4` 五板块抽取 prompt v1 |
 
 | 2026-09-02 | **P0-1-4 五板块抽取 prompt v1 完成 ✅**。新增 `types/parse.ts` + `lib/parse/`（`schemas.ts` / `prompts.ts` / `index.ts`），`parseSyllabusSections()` 五板块**并发**独立调用、单块失败不影响其余。核心设计 **`sourceExcerpt`**：每个条目带 ≤200 字原文逐字摘录，逼模型给依据 + 用户可核对 + 直接对应五张表的 `source_excerpt` 列。日期处理三条硬规则：`ExamDate.status` 由 `examDate` **派生**（不让模型填，否则必出现"日期 null 但 status=confirmed"）、日期必须 `YYYY-MM-DD` 否则置 null 退化 TBD、文本少于 200 字符直接 `text_too_short` **不发起 LLM 调用**。**自测埋了两个反幻觉陷阱**（Final 只写"按校历安排"、practical exam 日期见 bCourses），模型两次都正确返回 null + tbd，未编造日期；缺 office hours 的 syllabus 该块返回空数组而非编造。**实测踩坑**：未写语言规则时模型把 submission policy 的 `description` 翻成中文，与逐字字段的英文不一致 —— 补铁律「保留原文语言不翻译」（翻译不可逆，抽取层丢的原文找不回来）。自测全绿，进度指针推进至 `P0-1-5` 解析 API 路由 + 落库 + 修正 diff |
-| 2026-09-03 | **P0-1-5 拆为 5a / 5b 两张执行卡**（Steven 拍板，编号不变）。**P0-1-5a 开工并完成代码**：新增 `types/sections.ts`、五张板块表的 DB 映射层 `lib/{grade-components,course-outline-items,exam-dates,office-hours,submission-policies}.ts`、落库编排 `lib/parse/persist.ts`、共用逻辑 `lib/parse/endpoint.ts`、`POST /api/v1/syllabi/:id/{parse,reparse}` 两个端点。**契约偏离两项并已升格为 [ADR-012](./Decisions.md#adr-012)**：① `/parse` 同步返回 200（契约原写 202 异步 + 轮询，但实测五板块并发仅 3.2s，且 `llm_runs` 没有板块级进度的存储落点）；② `syllabi.parse_status` 只有 completed/failed 两态，契约原写的 `partial` 不在 DB CHECK 约束内。`GET /parse-status` 标注为 P0-1-11 待定。落库三条写入规则写进 5a 卡：**只动成功的板块 / 只删 `source='syllabus'` 的行 / `is_confirmed=true` 的行不删**。开工前已 push 4 个本地 commit 到 `origin/main` |
+| 2026-09-03 | **P0-1-5 拆为 5a / 5b 两张执行卡**（Steven 拍板，编号不变）。**P0-1-5a 开工并完成代码**：新增 `types/sections.ts`、五张板块表的 DB 映射层 `lib/{grade-components,course-outline-items,exam-dates,office-hours,submission-policies}.ts`、落库编排 `lib/parse/persist.ts`、共用逻辑 `lib/parse/endpoint.ts`、`POST /api/v1/syllabi/:id/{parse,reparse}` 两个端点。**契约偏离两项并已升格为 [ADR-012](./Decisions.md#adr-012)**：① `/parse` 同步返回 200（契约原写 202 异步 + 轮询，但实测五板块并发仅 3.2s，且 `llm_runs` 没有板块级进度的存储落点）；② `syllabi.parse_status` 只有 completed/failed 两态，契约原写的 `partial` 不在 DB CHECK 约束内。`GET /parse-status` 标注为 P0-1-11 待定。落库最终规则（初版「`is_confirmed=true` 不删」被冒烟实测推翻，会造成重复数据）：**只动成功的板块 / 只删 `source='syllabus'` 的行整体替换 / `manual` 来源保留**。`GET /parse-status` 标注为 P0-1-11 待定。本地冒烟 44/44，生产验证 14/14（`/parse` 端到端 4.4s，`llm_runs` 落 5 条 success，`deepseek-v4-flash`），P0-1-3/1-4 挂账的生产验证就此关闭。**Steven 验收通过，测试账号已清理**，进度指针推进至 P0-1-5b（开工提示见进度指针区） |
