@@ -29,14 +29,14 @@
 
 ## 当前进度指针
 
-**当前 task**：`P0-1-4` 五板块抽取 prompt v1（Grade Composition / Course Outline / Test Dates / Office Hours / Submission Policy）
+**当前 task**：`P0-1-5` 解析 API 路由 + 结果落库 + 修正 diff 存储
 
-> 📌 **P0-1-3 LLM 抽象层已完成 ✅（2026-09-02）**
-> - `lib/llm/` 六件套（index / types / env / schema / run + providers/deepseek）已交付，抽象层硬性要求 5 条全部满足。
-> - **⚠️ 未收口的两件事（Steven 手动）**：① Vercel Production + Preview 各加 `DEEPSEEK_API_KEY`，**加完必须 Redeploy**；② Supabase 里 2 个测试账号（`llm-diag@test.dev` / `llm-diag2@test.dev`）需在 Dashboard 手动删（无 service role key 删不掉）。
-> - **`P0-1-4` 开工提示**：直接用 `runStructured()`，别用 `getLLMProvider()` —— 前者自动落 `llm_runs` 审计。抽板 prompt 的 schema 用模块级 `as const` 常量（类型已接受 readonly 数组）。
+> 📌 **P0-1-4 五板块抽取 prompt v1 已完成 ✅（2026-09-02）**
+> - `types/parse.ts` + `lib/parse/`（schemas / prompts / index）已交付；`parseSyllabusSections()` 五板块并发调用、单块失败不影响其余。
+> - **核心设计：`sourceExcerpt`** —— 每个条目都带≤200 字的原文逐字摘录，逼模型给依据、让用户可核对，且直接对应五张表都有的 `source_excerpt` 列。
+> - **`P0-1-5` 开工提示**：① 调用方看 `okSections.length`（不是 `ok`）判断有没有可落库的结果 —— **部分成功是常态**；② `ExamDate.status` 由 `examDate` 派生，别让模型填；③ 五张表的 snake_case 映射写在各自的 `lib/*.ts` 里，`lib/parse/index.ts` 不碰 DB。
 
-> 📌 **P0-1-7 / P0-1-1 / P0-1-2 / P0-1-3 均已完成 ✅（2026-09-02）**
+> 📌 **P0-1-7 / P0-1-1 / P0-1-2 / P0-1-3 / P0-1-4 均已完成 ✅（2026-09-02）**
 > - **ADR-010 已拍板接受**：RLS 保护的资源，「越权」与「不存在」统一返回 `404`，Phase 0 不用 403。契约文档已同步改（§1.2 / §1.4），**后续所有资源端点按此执行，不再逐个论证**。
 > - **P0-1-1 / P0-1-2 的浏览器 UI 已由 Steven 本地验收通过（2026-09-02，合并验收）**：两者共用 `syllabus-upload.tsx` 一个组件，上传 → 提取状态 → 文本预览 → 错误提示文案走一遍覆盖两个 task。M1 前三个 task 全部收口，下一 task 为 P0-1-3。
 
@@ -150,7 +150,7 @@
 | **P0-1-1** | 文件存储：syllabus 上传入口 + Supabase Storage + 类型/大小校验（PDF / docx / pptx） | Bud | P0-0-6, **P0-1-7** | 可上传并取回文件；非法类型被拒绝且有提示 | ✅ |
 | **P0-1-2** | 文本提取管线（PDF / docx / pptx），抽不出时**明确降级提示**而非静默返回空 | Bud | P0-1-1 | 三种格式各测一份真实文件；扫描件走降级提示不崩溃 | ✅ |
 | **P0-1-3** | LLM provider 抽象层（`lib/llm`）：默认 DeepSeek adapter + JSON schema 结构化输出 + 错误处理 | Bud | P0-0-6 | 抽象层可用；切换 provider 只改配置不动业务代码（[ADR-003](./Decisions.md#adr-003)） | ✅ |
-| **P0-1-4** | 五板块抽取 prompt v1：Grade Composition / Course Outline / Test Dates / Office Hours / Submission Policy，**拆成独立抽取任务** | Bud | P0-1-3 | 每板块独立调用；输出符合 schema；缺失字段返回 null 不编造 | ⚪ |
+| **P0-1-4** | 五板块抽取 prompt v1：Grade Composition / Course Outline / Test Dates / Office Hours / Submission Policy，**拆成独立抽取任务** | Bud | P0-1-3 | 每板块独立调用；输出符合 schema；缺失字段返回 null 不编造 | ✅ |
 | **P0-1-5** | 解析 API 路由 + 结果落库 + **修正 diff 存储**（保存原始解析 vs 修正后 + 差异字段） | Bud | P0-1-2, P0-1-4 | 数据库同时存有原始与修正版本，可追溯差异 | ⚪ |
 | **P0-1-6** | 可编辑表单 UI：五个板块逐项编辑 / 补全 / 覆盖 + 保存 | Bud | P0-1-5 | 可修改任一字段并保存；TBD 状态可正常展示与编辑 | ⚪ |
 | **P0-1-7** | Workspace CRUD：创建（学期 + 课程名必填，编码/教师选填）、列表按学期分组、编辑、删除 | Bud | P0-0-6 | 建课后出现在总览页与列表；删除有二次确认 | ✅ |
@@ -234,6 +234,28 @@
   - 测试文件用 python `zipfile` 手工生成最小合法 pdf / docx / pptx（docx、pptx 本质都是 zip + XML），不依赖任何 Office 工具。
 - **✅ 浏览器 UI 已由 Steven 本地验收通过（2026-09-02，与 P0-1-1 合并验收）**。
 - **已知留白**：① 提取失败的行没有「重试提取」入口（Phase 0 无存量数据，重新上传即可）；② `maxDuration = 60` 是为 20MB PDF 留的，Vercel 套餐若更低需下调。
+
+#### 🎫 P0-1-4 · 五板块抽取 prompt v1 · ✅ 已完成，勿重做
+- **做什么**：把 syllabus 全文解析成五个结构化板块（Grade Composition / Course Outline / Test Dates / Office Hours / Submission Policy）。**只做抽取，不碰 DB**（落库是 P0-1-5）。
+- **改哪些文件（全部新增）**：
+  - `types/parse.ts` —— 五个板块的对外类型（camelCase），字段与五张表一一对齐
+  - `lib/parse/schemas.ts` —— 五个 JSON Schema，模块级 `as const`
+  - `lib/parse/prompts.ts` —— 五个板块的 system 指令 + 共通铁律
+  - `lib/parse/index.ts` —— `parseSyllabusSections()` 编排 + `PROMPT_VERSION`
+- **关键设计**：
+  - **每个条目都带 `sourceExcerpt`**（≤200 字原文逐字摘录）。三层作用：① 逼模型为每条结论找依据，编不出来就填 null；② 用户可悬停核对"这句话哪来的"；③ 直接对应五张表都有的 `source_excerpt` 列，P0-1-5 落库零转换。**这是本 task 抗幻觉的核心手段。**
+  - **五块各一次独立 LLM 调用，并发执行**。不合并成一次大 JSON：一次跑偏会污染整个响应，且拆开后可单块重试、可按板块统计准确率定位要改哪个 prompt。
+  - **`ExamDate.status` 由 `examDate` 派生，不让模型填** —— 否则一定会出现「日期是 null 但 status 写 confirmed」的矛盾数据。
+  - **日期必须是 `YYYY-MM-DD`**，格式不合法一律置 null 退化成 TBD。理由：格式错的字符串既进不了 `exam_dates.exam_date`（`date` 列），展示给用户也是误导。
+  - **文本少于 200 字符直接拒绝解析**（`text_too_short`，不发起 LLM 调用）—— 扫描件走到这里就该停，而不是让模型编一份课表出来。
+  - **所有字段保留原文语言，不翻译**：抽取层的首要目标是可核对，译文无法与原文比对；翻译不可逆，抽取层丢掉的原文找不回来。展示层要翻译是后话。
+- **🔴 踩过的坑 / 实测结论**：
+  1. **模型确实会翻译**。第一版没写语言规则，submission policy 的 `description` 被翻成中文，而 `examName` / `topic` 等逐字字段仍是英文 —— 同一份结果里语言不一致。补了铁律第 5 条后恢复一致。
+  2. **反幻觉测试必须主动埋陷阱**。测试样例里故意写了「Final: 按校历安排，没有确切日期」和「practical exam 日期见 bCourses」，模型两次都正确返回 `null` + `tbd`，**没有编造日期**。不埋这种陷阱就测不出"禁止编造"到底成不成立。
+  3. **占比不等于 100% 时不要补项**是 prompt 里必须写死的一条 —— "为了凑满 100 分而补一条原文没有的构成项"是最典型的编造，模型默认倾向这么做。
+  4. 同一类考核多次出现（每周 homework）会被合并成一条并把规则写进 `notes`，符合预期。
+- **自测（Bud，2026-09-02）：全绿** —— 完整 syllabus 五块全成功（评分 4 项权重 20/25/25/30 全对、大纲 15 周顺序与 orderIndex 全对、3 条 office hours 时间正确换成 24 小时制、2 条提交政策）；缺 office hours 的 syllabus 该块返回**空数组而非编造**；两处「日期不明」的考试都退回 `null` + `tbd`；扫描件（17 字符）与空文本都被 `text_too_short` 挡住且**未发起 LLM 调用**；审计 12 行全部 success、`prompt_version` 一致为 `v1`、purpose 按板块区分。
+- **已知留白**：① 超长文本（>30000 字符）从尾部截断，而 office hours / 提交政策常写在文末 —— 正确做法是分块 + 合并，Phase 0 先只做 `meta.truncated` 标记；② 没有"占比之和≠100"的校验提示（留给 P0-1-5 的 UI）；③ 没有单块重试（Phase 0 由调用方按 `retryable` 决定）。
 
 #### 🎫 P0-1-3 · LLM provider 抽象层（`lib/llm`）· ✅ 已完成，勿重做
 - **做什么**：按 [ADR-003](./Decisions.md#adr-003) 建可插拔 LLM 抽象层，默认 DeepSeek；结构化输出走 JSON schema；每次调用落 `llm_runs` 审计。
@@ -371,3 +393,4 @@ P0-0 基础设施
 | 2026-09-02 | **P0-1-1 + P0-1-2 浏览器 UI 验收通过 ✅（Steven 本地，合并验收，共用 `syllabus-upload.tsx`）**。M1 前三个 task（P0-1-7 / P0-1-1 / P0-1-2）全部收口，两张执行卡标注「勿重做」。进度指针维持 `P0-1-3` LLM provider 抽象层（下一 task） |
 | 2026-09-02 | **P0-1-3 LLM provider 抽象层完成 ✅**。新增 `lib/llm/` 六件套：`index.ts`（`getLLMProvider()`）/ `types.ts`（`LLMProvider` + `LLMResult<T>` + `LLMErrorCode` + JSON Schema 子集）/ `env.ts`（缺 key、坏 timeout 抛明确中文 `LLMConfigError`）/ `schema.ts`（`validateJsonSchema()`，报错带 JSON Pointer）/ `providers/deepseek.ts`（原生 fetch，不引厂商 SDK）/ `run.ts`（`runStructured()` 每次调用写 `llm_runs`，成功失败都写）。抽象层硬性要求 5 条全部满足（只依赖接口、切换只改配置、厂商异常不穿透、每次调用记审计、结构化输出走 schema 禁正则解析）。**实测踩到一个真教训**：请求 `deepseek-chat` 回来的是 `deepseek-v4-flash`，因此 `llm_runs.model` 记「实际服务的模型」而非「请求时填的模型」，否则按模型维度对比准确率会失真。自测全绿：配置 4 类错误各有明确中文报错、schema 校验器 7 用例、真实调用成功（MATH 53 权重 4 项全对）、`schema_mismatch` / `provider_error` / `request_failed` 三条错误分支的 `retryable` 判定正确、审计成功行与失败行都落库、**RLS 跨用户隔离**（user2 查得 0 行 / user1 得 3 行）。`TechStack.md` §5.2 同步补齐实际文件结构、环境变量表与错误码表。进度指针推进至 `P0-1-4` 五板块抽取 prompt v1 |
 
+| 2026-09-02 | **P0-1-4 五板块抽取 prompt v1 完成 ✅**。新增 `types/parse.ts` + `lib/parse/`（`schemas.ts` / `prompts.ts` / `index.ts`），`parseSyllabusSections()` 五板块**并发**独立调用、单块失败不影响其余。核心设计 **`sourceExcerpt`**：每个条目带 ≤200 字原文逐字摘录，逼模型给依据 + 用户可核对 + 直接对应五张表的 `source_excerpt` 列。日期处理三条硬规则：`ExamDate.status` 由 `examDate` **派生**（不让模型填，否则必出现"日期 null 但 status=confirmed"）、日期必须 `YYYY-MM-DD` 否则置 null 退化 TBD、文本少于 200 字符直接 `text_too_short` **不发起 LLM 调用**。**自测埋了两个反幻觉陷阱**（Final 只写"按校历安排"、practical exam 日期见 bCourses），模型两次都正确返回 null + tbd，未编造日期；缺 office hours 的 syllabus 该块返回空数组而非编造。**实测踩坑**：未写语言规则时模型把 submission policy 的 `description` 翻成中文，与逐字字段的英文不一致 —— 补铁律「保留原文语言不翻译」（翻译不可逆，抽取层丢的原文找不回来）。自测全绿，进度指针推进至 `P0-1-5` 解析 API 路由 + 落库 + 修正 diff |

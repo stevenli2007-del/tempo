@@ -192,6 +192,35 @@ type LLMResult<T> =
 3. **禁止编造**、禁止静默返回空结果
 4. 若扫描件比例超预期，再评估切到 Claude 走多模态（待决事项 O-03）
 
+### 5.5 五板块抽取层（`lib/parse`，P0-1-4）
+
+`lib/llm` 只解决"怎么调模型"，**业务语义（抽哪五块、各块长什么样）不进 `lib/llm`** —— 否则换 provider 时会被业务字段污染。抽取层单独放：
+
+```
+lib/parse/
+  schemas.ts   → 五个板块的 JSON Schema（模块级 as const）
+  prompts.ts   → 五个板块的 system 指令 + 共通铁律
+  index.ts     → parseSyllabusSections() 编排 + PROMPT_VERSION
+types/parse.ts → 五个板块的对外类型（camelCase）
+```
+
+| 板块 | 目标表（`Database.md` 3.4~3.8） |
+|---|---|
+| Grade Composition | `grade_components` |
+| Course Outline | `course_outline_items` |
+| Test Dates | `exam_dates` |
+| Office Hours | `office_hours` |
+| Submission Policy | `submission_policies` |
+
+**三条硬规则（违反任意一条都会产出不可信数据）**
+
+1. **每个条目带 `sourceExcerpt`**：≤200 字的原文逐字摘录。逼模型给依据、让用户可核对，且直接对应五张表都有的 `source_excerpt` 列。**这是抗幻觉的主要手段，不是可选装饰。**
+2. **`exam_dates.status` 由 `exam_date` 派生，不让模型填** —— 让模型自己判断一定会出现「日期是 null 但 status 写 confirmed」的矛盾数据。
+3. **所有字段保留 syllabus 原文语言，抽取层不翻译** —— 抽取的首要目标是可核对，译文无法与原文比对；且翻译不可逆，抽取层丢掉的原文找不回来。展示层要翻译是后话。
+
+**⚠️ `PROMPT_VERSION` 纪律**：改 `prompts.ts` 或 `schemas.ts` **必须**升 `lib/parse/index.ts` 里的 `PROMPT_VERSION`。
+它会写进 `llm_runs.prompt_version`，是判断"这次改 prompt 到底有没有变准"的唯一分组依据 —— 版本不动，新旧调用混在一组，PRD F3 要求的"用用户修正当优化种子"就无从统计。
+
 - API Key 只存服务端环境变量，`.gitignore` 必须包含 `.env*.local`
 
 ---
