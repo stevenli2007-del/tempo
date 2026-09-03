@@ -259,7 +259,13 @@
   3. **占比不等于 100% 时不要补项**是 prompt 里必须写死的一条 —— "为了凑满 100 分而补一条原文没有的构成项"是最典型的编造，模型默认倾向这么做。
   4. 同一类考核多次出现（每周 homework）会被合并成一条并把规则写进 `notes`，符合预期。
 - **自测（Bud，2026-09-02）：全绿** —— 完整 syllabus 五块全成功（评分 4 项权重 20/25/25/30 全对、大纲 15 周顺序与 orderIndex 全对、3 条 office hours 时间正确换成 24 小时制、2 条提交政策）；缺 office hours 的 syllabus 该块返回**空数组而非编造**；两处「日期不明」的考试都退回 `null` + `tbd`；扫描件（17 字符）与空文本都被 `text_too_short` 挡住且**未发起 LLM 调用**；审计 12 行全部 success、`prompt_version` 一致为 `v1`、purpose 按板块区分。
-- **已知留白**：① 超长文本（>30000 字符）从尾部截断，而 office hours / 提交政策常写在文末 —— 正确做法是分块 + 合并，Phase 0 先只做 `meta.truncated` 标记；② 没有"占比之和≠100"的校验提示（留给 P0-1-5 的 UI）；③ 没有单块重试（Phase 0 由调用方按 `retryable` 决定）。
+- **验收证据（Bud，2026-09-02 晚，Steven 验收时现场跑）**：临时路由 `app/api/v1/diag-parse`（内嵌 CS 61B 风格 syllabus，1970 字符）→ `NODE_OPTIONS= npm run build` → `npm run start`（后台）→ curl → 删路由 → 重建。**全程本地，不部署不推送**，路由已删、`git status` 干净。
+  - **五板块全 ok，耗时 3.2s**（五块并发），`meta.promptVersion: v1`、`truncated: false`。
+  - **反幻觉两个陷阱全过** —— 「Final Exam: scheduled by the university registrar according to the academic calendar」→ `examDate: null` + `status: tbd`；「Practical Exam: Date and location will be announced on bCourses later」→ 同样 `null` + `tbd`。**模型没有编造日期**，且两条的 `sourceExcerpt` 都逐字摘录了原文整句，可核对。
+  - 其余：权重 20/25/25/30 全对且「drop the lowest score」正确进 `notes`；15 周 `orderIndex` 1-15 全对；office hours 时间正确转 24h（2:00-3:30 PM → `14:00-15:30`、4:00-5:00 PM → `16:00-17:00`）；submission policy 的 `description` **保留英文原文未翻译**（语言铁律生效），`platformName: Gradescope`。
+  - ⚠️ 本次审计行**没写进 `llm_runs`**（脚本用假 userId、无会话，RLS 拒掉）—— 属预期，审计落库与 RLS 隔离已由 P0-1-3 单独验过。
+  - **没有 tsx / ts-node / esbuild**（devDeps 只有 typescript + eslint + tailwind），直接跑 TS 会引入新依赖违反 Diff First，所以走临时路由 + `next build`/`next start` 这条路。
+- **已知留白**：① 超长文本（>30000 字符）从尾部截断，而 office hours / 提交政策常写在文末 —— 正确做法是分块 + 合并，Phase 0 先只做 `meta.truncated` 标记；② 没有"占比之和≠100"的校验提示（留给 P0-1-5 的 UI）；③ 没有单块重试（Phase 0 由调用方按 `retryable` 决定）；④ **提交政策粒度偏粗**：验收实测里 syllabus 的 HOMEWORK POLICY 段含两条规则（迟交扣分 + 代码格式），模型**合并成 1 条** policy。可辩护（同属一个 section），但粒度偏粗，**待 Steven 判断是否接受**（不是正确性问题）。
 
 #### 🎫 P0-1-3 · LLM provider 抽象层（`lib/llm`）· ✅ 已完成，勿重做
 - **做什么**：按 [ADR-003](./Decisions.md#adr-003) 建可插拔 LLM 抽象层，默认 DeepSeek；结构化输出走 JSON schema；每次调用落 `llm_runs` 审计。
