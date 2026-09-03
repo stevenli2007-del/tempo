@@ -128,7 +128,10 @@
 {
   "id": "…", "semester": "…", "courseName": "…",
   "canvasLinked": true, "lastSyncedAt": "…", "syncStatus": "success", "syncError": null,
-  "syllabus": { "id": "…", "fileName": "syllabus.pdf", "parseStatus": "completed" },
+  // ⚠️ 返回**完整的 Syllabus 对象**（比原示例的 { id, fileName, parseStatus } 更宽）：
+  // 前端需要 extractStatus / parseError 才能渲染「解析失败，可重试」这类状态。
+  "syllabus": { "id": "…", "fileName": "syllabus.pdf", "extractStatus": "extracted", "parseStatus": "completed", "parseError": null },
+  // 没有 syllabus 时为 **null**（不是 {}）
   "gradeComponents": [ { "id": "…", "name": "Midterm 1", "weightPercent": 20, "notes": null, "isConfirmed": true } ],
   "outlineItems":    [ { "id": "…", "orderIndex": 1, "weekLabel": "Week 1", "topic": "Vectors" } ],
   "examDates":       [ { "id": "…", "examName": "Midterm 1", "examDate": "2026-10-15", "examTime": "7-9pm", "location": "…", "status": "confirmed" } ],
@@ -137,6 +140,15 @@
 }
 ```
 缺失项返回 `[]`（**不是 `null`**），前端按"TBD"渲染。
+
+**读逻辑只有一份**：`lib/course-detail.ts` 的 `loadCourseDetail()` 同时服务本端点与
+详情页的服务端组件 —— 页面直查 DB（RLS 保护），不 fetch 自己的 API。
+
+| 错误 | 状态码 | `error.code` | 说明 |
+|---|---|---|---|
+| 未登录 | 401 | `unauthenticated` | |
+| 非法 uuid | 400 | `bad_request` | |
+| 不存在 / 不属于当前用户 / **已归档** | 404 | `not_found` | [ADR-010](./Decisions.md#adr-010)；归档 = 删除（§2 DELETE 语义），与保存端点一致 |
 
 ### `PATCH /api/v1/courses/:id` — 更新课程元信息
 ### `DELETE /api/v1/courses/:id` — 软删除（`is_archived=true`），级联：该课程任务从总览页隐藏
@@ -512,7 +524,7 @@
 |---|---|---|---|
 | GET | `/api/v1/health` | 健康检查 | P0-0-6 |
 | GET/POST | `/api/v1/courses` | 课程列表 / 创建 | P0-1-7 |
-| GET/PATCH/DELETE | `/api/v1/courses/:id` | 课程详情 / 更新 / 归档 | P0-1-7, P0-1-8 |
+| GET/PATCH/DELETE | `/api/v1/courses/:id` | 课程详情（含五板块）/ 更新 / 归档 | P0-1-7, **✅ P0-1-8（GET 已实现）** |
 | POST | `/api/v1/courses/:id/syllabus` | 取上传票据（两步式直传第 1 步，**非 multipart**） | P0-1-1 |
 | GET | `/api/v1/syllabi/:id/download` | 签短时下载 URL（私有桶无永久 URL） | P0-1-1 |
 | POST | `/api/v1/syllabi/:id/extract` | 提取文本（上传流程第 3 步，幂等） | P0-1-2 |
@@ -547,3 +559,4 @@
 | 2026-09-03 | **§3 `/parse` 改为同步 200 + 落库规则收敛**（[ADR-012](./Decisions.md#adr-012)，P0-1-5a）：不再 202+轮询；部分失败 = `parseStatus='completed'` + `parseError` 写明失败板块；`GET /parse-status` 归 P0-1-11 待定 | ADR-012 |
 | 2026-09-03 | **§4 五板块保存契约按实现收敛**（P0-1-5b）：① request 不再含 `status`（由 `examDate` 派生，防止"无日期但已确认"的矛盾数据）；② response 明确为 `{ data: [...] }`；③ 修正粒度定为**字段级**（edit/add/delete 三类统一，`order_index` 除外）；④ 归因规则明确为「最新 syllabus 的最近一次成功解析」；⑤ 错误码表补齐（含 `details.staleIds`、归档课程 404）。均为实现期决策，无行为层面的需求变更 | P0-1-5b |
 | 2026-09-03 | **§4 补「读取路径」说明**（P0-1-6）：五板块**不设 GET 端点** —— 编辑表单初值由 dashboard 服务端组件直查五表（`lib/sections.ts`，RLS 保护），完整接口 `GET /api/v1/courses/:id`（含五板块）归 P0-1-8。写清这一点是为了避免后续会话误以为读端点已存在 | P0-1-6 |
+| 2026-09-03 | **§2 `GET /api/v1/courses/:id` 按 P0-1-8 实现收敛**：① `syllabus` 由「只给 `{id,fileName,parseStatus}`」放宽为**返回完整 Syllabus 对象** —— UI 需要 `extractStatus` / `parseError` 才能渲染「解析失败可重试」；② 补错误码表（401 / 400 / 404），**已归档课程按 404 处理**（归档 = 删除，与 §4 保存端点一致）；③ 读逻辑收敛到 `lib/course-detail.ts`，端点与详情页服务端组件共用一份 | P0-1-8 |

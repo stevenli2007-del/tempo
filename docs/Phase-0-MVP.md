@@ -29,7 +29,7 @@
 
 ## 当前进度指针
 
-**当前 task**：`P0-1-8` 课程详情页（P0-1-6 已代码完成 + 无头冒烟 17/17，待 Steven 浏览器验收）
+**当前 task**：`P0-1-9` 总览页 v1（P0-1-8 已代码完成 + 无头冒烟 34/34，待 Steven 浏览器验收）
 
 > 📌 **P0-1-5a 已验收通过 ✅（2026-09-03，Steven 验收；测试账号已清理）**。代码 commit `bcd5a20` + 文档 commit（生产验证 14/14 + §10 部署延迟条目），均已 push。本地冒烟 44/44、生产验证 14/14（真实调 DeepSeek 4.4s、`llm_runs` 落 5 条 success）。
 >
@@ -46,7 +46,15 @@
 > - **无头冒烟 17/17**：dashboard SSR 输出带上了五板块数据（RSC 载荷）、跨用户 RLS 隔离、PUT 保存回包结构、清理。⚠️ 命中的是 RSC 载荷 —— 只证明「服务端数据 → 客户端 props」链路通，**表单展开后的可见渲染与交互要 Steven 本地 `npm run dev` 验收**。
 > - **待办**：Steven 浏览器验收；测试账号 `p16-a-*/p16-b-*@test.dev` 留在 auth.users 待手动删（业务数据已清）。
 >
-> 🟦 **P0-1-8 开工提示**：`GET /api/v1/courses/:id`（契约 §2，含五板块）还没实现，详情页要先把这个端点做了（返回课程 + `sections`）；展示层沿用 `Stored*` 类型，缺失项显示 TBD 而非空白（验收标准原文）。P0-1-6 的编辑器此刻在卡片里，届时决定是否搬到详情页 —— 搬的话 `SectionEditor` 是现成的（props：courseId / sections / parseStatus）。
+> 🟦 **P0-1-8 状态（2026-09-03，代码完成 / 服务端自测通过 / 浏览器交互待 Steven 验收）**：
+> - **已交付**：`GET /api/v1/courses/:id`（契约 §2，合成大对象）+ `lib/course-detail.ts`（读逻辑唯一一份，端点与页面共用）+ `app/(routes)/courses/[id]/page.tsx` + `components/sections/section-view.tsx`（TBD 展示层）+ SectionEditor 双模式（查看 / 编辑）+ 卡片瘦身。
+> - **两个 Steven 拍板**：① **全部操作搬到详情页**（上传/解析/五板块编辑/课程信息编辑），卡片只留摘要 + 入口 + 删除；② 路由 `/courses/[id]`（列表页仍在 `/dashboard`）。
+> - **无头冒烟 34/34**：详情 API 的 200/401/400/404×2（不存在 + 跨用户）、缺失板块返回 `[]`、考试无日期 → `tbd`、详情页 SSR 渲染（含 TBD）、跨用户/不存在/非法 uuid 详情页均 404、归档后详情 404、dashboard 卡片已不再内嵌编辑器且链到详情页。
+> - **契约收敛（§2）**：`syllabus` 返回**完整 Syllabus 对象**（超集，UI 需要 `extractStatus` / `parseError`）；已归档课程按 404 处理。
+> - **顺手解决**：P0-1-6 留下的「dashboard 一次性加载所有课程五板块」开销随卡片瘦身一起消失。
+> - **待办**：Steven 浏览器验收；测试账号 `p18-a-*/p18-b-*@test.dev` 待手动删。
+>
+> 🟦 **P0-1-9 开工提示**：总览页要「每门课近期 1-2 个任务 + 跨课程近期任务列表（按日期排序，仅 syllabus 数据）」。数据源已经齐了 —— 考试派生 task 在 `tasks` 表里（`syncExamToTask()` 写入，ADR-004），契约 §5 有 `GET /api/v1/tasks?range=7d&limit=50`。卡片上要加 `upcomingTasks`（§2 列表响应里预留了这个字段，目前**没返回**，别误以为已实现）。
 
 > 🛑 **上一轮收工状态（2026-09-02 23:00，Steven 收工）**：P0-1-4 已验收通过。
 > - **P0-1-5a 已在 2026-09-03 开工**，开工提示见下方 P0-1-4 卡末尾（①②③④）。
@@ -180,7 +188,7 @@
 | **P0-1-5** | 解析 API 路由 + 结果落库 + **修正 diff 存储**（保存原始解析 vs 修正后 + 差异字段） | Bud | P0-1-2, P0-1-4 | 数据库同时存有原始与修正版本，可追溯差异 | 🔵 5a ✅ 已验收 / 5b 进行中 |
 | **P0-1-6** | 可编辑表单 UI：五个板块逐项编辑 / 补全 / 覆盖 + 保存 | Bud | P0-1-5 | 可修改任一字段并保存；TBD 状态可正常展示与编辑 | 🟡 代码完成，浏览器验收待做 |
 | **P0-1-7** | Workspace CRUD：创建（学期 + 课程名必填，编码/教师选填）、列表按学期分组、编辑、删除 | Bud | P0-0-6 | 建课后出现在总览页与列表；删除有二次确认 | ✅ |
-| **P0-1-8** | 课程详情页：展示五板块最终信息 | Bud | P0-1-6, P0-1-7 | 保存后的数据完整展示；缺失项显示 TBD 而非空白 | ⚪ |
+| **P0-1-8** | 课程详情页：展示五板块最终信息 | Bud | P0-1-6, P0-1-7 | 保存后的数据完整展示；缺失项显示 TBD 而非空白 | 🟡 代码完成，浏览器验收待做 |
 | **P0-1-9** | 总览页 v1：课程卡片（显示近期 1-2 个任务）+ 跨课程近期任务列表（仅 syllabus 数据，按日期排序） | Bud | P0-1-8 | 能看到"最近 7 天所有课程要做的事"；可跳转课程详情 | ⚪ |
 | **P0-1-10** | 冷启动：**Demo Workspace**（预置示例课程，含已解析 syllabus 与示例任务） | Bud | P0-1-9 | 新用户从进入站点到看到有内容的总览页 ≤ 30 秒 | ⚪ |
 | **P0-1-11** | 解析过程可视化：上传后先显示文本预览，再逐步填充五个板块 + 进度提示 | Bud | P0-1-6 | 用户不再干等；每一步有明确状态反馈 | ⚪ |
@@ -388,6 +396,26 @@
 - **自测（Bud，2026-09-03）**：`tsc` ✅ ｜ `lint` ✅ ｜ `build` ✅ ｜ 无头冒烟 **17/17**（dashboard SSR 带板块数据、跨用户隔离、PUT 回包结构、清理）。
 - **已知留白**：① **浏览器交互未验**（展开/切 tab/打字/保存/上移下移/解析按钮）—— `next dev` 在 WorkBuddy 起不来（`CodingRules.md` §5），只能 Steven 本地验收；② dashboard 一次性加载所有课程的五板块（Phase 0 课程数少，P0-1-8 详情页可按需加载）；③ 解析触发是同步等待（约 3-5 秒），过程动画归 P0-1-11；④ 测试账号 `p16-a-*/p16-b-*@test.dev` 待 Steven 手动删。
 
+#### 🎫 P0-1-8 · 课程详情页 · 🟡 代码完成 / 服务端自测通过 / 浏览器交互待 Steven 验收
+- **做什么**：`/courses/[id]` 展示课程 + 五板块最终信息（缺失项显示 TBD），并把一门课的全部操作集中到这里。
+- **改哪些文件**：
+  - `lib/course-detail.ts`（新）—— `loadCourseDetail()`：课程 + 最新 syllabus + 五板块，一次合成。**端点与页面共用同一份读逻辑**，避免「页面一套查询、接口另一套」的漂移。
+  - `app/api/v1/courses/[id]/route.ts` —— 新增 `GET`（契约 §2）。
+  - `app/(routes)/courses/[id]/page.tsx`（新）—— 详情页。
+  - `components/sections/section-view.tsx`（新）—— 五板块只读展示层（TBD 语义在这一层）。
+  - `components/sections/section-editor.tsx` —— 加 **查看 / 编辑双模式**（P0-1-6 只有编辑）。
+  - `components/courses/course-actions.tsx`（新）—— 编辑信息 / 删除（从卡片搬来，删除后跳回总览）。
+  - `components/courses/course-card.tsx` —— **瘦身**：只留摘要 + 详情入口 + 删除。
+  - `components/courses/syllabus-status.ts`（新）—— syllabus 一句话状态（卡片与详情页共用，抽出来防漂移）。
+  - `dashboard/page.tsx` —— 去掉五板块预加载（P0-1-6 加的，随卡片瘦身一起删除）。
+- **🔴 关键约束（改动前必读）**：
+  1. **读逻辑必须走 `lib/course-detail.ts`**，别在页面里重写一遍查询。页面直查 DB（RLS 保护），**不 fetch 自己的 API**（省一次往返）。
+  2. **归档 = 删除**：归档课程的详情返回 404（`is_archived = false` 过滤），与 §4 保存端点语义一致。
+  3. **缺失项返回 `[]` 不是 `null`**（契约 §2 原文）；**展示层必须把 null 值渲染成 TBD**（验收标准原文：缺失项显示 TBD 而非空白）—— 空白会让用户分不清「syllabus 没写」和「还没解析」。
+  4. **列表页在 `/dashboard`，详情页在 `/courses/[id]`** —— 不新增 `/courses` 列表路由（P0-1-7 定的）。
+- **自测（Bud，2026-09-03）**：`tsc` ✅ ｜ `lint` ✅ ｜ `build` ✅（新增 `/courses/[id]` 动态路由）｜ 无头冒烟 **34/34**。
+- **已知留白**：① **浏览器交互未验**（查看/编辑切换、点卡片进详情、从详情页删除后跳回）—— 只能 Steven 本地 `npm run dev`；② 详情页没有 syllabus 文本预览（契约 §3 的 `previewText` 只在上传响应里，P0-1-11 再做）；③ 测试账号 `p18-a-*/p18-b-*@test.dev` 待手动删。
+
 #### 🎫 P0-1-7 · Workspace CRUD（课程创建 / 列表 / 编辑 / 删除）· ✅ 已完成，勿重做
 - **做什么**：课程 CRUD。列表按学期分组展示；删除 = 归档，带二次确认。
 - **改哪些文件**：
@@ -502,4 +530,5 @@ P0-0 基础设施
 | 2026-09-03 | **P0-1-5 拆为 5a / 5b 两张执行卡**（Steven 拍板，编号不变）。**P0-1-5a 开工并完成代码**：新增 `types/sections.ts`、五张板块表的 DB 映射层 `lib/{grade-components,course-outline-items,exam-dates,office-hours,submission-policies}.ts`、落库编排 `lib/parse/persist.ts`、共用逻辑 `lib/parse/endpoint.ts`、`POST /api/v1/syllabi/:id/{parse,reparse}` 两个端点。**契约偏离两项并已升格为 [ADR-012](./Decisions.md#adr-012)**：① `/parse` 同步返回 200（契约原写 202 异步 + 轮询，但实测五板块并发仅 3.2s，且 `llm_runs` 没有板块级进度的存储落点）；② `syllabi.parse_status` 只有 completed/failed 两态，契约原写的 `partial` 不在 DB CHECK 约束内。`GET /parse-status` 标注为 P0-1-11 待定。落库最终规则（初版「`is_confirmed=true` 不删」被冒烟实测推翻，会造成重复数据）：**只动成功的板块 / 只删 `source='syllabus'` 的行整体替换 / `manual` 来源保留**。`GET /parse-status` 标注为 P0-1-11 待定。本地冒烟 44/44，生产验证 14/14（`/parse` 端到端 4.4s，`llm_runs` 落 5 条 success，`deepseek-v4-flash`），P0-1-3/1-4 挂账的生产验证就此关闭。**Steven 验收通过，测试账号已清理**，进度指针推进至 P0-1-5b（开工提示见进度指针区） |
 | 2026-09-03 | **P0-1-5b 代码完成（待 Steven 验收）**：5 个 `PUT` 板块保存端点 + 字段级 diff（`lib/parse/corrections.ts`，edit/add/delete 三类统一，`order_index` 除外）+ `syncExamToTask()`（`lib/sync/exam-tasks.ts`，ADR-004 唯一落点）+ `persist.ts` 接入派生（解析后也产 task）。实现期决策（写入 `API-Contract.md` §4 变更记录，无需 ADR）：request 不含 `status`（由 examDate 派生）、response 为 `{ data: [...] }`、归档课程保存 404、归因取「最新 syllabus 最近一次成功解析」。本地冒烟 56/56（含真实 `/parse` 归因验证）。进度指针推进至 P0-1-6（纯前端，后端全部就绪） |
 | 2026-09-03 | **P0-1-5b 生产验证通过**：两个 commit（代码 `638a331` + 文档）push 后 Vercel 部署 success，生产冒烟 **18/18**（路由存在 / grade-components 全流程含 edit 修正 / exam 派生 23:59:59 + tbd→null / 真实 `/parse` + `llm_run_id`·`syllabus_id` 归因 / 401 / 跨用户 404 / 非法日期 400 / 数据清理）。临时脚本已删，测试账号留 auth.users 待 Steven 手动删（本地 `p15b-a/b@test.dev`、生产 `p15b-prod/prod2@test.dev`） |
-| 2026-09-03 | **P0-1-6 五板块编辑 UI 代码完成（浏览器交互待 Steven 验收）**：`lib/sections.ts`（服务端直查五表）+ `components/sections/`（编辑器 + 五表单 + 共用 hook）+ 上传流程补齐第 5 拍解析触发（开始/重试/重新解析带二次确认）。**两个 Steven 拍板**：编辑 UI 放卡片内折叠面板（不新增路由，详情页留给 P0-1-8）、重新解析入口带上。**一处 React 模式纠正**：表单同步 props 从「effect 里 setState」改为「key 重挂载」（lint `react-hooks/set-state-in-effect` 拦下）。**发现并补上了一个断链**：`/parse` 此前没有任何 UI 触发入口，上传流程停在「已提取文本，等待解析」。tsc/lint/build 全绿，无头冒烟 17/17（SSR 载荷带板块数据 + RLS 隔离 + PUT 回包）。进度指针推进至 P0-1-8 |
+| 2026-09-03 | **P0-1-6 五板块编辑 UI 代码完成（浏览器交互待 Steven 验收）**：`lib/sections.ts`（服务端直查五表）+ `components/sections/`（编辑器 + 五表单 + 共用 hook）+ 上传流程补齐第 5 拍解析触发（开始/重试/重新解析带二次确认）。**两个 Steven 拍板**：编辑 UI 放卡片内折叠面板（不新增路由，详情页留给 P0-1-8）、重新解析入口带上。**一处 React 模式纠正**：表单同步 props 从「effect 里 setState」改为「key 重挂载」（lint `react-hooks/set-state-in-effect` 拦下）。**发现并补上了一个断链**：`/parse` 此前没有任何 UI 触发入口，上传流程停在「已提取文本，等待解析」。tsc/lint/build 全绿，无头冒烟 17/17（SSR 载荷带板块数据 + RLS 隔离 + PUT 回包）。**P0-1-8 时该编辑器已随「全部搬到详情页」的决策移到详情页**，卡片恢复为摘要 |
+| 2026-09-03 | **P0-1-8 课程详情页代码完成（浏览器交互待 Steven 验收）**：`GET /api/v1/courses/:id`（契约 §2）+ `lib/course-detail.ts`（读逻辑唯一一份）+ `app/(routes)/courses/[id]` + `section-view.tsx`（TBD 展示层）+ SectionEditor 加查看/编辑双模式 + **卡片瘦身为摘要**（删除也集中到详情页）。**两个 Steven 拍板**：全部操作搬详情页（卡片只留摘要+入口+删除）、路由 `/courses/[id]`。**契约收敛**：`syllabus` 返回完整 Syllabus 对象（超集，UI 需要 extractStatus/parseError）、归档课程 404。**顺手消除** P0-1-6 的「dashboard 一次性加载所有课程五板块」开销。tsc/lint/build 全绿，无头冒烟 34/34。进度指针推进至 P0-1-9 |
