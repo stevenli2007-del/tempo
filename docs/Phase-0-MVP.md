@@ -29,15 +29,17 @@
 
 ## 当前进度指针
 
-**当前 task**：`P0-1-10` Demo Workspace —— ⚪ **未开工**（Steven 在新会话里下达开工指令）
+**当前 task**：`P0-1-10` Demo Workspace —— ✅ **代码完成，待 Steven 验收**（Bud 2026-09-03 自测 14/14 冒烟 + dashboard SSR 渲染验证全过；浏览器交互归 Steven 本地验收）
 
 > ✅ **P0-1-9 已验收通过（2026-09-03 16:10，Steven 浏览器验收）**：三个端点/UI 全部通过，测试账号已由 Steven 删除。**M1 静态理解链路完整收口**（上传 → 提取 → 解析 → 落库 → 编辑 → 展示 → 总览 → 标记完成）。commit `8022643`/`1b4864c`/`f5065b7`/`777712c`，Vercel 部署 `1b4864c` success。
 >
-> 🔜 **P0-1-10 开工前需 Steven 先定一件事（唯一阻塞）**：**Demo 示例数据从哪来** ——
-> - **A（推荐）**：Steven 提供一份可公开的真实 syllabus（如 CS61B / EE16A 公开版）—— 真实感最强，种子用户第一眼就有代入感。
-> - **B**：Bud 用合成示例（**必须明确标注是演示数据**，不冒充真实课程，避免与"抗幻觉"的产品立场冲突）。
->
-> 契约 §8 的 `POST /api/v1/demo/seed` + `DELETE /api/v1/demo` 已定义好，**不阻塞实现**。
+> ✅ **P0-1-10 实现完成（2026-09-03，Bud）**：Demo 数据源 = Steven 提供的真实 syllabus `Syllabus 2.pdf`（CHEM 1A Fall 2026，选项 A）。五板块由 `lib/parse` 真实解析结果固化进 `lib/demo/seed-data.ts`（非手写），seed 端点复用 `persistParsedSections` 落库 + `syncExamToTask` 派生考试任务（与正常上传解析同一套落库逻辑）。无 LLM 实时调用。冒烟 14/14 + SSR 渲染验证通过。
+> - **Steven 拍板两处留空**：① `courseOutline` 留空（真实 syllabus 用 L1–L40 讲座编号，解析器 prompt 未覆盖该格式、稳定漏抽，已记 bug 归 P0 期后改进卡）；② `officeHours` 留空（原文只写 "see calendar on bCourses"，模型正确返回空）。
+> - ⚠️ **遗留真 bug（非本卡范围）**：courseOutline 对 L 编号课表稳定漏抽，是解析器 prompt 缺陷，真实用户传同类 syllabus 也会丢课表 → 建议开 P0 期后改进卡（修 prompt + 加回归样例）。
+> - 演示课程**不建 syllabi 行**（`file_url`/`file_name` 为 NOT NULL，避免悬挂 Storage 对象 + 失效下载链接）；卡片显示「还没有 syllabus」属预期。
+> - 🔜 **下一张卡**：M2 动态感知（Canvas 同步），入口 `P0-2-1` 已 ✅，待 Steven 定 P0-2 序列开工。
+
+> 🛑 **本轮收工状态（2026-09-03 16:12，Steven 收工）**：**P0-1-9 验收通过 ✅ → M1 静态理解链路完整收口**。本轮 Bud 两次按 `CodingRules.md` §5 在模糊指令「Please continue.」处停下确认（未越界开工）。下一张卡 **P0-1-10 Demo Workspace**，Steven 将在**新会话**开工，开工前需先定示例数据来源（A 真实公开 syllabus / B 合成示例）。
 
 > 🛑 **本轮收工状态（2026-09-03 16:12，Steven 收工）**：**P0-1-9 验收通过 ✅ → M1 静态理解链路完整收口**。本轮 Bud 两次按 `CodingRules.md` §5 在模糊指令「Please continue.」处停下确认（未越界开工）。下一张卡 **P0-1-10 Demo Workspace**，Steven 将在**新会话**开工，开工前需先定示例数据来源（A 真实公开 syllabus / B 合成示例）。
 > - ✅ **测试账号已全部清理（2026-09-03 16:10，Steven 手动删）**：`p19-a/b@test.dev`（本地）+ `p19-prod-a/b@test.dev`（生产）已从 auth.users 移除。**auth.users 现在无测试残留**。
@@ -209,7 +211,7 @@
 | **P0-1-7** | Workspace CRUD：创建（学期 + 课程名必填，编码/教师选填）、列表按学期分组、编辑、删除 | Bud | P0-0-6 | 建课后出现在总览页与列表；删除有二次确认 | ✅ |
 | **P0-1-8** | 课程详情页：展示五板块最终信息 | Bud | P0-1-6, P0-1-7 | 保存后的数据完整展示；缺失项显示 TBD 而非空白 | ✅ 已验收（2026-09-03 11:50） |
 | **P0-1-9** | 总览页 v1：课程卡片（显示近期 1-2 个任务）+ 跨课程近期任务列表（仅 syllabus 数据，按日期排序） | Bud | P0-1-8 | 能看到"最近 7 天所有课程要做的事"；可跳转课程详情 | ✅ **2026-09-03 验收通过**（本地 64/64 + 生产 26/26）。**M1 收口** |
-| **P0-1-10** | 冷启动：**Demo Workspace**（预置示例课程，含已解析 syllabus 与示例任务） | Bud | P0-1-9 | 新用户从进入站点到看到有内容的总览页 ≤ 30 秒 | ⚪ |
+| **P0-1-10** | 冷启动：**Demo Workspace**（预置示例课程，含已解析 syllabus 与示例任务） | Bud | P0-1-9 | 新用户从进入站点到看到有内容的总览页 ≤ 30 秒 | ✅ 代码完成（2026-09-03，Bud 自测 14/14 冒烟 + SSR 渲染验证；待 Steven 浏览器验收） |
 | **P0-1-11** | 解析过程可视化：上传后先显示文本预览，再逐步填充五个板块 + 进度提示 | Bud | P0-1-6 | 用户不再干等；每一步有明确状态反馈 | ⚪ |
 
 ---
@@ -416,6 +418,24 @@
 - **✅ Steven 验收（2026-09-03 11:50，在 P0-1-8 详情页上验）**：展开 / 切 tab / 打字 / 保存 / 上移下移 / 解析按钮全部通过。测试账号已删。
 - **剩余留白**（已确认可接受）：① dashboard 一次性加载所有课程的五板块 —— **已随 P0-1-8 卡片瘦身消失**；② 解析触发是同步等待（约 3-5 秒），过程动画归 P0-1-11。
 
+#### 🎫 P0-1-10 · Demo Workspace（冷启动）· ✅ **代码完成（2026-09-03，Bud 自测 14/14 冒烟 + SSR 渲染验证；待 Steven 浏览器验收）**
+- **做什么**：新用户一键生成预置示例课程（含已解析 syllabus 与示例任务），标记 `is_demo=true`；可一键清空。让"从进入站点到看到有内容的总览页 ≤ 30 秒"。
+- **数据源（Steven 拍板选项 A）**：`Syllabus 2.pdf` = CHEM 1A Fall 2026（Berkeley Dr. Debjani Roy & Dr. Alexis Shusterman），**真实公开 syllabus**。五板块由 `lib/parse` 真实解析结果固化进 `lib/demo/seed-data.ts`（非手写），每条 `sourceExcerpt` 是逐字摘录，抗幻觉不破。
+- **改哪些文件**：
+  - `lib/demo/seed-data.ts`（新）—— `DEMO_COURSE` + `DEMO_SEED_SECTIONS`（真实解析固化）+ `toDemoSectionsResult()`（包成 `persistParsedSections` 入参形状）
+  - `app/api/v1/demo/seed/route.ts`（新）—— `POST`：查重 → 建 `is_demo` 课程 → 复用 `persistParsedSections` 落库 + 派生 exam tasks → 写 `profiles.demo_seeded_at`；失败尽力回滚课程；重复 → `409 already_linked`
+  - `app/api/v1/demo/route.ts`（新）—— `DELETE`：删 `is_demo` 课程（级联清五板块 + 派生 tasks）→ 复位 `demo_seeded_at`；无 demo → `200 {deleted:0}`（幂等）
+  - `components/courses/demo-controls.tsx`（新）—— 客户端控件：空状态「先看看效果」CTA + 「清空示例数据」小按钮
+  - `components/courses/course-card.tsx` —— `isDemo` 时显示「示例」badge
+  - `app/(routes)/dashboard/page.tsx` —— 接管 `DemoControls`（`hasDemo` 决定 CTA / 清空按钮）+ 空状态入口
+- **🔴 关键约束（改动前必读）**：
+  1. **seed 端点不调 LLM**：直接用固化常量 + 复用 `persistParsedSections`，与正常上传解析同一套落库/派生逻辑（单一事实源）。运行时零 LLM 依赖。
+  2. **`courseOutline` 与 `officeHours` 按 Steven 拍板留空**：前者是解析器对 L1–L40 讲座编号课表稳定漏抽的真 bug（归 P0 期后改进卡）；后者原文无具体时间，模型正确返回空。
+  3. **演示课程不建 syllabi 行**：`syllabi.file_url`/`file_name` 为 NOT NULL，建行必指向 Storage 对象，否则卡片下载入口 404。无 syllabi 行时卡片显示「还没有 syllabus」属预期。
+  4. **删 demo 课程靠 `ON DELETE CASCADE`**：五板块 + 派生的 tasks 全对 `courses` 设了级联；`courses` 是 `for all` RLS 策略，`DELETE` 放行，只能删自己的。
+- **自测（Bud，2026-09-03）**：`tsc` ✅ ｜ `lint` ✅ ｜ `build` ✅ ｜ 冒烟 **14/14**（seed 201 + isDemo、重复 409、五板块落库 + 派生 4 条 exam 任务、卡片近期任务含考试、跨用户隔离、delete 级联清子数据 + 幂等）+ dashboard SSR 渲染验证（课程名 / 「示例」badge / 派生考试均渲染；已 seed 后「先看看效果」入口不出现）。**遗留两个测试 auth 账号待 Steven 在 Supabase Dashboard 删除**。
+- **🔜 下一张卡**：M2 动态感知（Canvas 同步），`P0-2-1` 已 ✅，待 Steven 定 P0-2 序列开工。
+
 #### 🎫 P0-1-9 · 总览页 v1 · ✅ **已验收通过（2026-09-03 16:10，Steven 浏览器验收）· 勿重做**
 - **做什么**：跨课程近期任务列表（按日期排序）+ 卡片近期 1-2 个任务 + 「标记完成」。**这是 M1 的最后一张卡**，做完 M1 静态理解链路完整收口。
 - **改哪些文件**：
@@ -588,3 +608,4 @@ P0-0 基础设施
 | 2026-09-03 | **P0-1-9 总览页 v1 代码完成（浏览器交互待 Steven 验收）**：新建 `types/task.ts` + `lib/tasks.ts` + `GET /api/v1/tasks` + `PATCH /api/v1/tasks/:id`（此前两个端点都不存在）+ `components/tasks/task-list.tsx`；`Course` 加可选 `upcomingTasks` 并由 `GET /api/v1/courses` 补上（契约 §2 早有此字段但一直没返回）；卡片显示近期 1-2 个任务；dashboard 加「最近要做的事」区块。**三个实现期决策（写入 `API-Contract.md` §5 变更记录）**：① `range` **只设上界不设下界** —— 逾期未完成的任务必须留在列表里（藏起来等于帮用户逃避）；② PATCH 两类拒绝分开 —— 派生任务传 title/dueDate → `422 derived_task_immutable`（ADR-004 接口层强制点），非派生任务 → `400 validation_failed`（明确拒绝而非静默忽略）；③ `meta` **不返回** `staleWarning`/`lastSuccessfulSyncAt`（Canvas 同步状态，Phase 0 无同步，硬编码 false 是静默的错误数据），留 P0-2-7 / P0-2-11。**两个技术约束**：tasks 的 RLS 不看 `is_archived`（归档过滤必须显式做）、`.lte()` 对 null 求值不成立（TBD 任务要显式 `or` 保留）。**踩坑**：把 PostgREST 查询构造器抽成带泛型函数触发 `TS2589`，排序改为各写一份。tsc/lint/build 全绿，本地无头冒烟 **64/64**。测试账号 `p19-a/b@test.dev` 待 Steven 手动删 |
 | 2026-09-03 | **P0-1-9 生产验证通过**：Vercel 部署 `1b4864c` success，生产冒烟 **26/26**（端点已部署两个、range 窗口与排序、分页、跨用户隔离、`upcomingTasks`、PATCH 标记完成与 422、越权 404、`x-request-id` 回传、dashboard SSR、数据清理）。生产验证前先用 `gh api .../deployments` 确认部署 —— 首次查询时最新部署仍是昨天的 `0587138`，新路由 404 而旧路由 401，按 `CodingRules.md` §10.1 第 7 条判定为部署延迟而非代码问题，等待后自动创建。**待 Steven 手动**：删测试账号 `p19-a/b@test.dev`（本地）+ `p19-prod-a/b@test.dev`（生产） |
 | 2026-09-03 | **P0-1-9 验收通过 ✅ → M1 静态理解链路完整收口（2026-09-03 16:10，Steven 浏览器验收）**：三项浏览器交互全通过（勾 checkbox 标记完成并刷新 / 展开「已完成 N 项」看到删除线 / 卡片显示近期任务），测试账号由 Steven 手动删除，auth.users 无残留。commit `8022643`（代码）+ `1b4864c`（文档）+ `f5065b7`（生产验证）+ `777712c`（踩坑库），Vercel 部署 `1b4864c` success。**本轮 Bud 两次在模糊指令「Please continue.」处按 `CodingRules.md` §5 停下确认，未越界开工** —— 该规则第二次生效，可确认「Steven 会重复用 Please continue. 回应 Done Report」是稳定模式。**下一张卡 P0-1-10 Demo Workspace，Steven 在新会话开工**；开工前唯一阻塞是「示例数据来源」：A 真实公开 syllabus（推荐，代入感强）/ B 合成示例（须明确标注为演示数据，否则与产品「抗幻觉」立场冲突）。契约 §8 的 `POST /api/v1/demo/seed` + `DELETE /api/v1/demo` 已定义，不阻塞实现 |
+| 2026-09-03 | **P0-1-10 Demo Workspace 代码完成（待 Steven 浏览器验收）**：示例数据 = Steven 提供的真实 `Syllabus 2.pdf`（CHEM 1A Fall 2026，选项 A）。五板块由 `lib/parse` 真实解析结果固化进 `lib/demo/seed-data.ts`，seed 端点复用 `persistParsedSections` 落库 + `syncExamToTask` 派生考试任务，**运行时零 LLM 依赖**。新增 `POST /api/v1/demo/seed`（重复 409 already_linked、失败回滚课程）+ `DELETE /api/v1/demo`（级联清子数据 + 复位 `demo_seeded_at`、幂等）+ `components/courses/demo-controls.tsx`（「先看看效果」CTA + 「清空示例数据」）+ 课程卡「示例」badge + dashboard 空状态入口。**Steven 拍板留空** `courseOutline`（解析器对 L1–L40 讲座编号课表稳定漏抽，已记 bug 归 P0 期后改进卡）与 `officeHours`（原文无具体时间，模型正确返回空）；演示课程**不建 syllabi 行**（避免悬挂 Storage 对象）。自测 `tsc`/`lint`/`build` 全绿 + 冒烟 **14/14** + dashboard SSR 渲染验证全过。**遗留两个测试 auth 账号待 Steven 在 Supabase Dashboard 删除**。DeepSeek 期间触发 429 每日限流（非余额耗尽，约 2026-09-04 13:04 北京时间重置），不阻塞本卡 |

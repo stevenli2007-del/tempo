@@ -562,8 +562,20 @@ syllabus 数据、根本没有同步这回事。硬编码 `staleWarning: false` 
 为新用户复制预置的示例课程（含已解析 syllabus 与示例任务），标记 `isDemo = true`。重复调用返回 `409 already_linked`。
 验收：从进入站点到看到有内容的总览页 **≤ 30 秒**（P0-1-10）。
 
+- **预置数据来源（P0-1-10 实现）**：Steven 提供的真实 syllabus `Syllabus 2.pdf`（CHEM 1A Fall 2026），五板块由 `lib/parse` 真实解析结果固化进 `lib/demo/seed-data.ts`（非手写，每条 `sourceExcerpt` 为逐字摘录）。
+- **落库复用常态链路**：seed 端点直接复用 `persistParsedSections` 落五板块 + `syncExamToTask` 派生考试任务，**运行时不调 LLM**。
+- **留空板块（Steven 拍板）**：`courseOutline` 留空（解析器对 L1–L40 讲座编号课表稳定漏抽，归 P0 期后改进卡）；`officeHours` 留空（原文无具体时间，模型正确返回空）。
+- **不建 syllabi 行**：演示课程不写 `syllabi` 表（`file_url`/`file_name` 为 NOT NULL，避免悬挂 Storage 对象 + 失效下载入口）；卡片显示「还没有 syllabus」属预期。
+- **流程**：查重（已存在 `isDemo` 课程 → `409`）→ 建 `is_demo=true` 课程 → 落五板块 + 派生 tasks → 写 `profiles.demo_seeded_at`；任一步失败尽力回滚已建课程（避免半截 demo 卡住重试的 409）。
+- **响应**：`201` + 课程对象（`isDemo: true`）。
+
 ### `DELETE /api/v1/demo`
 一键清空全部 `isDemo = true` 的课程及其数据。
+
+- **级联清理**：子表（五板块 + 派生的 tasks）全部对 `courses` 设 `ON DELETE CASCADE`，物理删课程即级联清子数据；`courses` 为 `for all` RLS 策略，只能删自己的。
+- **复位**：清 `profiles.demo_seeded_at = null`（让 UI 重新展示「先看看效果」入口）。
+- **幂等**：无 `isDemo` 课程时返回 `200 { deleted: 0 }`。
+- **响应**：`200 { deleted: <数量> }`。
 
 ---
 
@@ -620,3 +632,4 @@ syllabus 数据、根本没有同步这回事。硬编码 `staleWarning: false` 
 | 2026-09-03 | **§2 补 `upcomingTasks` 的实现说明**（P0-1-9）：契约早有此字段但端点一直没返回，本次补上（最多 2 条、只含未完成、按 dueDate 升序）。**字段可选**：缺失表示"没加载到"而非"没有任务"，两者在 UI 上必须分开 | P0-1-9 |
 | 2026-09-03 | **§2 `GET /api/v1/courses/:id` 按 P0-1-8 实现收敛**：① `syllabus` 由「只给 `{id,fileName,parseStatus}`」放宽为**返回完整 Syllabus 对象** —— UI 需要 `extractStatus` / `parseError` 才能渲染「解析失败可重试」；② 补错误码表（401 / 400 / 404），**已归档课程按 404 处理**（归档 = 删除，与 §4 保存端点一致）；③ 读逻辑收敛到 `lib/course-detail.ts`，端点与详情页服务端组件共用一份 | P0-1-8 |
 | 2026-09-03 | **§5 两个端点验收通过（Steven 浏览器验收，P0-1-9 ✅）**：`GET /api/v1/tasks` 与 `PATCH /api/v1/tasks/:id` 本地无头 64/64 + 生产 26/26，浏览器交互（标记完成 → 列表刷新 / 已完成折叠与删除线）通过，契约 §5 现状即实现现状，无需再收敛。**§5 的 `POST` / `DELETE`（手动任务）仍为未实现**，留给后续卡片 | P0-1-9 |
+| 2026-09-03 | **§8 Demo 端点按 P0-1-10 实现落地**：`POST /api/v1/demo/seed`（建 `is_demo=true` 课程 + 复用 `persistParsedSections` 落五板块 + `syncExamToTask` 派生考试任务，运行时零 LLM；重复 → `409 already_linked`；失败回滚课程）+ `DELETE /api/v1/demo`（级联清子数据 + 复位 `demo_seeded_at`，幂等 `200 {deleted:0}`）。预置数据 = Steven 真实 syllabus（CHEM 1A Fall 2026），`courseOutline`/`officeHours` 按拍板留空，演示课程不建 syllabi 行。现状即实现现状 | P0-1-10 |
