@@ -31,7 +31,9 @@
 
 **当前 task**：`P0-1-5a` 解析 API 路由 + 五板块落库（`/parse` / `/reparse`）
 
-> 🔵 **P0-1-5a 进行中（2026-09-03）** —— 代码已写完，tsc / lint / build 三项全绿，待 curl 冒烟 + Steven 验收。
+> 🔵 **P0-1-5a 代码完成（2026-09-03），待 Steven check** —— tsc / lint / build 全绿，**本地 curl 冒烟 44/44**。
+> - ⚠️ **生产验证被卡（交接点）**：commit `bcd5a20` 已推到 `origin/main`，但 **Vercel 没有为它创建部署**（最新部署仍停在 `289f857`，15:19Z success）。等了 20 分钟 + 绕过 CDN 缓存重试，生产 `/parse` 与 `/reparse` 仍 404，同目录 `/extract` 是 401（说明服务的是旧部署）。**需 Steven 去 Vercel Dashboard 看 Git 集成 / 手动 Redeploy**，之后跑生产验证脚本确认 ① key 注入 ② adapter 跑通 ③ `llm_runs` 落库。
+> - 查部署状态不用登 Vercel：`gh api repos/stevenli2007-del/tempo/deployments --jq '.[0] | {sha, created_at}'` + `.../deployments/<id>/statuses`。
 > - **P0-1-5 拆成 5a / 5b 两张卡（2026-09-03，Steven 拍板）**：5a = 解析 + 落库；5b = 5 个 `PUT` 保存端点 + `parse_corrections` diff + 考试派生任务。**task 编号不变**（P0-1-5 仍是一行），只在执行卡层面拆。
 > - **两个拍板**：① `/parse` **同步返回 200** 而非契约原写的 202 异步（[ADR-012](./Decisions.md#adr-012)）；② 拆卡，每卡做完等 Steven check 再做下一张。
 > - **`git push` 已完成**（2026-09-03 开工时）：`40d1f33` / `ebd9b8a` / `4dc8c3e` / `289f857` 已到 `origin/main`。
