@@ -48,7 +48,11 @@
 
 > 📌 **P0-1-5a 已验收通过 ✅（2026-09-03，Steven 验收；测试账号已清理）**。代码 commit `bcd5a20` + 文档 commit（生产验证 14/14 + §10 部署延迟条目），均已 push。本地冒烟 44/44、生产验证 14/14（真实调 DeepSeek 4.4s、`llm_runs` 落 5 条 success）。
 
-> 🟦 **P0-1-9 开工提示**：总览页要「每门课近期 1-2 个任务 + 跨课程近期任务列表（按日期排序，仅 syllabus 数据）」。数据源已经齐了 —— 考试派生 task 在 `tasks` 表里（`syncExamToTask()` 写入，ADR-004），契约 §5 有 `GET /api/v1/tasks?range=7d&limit=50`。卡片上要加 `upcomingTasks`（§2 列表响应里预留了这个字段，目前**没返回**，别误以为已实现）。
+> 🟦 **P0-1-9 开工提示**：总览页要「每门课近期 1-2 个任务 + 跨课程近期任务列表（按日期排序，仅 syllabus 数据）」。
+> - **数据**：考试派生 task 已经在 `tasks` 表里（`syncExamToTask()` 写入，ADR-004）。**但读它的端点还不存在，要新建**（见下方 ⚠️）。
+> - **契约**：`GET /api/v1/tasks?range=7d&limit=50&offset=0`（§5）、`PATCH /api/v1/tasks/:id`（§5）。
+> - **卡片**：要加 `upcomingTasks`（§2 列表响应里预留了这个字段，目前**没返回**，别误以为已实现）。
+> - **范围边界**：仅 syllabus 数据 —— **不做**手动任务的新增 / 删除（§5 的 `POST` / `DELETE` 不在本卡）。
 >
 > ✅ **两个产品问题已拍板（2026-09-03 11:58，Steven）**：
 > ① **包含「标记任务完成」** → 走契约 §5 的 `PATCH /api/v1/tasks/:id`，**只允许改 `status`**；`isDerived = true` 的任务传 `title` / `dueDate` → `422 derived_task_immutable`，错误信息引导去课程页改 `exam_dates`（ADR-004 在接口层的强制点）。
