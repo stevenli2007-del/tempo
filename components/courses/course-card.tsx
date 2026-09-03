@@ -6,16 +6,20 @@ import { useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { CourseForm } from '@/components/courses/course-form'
 import { SyllabusUpload } from '@/components/courses/syllabus-upload'
+import { SectionEditor } from '@/components/sections/section-editor'
 import type { Course } from '@/types/course'
+import type { StoredSections } from '@/types/sections'
 import type { Syllabus } from '@/types/syllabus'
 
 interface CourseCardProps {
   course: Course
   /** 该课程最新一份 syllabus；没有则为 null（P0-1-1 起展示上传入口）。 */
   syllabus: Syllabus | null
+  /** 该课程五板块的当前数据（服务端直查，`lib/sections.ts`）。 */
+  sections: StoredSections
 }
 
-export function CourseCard({ course, syllabus }: CourseCardProps) {
+export function CourseCard({ course, syllabus, sections }: CourseCardProps) {
   const router = useRouter()
   const [isEditing, setIsEditing] = useState(false)
   const [isConfirmingDelete, setIsConfirmingDelete] = useState(false)
@@ -90,6 +94,12 @@ export function CourseCard({ course, syllabus }: CourseCardProps) {
       </div>
 
       <SyllabusUpload courseId={course.id} syllabus={syllabus} />
+
+      <SectionEditor
+        courseId={course.id}
+        sections={sections}
+        parseStatus={syllabus ? syllabus.parseStatus : 'none'}
+      />
 
       {isConfirmingDelete ? (
         <div className="mt-4 rounded-lg border border-border bg-muted/40 p-4">

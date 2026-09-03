@@ -12,6 +12,7 @@ import type {
   Syllabus,
   SyllabusDownloadUrl,
   SyllabusExtractResponse,
+  SyllabusParseResponse,
 } from '@/types/syllabus'
 
 /**
@@ -28,6 +29,10 @@ import type {
  *
  * ⚠️ **第 4 步失败不算上传失败** —— 文件已经存下来了，只是读不出文字。
  * 所以走 `notice`（提示色）而不是 `error`（错误色），文案也要说清「上传成功，但…」。
+ *
+ * P0-1-6 补齐第 5 拍的 UI 触发：「开始解析」（`POST /parse`，同步约 3-5 秒）。
+ * `parseStatus` 已是 `completed` 时改走 `/reparse`，带二次确认 —— 重解析会整体替换
+ * syllabus 来源的行（`is_confirmed` 不保护，5a 实测教训），用户必须知情。
  */
 
 interface SyllabusUploadProps {
@@ -35,7 +40,7 @@ interface SyllabusUploadProps {
   syllabus: Syllabus | null
 }
 
-type Pending = 'uploading' | 'extracting' | 'downloading'
+type Pending = 'uploading' | 'extracting' | 'downloading' | 'parsing'
 
 export function SyllabusUpload({ courseId, syllabus }: SyllabusUploadProps) {
   const router = useRouter()
@@ -46,6 +51,8 @@ export function SyllabusUpload({ courseId, syllabus }: SyllabusUploadProps) {
   const [notice, setNotice] = useState<string | null>(null)
   /** 提取到的文本预览，供用户立刻确认"抽出来的东西对不对"。 */
   const [preview, setPreview] = useState<string | null>(null)
+  /** 重新解析的二次确认（和删除确认同一个模式）。 */
+  const [isConfirmingReparse, setIsConfirmingReparse] = useState(false)
 
   const isBusy = pending !== null
 
@@ -141,6 +148,48 @@ export function SyllabusUpload({ courseId, syllabus }: SyllabusUploadProps) {
     }
   }
 
+  /**
+   * 触发解析（`/parse` 或 `/reparse`）。同步接口，实测 3-5 秒。
+   *
+   * `already_parsed` 的 409 不当错误处理：说明数据已经在库里，刷新即可 ——
+   * 常见于双击或别处刚解析完。
+   */
+  async function handleParse(mode: 'parse' | 'reparse') {
+    if (!syllabus) return
+    setError(null)
+    setNotice(null)
+    setPending('parsing')
+    try {
+      const response = await fetch(`/api/v1/syllabi/${syllabus.id}/${mode}`, {
+        method: 'POST',
+      })
+      if (!response.ok) {
+        if (response.status === 409) {
+          // already_parsed / text_not_ready 都不是「坏了」，刷新即可看到真实状态。
+          router.refresh()
+          return
+        }
+        setError(await readApiErrorMessage(response, mode === 'reparse' ? '重新解析' : '解析'))
+        return
+      }
+
+      const result = (await response.json()) as SyllabusParseResponse
+      // HTTP 200 不代表全成功（ADR-012）：部分失败要在界面上说出来，不能静默吞掉。
+      if (result.failedSections.length > 0) {
+        setNotice(
+          `解析完成，但 ${result.failedSections.length} 个板块没解析出来（${result.failedSections
+            .map((s) => s.section)
+            .join('、')}）。可以点下方「五个板块」手动补。`,
+        )
+      }
+      router.refresh()
+    } catch {
+      setError('网络错误，请稍后重试')
+    } finally {
+      setPending(null)
+    }
+  }
+
   return (
     <div className="mt-4 rounded-lg border border-border bg-muted/40 p-4">
       <input
@@ -162,16 +211,38 @@ export function SyllabusUpload({ courseId, syllabus }: SyllabusUploadProps) {
             <p className="truncate text-sm font-medium text-foreground" title={syllabus.fileName}>
               {syllabus.fileName}
             </p>
-            <p className="mt-0.5 text-xs text-muted-foreground">
-              {syllabus.extractStatus === 'extracted'
-                ? '已提取文本，等待解析'
-                : syllabus.extractStatus === 'failed'
-                  ? (syllabus.extractError ?? '文本提取失败，可手动补充')
-                  : '已上传，等待文本提取'}
-            </p>
+            <p className="mt-0.5 text-xs text-muted-foreground">{statusText(syllabus)}</p>
           </div>
 
           <div className="flex shrink-0 items-center gap-1">
+            {/* 第 5 拍：解析触发。没解析过 / 解析失败 → 开始（重试）；已完成 → 重新解析（带确认）。 */}
+            {syllabus.extractStatus === 'extracted' && syllabus.parseStatus !== 'completed' ? (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => void handleParse('parse')}
+                disabled={isBusy}
+              >
+                {pending === 'parsing'
+                  ? '解析中…'
+                  : syllabus.parseStatus === 'failed'
+                    ? '重试解析'
+                    : '开始解析'}
+              </Button>
+            ) : null}
+            {syllabus.parseStatus === 'completed' ? (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => {
+                  setError(null)
+                  setIsConfirmingReparse(true)
+                }}
+                disabled={isBusy}
+              >
+                重新解析
+              </Button>
+            ) : null}
             <Button
               variant="ghost"
               size="sm"
@@ -212,6 +283,41 @@ export function SyllabusUpload({ courseId, syllabus }: SyllabusUploadProps) {
       {pending === 'extracting' ? (
         <p className="mt-3 text-xs text-muted-foreground">文件已上传，正在提取文本…</p>
       ) : null}
+      {pending === 'parsing' ? (
+        <p className="mt-3 text-xs text-muted-foreground">
+          正在解析五个板块（约 3-5 秒），完成后数据会出现在下方「五个板块」里…
+        </p>
+      ) : null}
+
+      {isConfirmingReparse ? (
+        <div className="mt-3 rounded-lg border border-border bg-background p-3">
+          <p className="text-sm text-foreground">
+            重新解析会用当前文本整体替换解析来源的条目；手动添加的条目保留，
+            但未保存的修改会丢失。确定重跑吗？
+          </p>
+          <div className="mt-2 flex items-center gap-2">
+            <Button
+              variant="destructive"
+              size="sm"
+              onClick={() => {
+                setIsConfirmingReparse(false)
+                void handleParse('reparse')
+              }}
+              disabled={isBusy}
+            >
+              确认重跑
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setIsConfirmingReparse(false)}
+              disabled={isBusy}
+            >
+              取消
+            </Button>
+          </div>
+        </div>
+      ) : null}
 
       {notice ? (
         <p role="status" className="mt-3 text-sm text-muted-foreground">
@@ -237,4 +343,22 @@ export function SyllabusUpload({ courseId, syllabus }: SyllabusUploadProps) {
       ) : null}
     </div>
   )
+}
+
+/** syllabus 一行的状态文案（extract 与 parse 两层分开表达）。 */
+function statusText(syllabus: Syllabus): string {
+  if (syllabus.extractStatus === 'pending') return '已上传，等待文本提取'
+  if (syllabus.extractStatus === 'failed') {
+    return syllabus.extractError ?? '文本提取失败，可手动补充'
+  }
+  switch (syllabus.parseStatus) {
+    case 'completed':
+      return '已解析完成，可点下方「五个板块」查看和编辑'
+    case 'processing':
+      return '解析中…'
+    case 'failed':
+      return syllabus.parseError ?? '解析失败，可重试或手动补充'
+    default:
+      return '已提取文本，等待解析'
+  }
 }
