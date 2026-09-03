@@ -118,6 +118,8 @@ Canvas token、LLM API Key、Supabase 密钥、加密密钥——**只允许存�
 
 这样 API 层不必留给 Steven 首测；**浏览器 UI 的交互与样式仍然只能由 Steven 本地 `npm run dev` 验收**，交付时要如实区分这两者。临时脚本用完必须删除并提交前 `git status` 复查。
 
+**踩坑速查**：本条套路之外的环境 / 依赖 / 部署陷阱见 **§10 踩坑库**（通用方法论在 10.1，按主题的坑索引在 10.2）。自测跑不通时先去那里翻一眼。
+
 **验收不通过时**：按具体意见修改，不自作主张扩大改动范围。改完重新提交验收。
 
 **任务边界**：做的时候发现了别的问题——记下来作为下一个 task 的候选，**不在当前 task 里顺手改**（见 1.2）。
@@ -152,6 +154,7 @@ Canvas token、LLM API Key、Supabase 密钥、加密密钥——**只允许存�
 - **单一事实源**：同一件事只在一处权威定义，其他文档引用而非重复。避免四份文档各自漂移。
 - **改代码顺手改文档**：数据结构、API 契约、技术选型发生变化时，同步更新对应文档，不留下「文档说的是 A、代码做的是 B」。
 - **重要决策进 `Decisions.md`**：凡影响架构、需要权衡取舍的决策（尤其是「为什么不用 X」），记一条 ADR，写清背景、决策、理由、后果。
+- **踩坑按归属落位**：新踩到的坑，能归到某个主题文档（执行卡 / ADR / TechStack / Database / API-Contract）的就写进主题文档，再到 `CodingRules.md` **§10.2 坑索引**加一行；只有跨 task 通用的排查方法论才写进 §10.1。细节不复制，避免四处漂移。
 - **收工摘要表不得重新归纳**：摘要 / 速查表里的结论必须逐字从根因段落抄，不做二次归纳。写完做**反向代入验证**：把「坑」列的内容代回根因句读一遍，语义成立才算过。踩坑实例：2026-09-02 收工摘要把「cookies() 前置（修法）」归纳成了「坑」，方向写反，随后被照抄进 `Phase-0-MVP.md`，污染链跨两个文件才被 Steven 抓出来。
 
 ---
@@ -169,4 +172,50 @@ Canvas token、LLM API Key、Supabase 密钥、加密密钥——**只允许存�
 
 ---
 
-*创建：2026-09-01 ｜ 最近更新：2026-09-02（新增「阅读策略」，避免每个 task 重读全部文档）*
+## 10. 踩坑库（环境 / 依赖 / 部署）
+
+> **本节的定位**：索引 + 通用方法论，**不复制细节**。
+> - **10.1 通用排查方法论** —— 跨 task 通用、没有单一主题归属的套路，只写在这里。
+> - **10.2 坑索引** —— 「坑 → 权威文档位置」的指路表。细节**一律留在它所属的主题文档**（执行卡 / ADR / TechStack / Database / API-Contract），本节只给一句话 + 位置，避免同一件事在几份文档里各写一份然后漂移。
+>
+> **新增坑的规矩**：能归到某个主题文档的 → 写进主题文档，再在 10.2 加一行索引；只有通用方法论才写进 10.1。**禁止把细节抄进本节。**
+
+### 10.1 通用排查方法论
+
+1. 🔴 **「线上 500 但响应体为空」= 模块加载失败，靠猜猜不出来。**
+   特征：整个路由 500，连完全不碰该依赖的分支也 500，响应体 `content-length: 0`。
+   有效手段：临时加一个诊断路由，把可疑 `import` 逐个 try/catch 并把错误消息回传，一次定位。
+   ⚠️ **App Router 里下划线开头的目录是私有目录、不建路由**（`app/api/_diag/` 无效，要用 `diag-tmp` 这种名字）。
+
+2. 🔴 **验证「依赖里含原生二进制 / 浏览器 API」的库，本地必须先 `delete globalThis.DOMMatrix` 再 `import`。**
+   本地 macOS 常装着这类原生依赖（如 `@napi-rs/canvas-darwin-arm64`，23MB），会掩盖问题 —— 曾因此误判「换库已修好」白推一次部署。**本地全绿 ≠ 线上能跑。**
+
+3. **含 worker / wasm / 二进制资源的 npm 包，一律考虑 `serverExternalPackages`。** 危害是静默的：HTTP 仍 200，只是业务结果变成"失败"。排查口诀：**构建绿 + 接口 200 但结果不对 → 先看服务端日志有没有 module not found。**
+
+4. **用环境变量覆写做分支测试时，每个 case 前必须先恢复原值。** 否则上一个 case 的值泄漏进下一个 case，报错全变成别的样子，把真实错误掩盖掉。
+
+5. **删掉路由 / 文件后要重建再跑 `tsc`。** `.next/types/validator.ts` 会残留旧引用，报 `Cannot find module '...route.js'` —— 不是代码问题，重新 `npm run build` 即可。
+
+6. **验纯库层（无 HTTP 出口的模块）**：仓库**没有 tsx / ts-node / esbuild**（devDeps 只有 typescript + eslint + tailwind），直接跑 TS 会引入新依赖，违反 1.3。走 §5 的套路：临时诊断路由 + `npm run build` / `npm run start` + curl，验完删路由并重建。
+   起后台服务**必须用 `run_in_background: true`**；写成 `(cmd &)` 的话，工具调用一结束进程就被回收，下一轮 curl 全是 502（不是代码问题）。关服务用 `lsof -ti:3000 | xargs kill`（沙箱里 `ps` 被拒）。
+   临时路由 / 脚本**用完必须删除**，提交前 `git status` 复查。
+
+### 10.2 坑索引（细节在各自文档）
+
+| 坑 | 一句话 | 权威位置 |
+|---|---|---|
+| Next 16 动态路由判定 | `cookies()` 必须写在 `getSupabaseEnv()` **之前**，否则 env 缺失时 Next 看不到 `cookies()` → 误判静态页 → build `prerender-error` | `Phase-0-MVP.md` P0-0-6 执行卡 |
+| Vercel git author 不匹配 | commit 邮箱 ≠ GitHub 主邮箱 → Vercel 判冒名顶替 **Blocked**（不报 build 错） | `Phase-0-MVP.md` P0-0-6 执行卡 |
+| env vars 保存 ≠ 已注入 | 加完/改完环境变量 **必须手动 Redeploy**，否则旧 build 不带变量 → 生产全站 500。**build 绿 ≠ runtime 通** | `TechStack.md` §5.2、`Phase-0-MVP.md` P0-0-6 执行卡 |
+| Vercel Environment 只能单选 | 新增变量时 Production / Preview **不能两个都勾**。本项目只需 Production（部署流程是 push main → 自动部署到 Production，没有 Preview 环节） | 本节（无其他归属） |
+| PDF 提取只能用 `unpdf` | `pdf-parse` / `pdfjs-dist`（现代与 legacy）在 Vercel 上一律 import 即 500；释放文档用 `pdf.cleanup()`（v5 改名，非 `destroy()`） | `Decisions.md` **ADR-011**、`TechStack.md` §2、`Phase-0-MVP.md` P0-1-2 执行卡 |
+| Storage 平台 schema DDL 走 UI | `storage.objects` 建策略报 `42501 must be owner`（owner 是 `supabase_storage_admin`）→ 只能 Dashboard UI。UI 会加策略名后缀，验收看 `pg_policies` 语义 | `Database.md` §7.3、`Phase-0-MVP.md` P0-1-1 执行卡 |
+| `createSignedUrl` 会检查存在性 | 对象不存在返回 `NoSuchKey`，`statusCode` 是**字符串** `'404'` —— 这是「悬挂行」判定信号，别当 500 抛。谓词收在 `lib/syllabi.ts` 的 `isStorageObjectNotFoundError()` | `API-Contract.md` §download、`Phase-0-MVP.md` P0-1-2 执行卡 |
+| `extract_method` CHECK 约束 | 取值 `pdf_text` / `docx` / `pptx` / `manual`；`docx` / `pptx` **没有** `_text` 后缀 | `Phase-0-MVP.md` P0-1-2 执行卡 |
+| supabase-js `*_COLUMNS` 常量 | **必须写字面量字符串**，不能 `.join()` —— 退化成 `string` 后推不出返回行类型，`data` 被推断成 `GenericStringError` | `lib/syllabi.ts` 注释、`Phase-0-MVP.md` P0-1-1 执行卡 |
+| LLM 模型别名 | 请求 `deepseek-chat`，实际服务的是 `deepseek-v4-flash`。`llm_runs.model` 记**实际服务模型**，否则按模型维度对比准确率会失真 | `TechStack.md` §5.2、`Phase-0-MVP.md` P0-1-3 执行卡 |
+| 抽取层保留原文语言 | prompt 必须写死「不翻译」—— 译文无法与原文核对，且**翻译不可逆**，抽取层丢掉的原文找不回来 | `TechStack.md` §5.5、`Phase-0-MVP.md` P0-1-4 执行卡 |
+
+---
+
+*创建：2026-09-01 ｜ 最近更新：2026-09-03（新增 §10 踩坑库：从 `.workbuddy/memory/MEMORY.md` 迁入，改为「方法论 + 索引」制，细节留在各自主题文档）*
