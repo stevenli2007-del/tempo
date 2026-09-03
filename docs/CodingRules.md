@@ -212,6 +212,15 @@ Canvas token、LLM API Key、Supabase 密钥、加密密钥——**只允许存�
    `state: success` 但端点仍 404 → 才是代码 / 构建问题。
    另注：临时脚本与生成的测试文件一律 `.tmp-` 前缀（`.gitignore` 已忽略），否则 `git add -A` 会把它们误暂存。
 
+8. 🔴 **React：「服务端数据变了要让表单跟上」→ 用 `key` 重挂载，别在 effect 里 setState。**
+   本项目的 eslint（`react-hooks` 编译器规则）会连开两枪：`react-hooks/set-state-in-effect`
+   拦 effect 里的同步 setState；改用 `useRef` 存标志又被 `react-hooks/refs` 拦（render 期不能读写 ref）。
+   **正解（React 官方「用 key 重置状态」）**：父组件给子组件 `key={JSON.stringify(该板块数据)}`，
+   数据一变直接重挂载，非受控状态自动重置。
+   ⚠️ **key 必须用数据序列化，不能用 props 数组身份** —— props 每次渲染都是新数组，靠身份会天天重挂载。
+   代价：服务端数据变化时未保存的编辑会丢（P0-1-6 的重新解析有二次确认并写明此点）。
+   相关：**保存成功后要用响应里的 `data` 重建 draft**，否则新行没有 id，第二次保存会重复 insert。
+
 ### 10.2 坑索引（细节在各自文档）
 
 | 坑 | 一句话 | 权威位置 |
