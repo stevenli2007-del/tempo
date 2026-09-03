@@ -18,6 +18,7 @@ import {
 import type { SubmissionPolicyRow } from '@/lib/submission-policies'
 
 import type { getCurrentUser } from '@/lib/api/response'
+import { syncExamToTask } from '@/lib/sync/exam-tasks'
 
 import type { ParsedSyllabusResult } from '@/types/parse'
 import type { StoredSections } from '@/types/sections'
@@ -110,6 +111,9 @@ export async function persistParsedSections({
       sections.testDates.data.map((item) => toExamDateInsert(item, courseId)),
       (row) => toExamDate(row as ExamDateRow),
     )
+    // 解析写入的考试行同样要派生 task（ADR-004 的触发时机含「新增」）。
+    // 没有这一步，解析成功后总览页永远缺考试，直到用户手动保存一次考试板块。
+    await syncExamToTask({ supabase, courseId, exams: stored.testDates })
   }
 
   if (sections.officeHours.ok) {

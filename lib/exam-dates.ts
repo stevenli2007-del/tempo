@@ -1,5 +1,14 @@
 import type { ExamDate } from '@/types/parse'
-import type { StoredExamDate } from '@/types/sections'
+import type { SaveExamDateItem, StoredExamDate } from '@/types/sections'
+import {
+  isInvalid,
+  itemId,
+  itemDate,
+  itemText,
+  requireItemObject,
+  requireItemsArray,
+} from '@/lib/api/input'
+import type { ValidationResult } from '@/lib/api/input'
 
 /**
  * `exam_dates` 表的 DB 行 ↔ 对外对象映射（P0-1-5a）。
@@ -68,5 +77,90 @@ export function toExamDateInsert(item: ExamDate, courseId: string): Omit<ExamDat
     is_confirmed: false,
     source: 'syllabus',
     source_excerpt: item.sourceExcerpt,
+  }
+}
+
+// ---------- 保存（P0-1-5b PUT 全量替换） ----------
+
+const MAX_EXAM_NAME = 200
+const MAX_EXAM_TIME = 100
+const MAX_EXAM_LOCATION = 500
+
+export function parseSaveExamDatesInput(body: unknown): ValidationResult<SaveExamDateItem[]> {
+  const extracted = requireItemsArray(body)
+  if (!extracted.ok) return extracted
+
+  const items: SaveExamDateItem[] = []
+  for (const [index, raw] of extracted.items.entries()) {
+    const object = requireItemObject(raw, index)
+    if (!object.ok) return object
+    const item = object.item
+
+    const id = itemId(item)
+    const examName = itemText(item, 'examName')
+    const examTime = itemText(item, 'examTime')
+    const location = itemText(item, 'location')
+    if (isInvalid(id) || isInvalid(examName) || isInvalid(examTime) || isInvalid(location)) {
+      return { ok: false, message: `第 ${index + 1} 条：文本字段类型错误` }
+    }
+
+    const examDate = itemDate(item.examDate, 'examDate')
+    if (!examDate.ok) return { ok: false, message: `第 ${index + 1} 条：${examDate.message}` }
+
+    if (!examName) return { ok: false, message: `第 ${index + 1} 条：examName 不能为空` }
+    if (examName.length > MAX_EXAM_NAME)
+      return { ok: false, message: `第 ${index + 1} 条：examName 不能超过 ${MAX_EXAM_NAME} 个字符` }
+    if (examTime && examTime.length > MAX_EXAM_TIME)
+      return { ok: false, message: `第 ${index + 1} 条：examTime 不能超过 ${MAX_EXAM_TIME} 个字符` }
+    if (location && location.length > MAX_EXAM_LOCATION)
+      return { ok: false, message: `第 ${index + 1} 条：location 不能超过 ${MAX_EXAM_LOCATION} 个字符` }
+
+    items.push({
+      ...(id ? { id } : {}),
+      examName,
+      examDate: examDate.value,
+      examTime,
+      location,
+    })
+  }
+  return { ok: true, value: items }
+}
+
+/**
+ * 由 `examDate` 派生 `status` —— 与解析侧 `normalizeExam()` 同一条规则：
+ * 有合法日期 = `confirmed`，否则 `tbd`。校验层已保证 `examDate` 是 null 或
+ * 合法 `YYYY-MM-DD`，所以这里只需判空。
+ */
+function deriveStatus(examDate: string | null): 'confirmed' | 'tbd' {
+  return examDate !== null ? 'confirmed' : 'tbd'
+}
+
+export function toExamDateSaveInsert(
+  item: SaveExamDateItem,
+  courseId: string,
+): Omit<ExamDateRow, 'id' | 'created_at' | 'updated_at'> {
+  return {
+    course_id: courseId,
+    exam_name: item.examName,
+    exam_date: item.examDate,
+    exam_time: item.examTime,
+    location: item.location,
+    status: deriveStatus(item.examDate),
+    is_confirmed: true,
+    source: 'manual',
+    source_excerpt: null,
+  }
+}
+
+export function toExamDateSaveUpdate(
+  item: SaveExamDateItem,
+): Partial<Omit<ExamDateRow, 'id' | 'course_id' | 'source' | 'source_excerpt' | 'created_at' | 'updated_at'>> {
+  return {
+    exam_name: item.examName,
+    exam_date: item.examDate,
+    exam_time: item.examTime,
+    location: item.location,
+    status: deriveStatus(item.examDate),
+    is_confirmed: true,
   }
 }

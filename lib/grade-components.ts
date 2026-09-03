@@ -1,5 +1,14 @@
 import type { GradeComponent } from '@/types/parse'
-import type { StoredGradeComponent } from '@/types/sections'
+import type { SaveGradeComponentItem, StoredGradeComponent } from '@/types/sections'
+import {
+  isInvalid,
+  itemId,
+  itemPercent,
+  itemText,
+  requireItemObject,
+  requireItemsArray,
+} from '@/lib/api/input'
+import type { ValidationResult } from '@/lib/api/input'
 
 /**
  * `grade_components` 表的 DB 行 ↔ 对外对象映射（P0-1-5a）。
@@ -56,5 +65,78 @@ export function toGradeComponentInsert(
     is_confirmed: false,
     source: SOURCE_SYLLABUS,
     source_excerpt: item.sourceExcerpt,
+  }
+}
+
+// ---------- 保存（P0-1-5b PUT 全量替换） ----------
+
+const MAX_GC_NAME = 200
+const MAX_GC_NOTES = 2000
+
+export function parseSaveGradeComponentsInput(body: unknown): ValidationResult<SaveGradeComponentItem[]> {
+  const extracted = requireItemsArray(body)
+  if (!extracted.ok) return extracted
+
+  const items: SaveGradeComponentItem[] = []
+  for (const [index, raw] of extracted.items.entries()) {
+    const object = requireItemObject(raw, index)
+    if (!object.ok) return object
+    const item = object.item
+
+    const id = itemId(item)
+    const name = itemText(item, 'name')
+    const notes = itemText(item, 'notes')
+    if (isInvalid(id) || isInvalid(name) || isInvalid(notes)) {
+      return { ok: false, message: `第 ${index + 1} 条：id / name / notes 字段类型错误` }
+    }
+
+    const weight = itemPercent(item.weightPercent, 'weightPercent')
+    if (!weight.ok) return { ok: false, message: `第 ${index + 1} 条：${weight.message}` }
+
+    if (!name) return { ok: false, message: `第 ${index + 1} 条：name 不能为空` }
+    if (name.length > MAX_GC_NAME)
+      return { ok: false, message: `第 ${index + 1} 条：name 不能超过 ${MAX_GC_NAME} 个字符` }
+    if (notes && notes.length > MAX_GC_NOTES)
+      return { ok: false, message: `第 ${index + 1} 条：notes 不能超过 ${MAX_GC_NOTES} 个字符` }
+
+    items.push({
+      ...(id ? { id } : {}),
+      name,
+      weightPercent: weight.value,
+      notes,
+    })
+  }
+  return { ok: true, value: items }
+}
+
+/**
+ * 保存输入 → 新插入的行。**`source = 'manual'`**：不带 id 的条目是用户手动加的，
+ * 重解析只删 `source = 'syllabus'` 的行（`lib/parse/persist.ts` 的规则），
+ * 用户手动加的必须活过重解析。保存动作本身即确认，`is_confirmed = true`。
+ */
+export function toGradeComponentSaveInsert(
+  item: SaveGradeComponentItem,
+  courseId: string,
+): Omit<GradeComponentRow, 'id' | 'created_at' | 'updated_at'> {
+  return {
+    course_id: courseId,
+    name: item.name,
+    weight_percent: item.weightPercent,
+    notes: item.notes,
+    is_confirmed: true,
+    source: 'manual',
+    source_excerpt: null,
+  }
+}
+
+/** 保存输入 → 更新列。整行内容以表单为准（全量替换语义），并把确认位置 true。 */
+export function toGradeComponentSaveUpdate(
+  item: SaveGradeComponentItem,
+): Partial<Omit<GradeComponentRow, 'id' | 'course_id' | 'source' | 'source_excerpt' | 'created_at' | 'updated_at'>> {
+  return {
+    name: item.name,
+    weight_percent: item.weightPercent,
+    notes: item.notes,
+    is_confirmed: true,
   }
 }

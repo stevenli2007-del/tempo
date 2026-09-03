@@ -66,6 +66,58 @@ export type StoredSubmissionPolicy = {
   sourceExcerpt: string | null
 }
 
+// ---------------------------------------------------------------
+// P0-1-5b：五板块保存（PUT 全量替换）的输入形状
+// ---------------------------------------------------------------
+
+/**
+ * 保存输入与 `Stored*` 的区别：
+ * - `id` 可选（不带 = 新增一行，落库时 `source = 'manual'`）；
+ * - **没有** `source` / `sourceExcerpt` / `isConfirmed` —— 这三样不是用户能决定的：
+ *   来源是系统按「带不带 id」判定的，摘录来自原文（用户新增的行没有摘录），
+ *   确认标记由保存动作本身置位。
+ *
+ * ⚠️ `SaveExamDateItem` **没有 `status`**：它由 `examDate` 派生（有日期 = confirmed，
+ * 否则 tbd），规则与解析侧的 `normalizeExam()` 完全一致 —— 契约 §4 早期示例里
+ * 让请求方填 status，等于允许"日期为空但状态是已确定"的矛盾数据进库。
+ */
+
+export type SaveGradeComponentItem = {
+  id?: string
+  name: string
+  weightPercent: number | null
+  notes: string | null
+}
+
+export type SaveCourseOutlineItem = {
+  id?: string
+  weekLabel: string | null
+  topic: string
+}
+
+export type SaveExamDateItem = {
+  id?: string
+  examName: string
+  examDate: string | null
+  examTime: string | null
+  location: string | null
+}
+
+export type SaveOfficeHourItem = {
+  id?: string
+  personName: string
+  dayOfWeek: string | null
+  startTime: string | null
+  endTime: string | null
+  location: string | null
+}
+
+export type SaveSubmissionPolicyItem = {
+  id?: string
+  description: string
+  platformName: string | null
+}
+
 /**
  * `POST /api/v1/syllabi/:id/parse` 响应里 `sections` 的形状。
  *
