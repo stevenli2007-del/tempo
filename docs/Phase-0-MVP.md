@@ -29,12 +29,19 @@
 
 ## 当前进度指针
 
-**当前 task**：`P0-1-9` 总览页 v1 —— 🟦 **代码完成，待 Steven 浏览器验收**（验收通过后 M1 收口，下一张卡是 P0-1-10 Demo Workspace）
+**当前 task**：`P0-1-10` Demo Workspace —— ⚪ **未开工**（Steven 在新会话里下达开工指令）
 
-> 🟦 **P0-1-9 代码完成（2026-09-03 下午）**：`GET /api/v1/tasks` + `PATCH /api/v1/tasks/:id` 新建（此前两个端点都不存在）+ `lib/tasks.ts`（tasks 表唯一映射点）+ `components/tasks/task-list.tsx`（标记完成 + 已完成折叠）+ 卡片 `upcomingTasks`（契约 §2 补齐）+ dashboard「最近要做的事」区块。本地无头冒烟 **64/64**。
-> - **待 Steven 浏览器验收（本地 `npm run dev`）**：① 勾 checkbox 标记完成 → 列表刷新；② 点「已完成 N 项」展开 → 看到删除线的已完成任务；③ 卡片上显示近期任务。
-> - **验收通过后 M1 静态理解链路完整收口**，下一张卡是 **P0-1-10 Demo Workspace**（冷启动，PRD §6）。
-> - **待 Steven 手动**：删测试账号 `p19-a@test.dev` / `p19-b@test.dev`（业务数据已清）。
+> ✅ **P0-1-9 已验收通过（2026-09-03 16:10，Steven 浏览器验收）**：三个端点/UI 全部通过，测试账号已由 Steven 删除。**M1 静态理解链路完整收口**（上传 → 提取 → 解析 → 落库 → 编辑 → 展示 → 总览 → 标记完成）。commit `8022643`/`1b4864c`/`f5065b7`/`777712c`，Vercel 部署 `1b4864c` success。
+>
+> 🔜 **P0-1-10 开工前需 Steven 先定一件事（唯一阻塞）**：**Demo 示例数据从哪来** ——
+> - **A（推荐）**：Steven 提供一份可公开的真实 syllabus（如 CS61B / EE16A 公开版）—— 真实感最强，种子用户第一眼就有代入感。
+> - **B**：Bud 用合成示例（**必须明确标注是演示数据**，不冒充真实课程，避免与"抗幻觉"的产品立场冲突）。
+>
+> 契约 §8 的 `POST /api/v1/demo/seed` + `DELETE /api/v1/demo` 已定义好，**不阻塞实现**。
+
+> 🛑 **本轮收工状态（2026-09-03 16:12，Steven 收工）**：**P0-1-9 验收通过 ✅ → M1 静态理解链路完整收口**。本轮 Bud 两次按 `CodingRules.md` §5 在模糊指令「Please continue.」处停下确认（未越界开工）。下一张卡 **P0-1-10 Demo Workspace**，Steven 将在**新会话**开工，开工前需先定示例数据来源（A 真实公开 syllabus / B 合成示例）。
+> - ✅ **测试账号已全部清理（2026-09-03 16:10，Steven 手动删）**：`p19-a/b@test.dev`（本地）+ `p19-prod-a/b@test.dev`（生产）已从 auth.users 移除。**auth.users 现在无测试残留**。
+> - 工作区干净（无 `.tmp-*` 残留），`origin/main` 已同步到 `777712c`。
 
 > 📌 **P0-1-5b 已验收通过 ✅（2026-09-03 11:50，Steven 验收）**：5 个 `PUT /api/v1/courses/:id/{板块}` 端点 + `lib/parse/save.ts`（编排）+ `lib/parse/corrections.ts`（字段级 diff + 归因）+ `lib/sync/exam-tasks.ts`（`syncExamToTask()`）+ `persist.ts` 接入派生。本地冒烟 **56/56**、生产验证 **18/18**（真实 `/parse` 归因、`llm_run_id`/`syllabus_id` 非 null 且真实存在）。commit `638a331`/`a959d45`/`54590cd`。
 > - **实现期决策（已写进 `API-Contract.md` §4 变更记录，无需 ADR）**：① request 不含 `status`（由 examDate 派生）；② 修正粒度 = 字段级（add/delete 也按字段拆，`order_index` 除外）；③ 归档课程保存 → 404；④ 归因取「最新 syllabus 最近一次成功解析」。
@@ -63,7 +70,7 @@
 > ① **包含「标记任务完成」** → `PATCH /api/v1/tasks/:id`，**只允许改 `status`**；`isDerived = true` 的任务传 `title` / `dueDate` → `422 derived_task_immutable`，错误信息引导去课程页改 `exam_dates`（ADR-004 在接口层的强制点）。
 > ② **已完成的任务：横线划掉 + 折叠起来**（不是隐藏，也不是置灰混排）。
 
-> 🛑 **上一轮收工状态（2026-09-03 12:00，Steven 收工）**：**P0-1-5b / P0-1-6 / P0-1-8 已验收通过 ✅**。M1 静态理解链路（syllabus 上传 → 提取 → 解析 → 落库 → 编辑 → 展示）全部打通，下一 task 为 **P0-1-9 总览页 v1**。
+> 🛑 **历史存档 · 上一轮收工状态（2026-09-03 12:00，Steven 收工）—— 已被上方「本轮收工状态」取代，仅留档勿据此行动**：**P0-1-5b / P0-1-6 / P0-1-8 已验收通过 ✅**。M1 静态理解链路（syllabus 上传 → 提取 → 解析 → 落库 → 编辑 → 展示）全部打通，下一 task 为 **P0-1-9 总览页 v1**。
 > - ⚠️ **本轮发生过一次越界**：Steven 的停止指令是 P0-1-5b，Bud 收到模糊的「continue」后一路做到 P0-1-8。已写进协作约定 —— **Done Report 之后的模糊指令一律回读原始停止点**。
 > - ✅ **测试账号已清理（2026-09-03 11:58，Steven 手动删除）**：8 个 `p15b-*` / `p16-*` / `p18-*` `@test.dev` 账号全部从 auth.users 移除。
 > - 🔜 **P0-1-9 的两个阻塞问题已拍板**（① 包含「标记完成」② 已完成划掉 + 折叠），**但 Bud 未开工** —— Steven 未下达开工指令。
@@ -201,7 +208,7 @@
 | **P0-1-6** | 可编辑表单 UI：五个板块逐项编辑 / 补全 / 覆盖 + 保存 | Bud | P0-1-5 | 可修改任一字段并保存；TBD 状态可正常展示与编辑 | ✅ 已验收（2026-09-03；验收点在详情页，见 P0-1-8） |
 | **P0-1-7** | Workspace CRUD：创建（学期 + 课程名必填，编码/教师选填）、列表按学期分组、编辑、删除 | Bud | P0-0-6 | 建课后出现在总览页与列表；删除有二次确认 | ✅ |
 | **P0-1-8** | 课程详情页：展示五板块最终信息 | Bud | P0-1-6, P0-1-7 | 保存后的数据完整展示；缺失项显示 TBD 而非空白 | ✅ 已验收（2026-09-03 11:50） |
-| **P0-1-9** | 总览页 v1：课程卡片（显示近期 1-2 个任务）+ 跨课程近期任务列表（仅 syllabus 数据，按日期排序） | Bud | P0-1-8 | 能看到"最近 7 天所有课程要做的事"；可跳转课程详情 | 🟦 代码完成（本地 64/64），待 Steven 验收 |
+| **P0-1-9** | 总览页 v1：课程卡片（显示近期 1-2 个任务）+ 跨课程近期任务列表（仅 syllabus 数据，按日期排序） | Bud | P0-1-8 | 能看到"最近 7 天所有课程要做的事"；可跳转课程详情 | ✅ **2026-09-03 验收通过**（本地 64/64 + 生产 26/26）。**M1 收口** |
 | **P0-1-10** | 冷启动：**Demo Workspace**（预置示例课程，含已解析 syllabus 与示例任务） | Bud | P0-1-9 | 新用户从进入站点到看到有内容的总览页 ≤ 30 秒 | ⚪ |
 | **P0-1-11** | 解析过程可视化：上传后先显示文本预览，再逐步填充五个板块 + 进度提示 | Bud | P0-1-6 | 用户不再干等；每一步有明确状态反馈 | ⚪ |
 
@@ -408,7 +415,7 @@
 - **自测（Bud，2026-09-03）**：`tsc` ✅ ｜ `lint` ✅ ｜ `build` ✅ ｜ 无头冒烟 **17/17**（dashboard SSR 带板块数据、跨用户隔离、PUT 回包结构、清理）。
 - **已知留白**：① **浏览器交互未验**（展开/切 tab/打字/保存/上移下移/解析按钮）—— `next dev` 在 WorkBuddy 起不来（`CodingRules.md` §5），只能 Steven 本地验收；② dashboard 一次性加载所有课程的五板块（Phase 0 课程数少，P0-1-8 详情页可按需加载）；③ 解析触发是同步等待（约 3-5 秒），过程动画归 P0-1-11；④ 测试账号 `p16-a-*/p16-b-*@test.dev` 待 Steven 手动删。
 
-#### 🎫 P0-1-9 · 总览页 v1 · 🟦 代码完成（本地 64/64）/ 浏览器交互待 Steven 验收
+#### 🎫 P0-1-9 · 总览页 v1 · ✅ **已验收通过（2026-09-03 16:10，Steven 浏览器验收）· 勿重做**
 - **做什么**：跨课程近期任务列表（按日期排序）+ 卡片近期 1-2 个任务 + 「标记完成」。**这是 M1 的最后一张卡**，做完 M1 静态理解链路完整收口。
 - **改哪些文件**：
   - `types/task.ts`（新）—— `Task` / `UpcomingTask` + 三个枚举收窄
@@ -434,7 +441,9 @@
 - **自测（Bud，2026-09-03）**：`tsc` ✅ ｜ `lint` ✅ ｜ `build` ✅（`/api/v1/tasks`、`/api/v1/tasks/[id]` 均为 ƒ 动态路由）｜ 无头冒烟 **64/64**。
   覆盖：7d 窗口内/外、逾期保留、TBD 保留、排序（升序 + null 最后）、`range` 五种取值（含 3 条非法 → 400）、分页（limit/offset/total 独立）、`x-request-id` 回传、跨用户隔离、`upcomingTasks`（最多 2 条 / 只含未完成 / 排除已完成）、PATCH 标记完成与取消、派生任务 422（含 code / message / `details.immutableFields`）、非派生任务 400、**7 条入参与越权路径**、归档课程任务消失、dashboard SSR、清理。
 - **自测（Bud，2026-09-03）—— 生产验证补充**：Vercel 部署 `1b4864c` success，**生产冒烟 26/26**（端点已部署、range 窗口与排序、分页、跨用户隔离、`upcomingTasks`、PATCH 标记完成与 422、越权 404、`x-request-id`、dashboard SSR、数据清理）。
-- **已知留白**：① **浏览器交互未验**（勾选 checkbox、展开折叠区块后看到删除线、`router.refresh()` 后列表刷新）—— `next dev` 在 WorkBuddy 起不来（`CodingRules.md` §5），只能 Steven 本地验收；② 测试账号 `p19-a/b@test.dev`（本地）+ `p19-prod-a/b@test.dev`（生产）留在 auth.users 待手动删（业务数据已清）；③ 手动任务的新增/删除未做（本卡范围外）；④ 逾期任务只标红显示，不做"顺延"逻辑（Phase 2）。
+- **Steven 验收（2026-09-03 16:10）**：✅ 浏览器交互三项全通过 —— ① 勾 checkbox 标记完成 → 列表刷新；② 展开「已完成 N 项」→ 看到删除线；③ 卡片显示近期任务。测试账号已由 Steven 删除，**本卡无待办**。
+- **剩余留白**（已确认可接受，非阻塞）：① 手动任务的新增/删除未做（本卡范围外，契约 §5 的 `POST` / `DELETE`）；② 逾期任务只标红显示，不做"顺延"逻辑（Phase 2）；③ `meta.staleWarning` / `lastSuccessfulSyncAt` 待 P0-2-7 / P0-2-11 才有真实数据。
+- **🔜 下一张卡 P0-1-10（Demo Workspace）的唯一阻塞**：**示例数据来源**（真实公开 syllabus vs 合成示例），见「当前进度指针」。
 
 #### 🎫 P0-1-8 · 课程详情页 · 🟡 代码完成 / 服务端自测通过 / 浏览器交互待 Steven 验收
 - **做什么**：`/courses/[id]` 展示课程 + 五板块最终信息（缺失项显示 TBD），并把一门课的全部操作集中到这里。
@@ -576,3 +585,4 @@ P0-0 基础设施
 | 2026-09-03 | **P0-1-9 两个产品问题拍板（Steven 11:58）+ 测试账号清理完毕**：① **包含「标记任务完成」** —— 走契约 §5 `PATCH /api/v1/tasks/:id`，只允许改 `status`，派生任务改 title/dueDate 返 `422 derived_task_immutable`（ADR-004 接口层强制点）；② **已完成的任务：横线划掉 + 折叠起来**（不隐藏、不置灰混排）。同时核实到一个实现事实：`app/api/v1/` 下**只有 `courses` 和 `syllabi`**，契约 §5 的 `GET /api/v1/tasks` 与 `PATCH /api/v1/tasks/:id` **都不存在，P0-1-9 要新建**；`POST`/`DELETE`（手动任务）因范围是「仅 syllabus 数据」**不在本卡**。8 个 `@test.dev` 测试账号已由 Steven 手动删除。**Bud 未开工** —— 未收到开工指令 | 
 | 2026-09-03 | **P0-1-9 总览页 v1 代码完成（浏览器交互待 Steven 验收）**：新建 `types/task.ts` + `lib/tasks.ts` + `GET /api/v1/tasks` + `PATCH /api/v1/tasks/:id`（此前两个端点都不存在）+ `components/tasks/task-list.tsx`；`Course` 加可选 `upcomingTasks` 并由 `GET /api/v1/courses` 补上（契约 §2 早有此字段但一直没返回）；卡片显示近期 1-2 个任务；dashboard 加「最近要做的事」区块。**三个实现期决策（写入 `API-Contract.md` §5 变更记录）**：① `range` **只设上界不设下界** —— 逾期未完成的任务必须留在列表里（藏起来等于帮用户逃避）；② PATCH 两类拒绝分开 —— 派生任务传 title/dueDate → `422 derived_task_immutable`（ADR-004 接口层强制点），非派生任务 → `400 validation_failed`（明确拒绝而非静默忽略）；③ `meta` **不返回** `staleWarning`/`lastSuccessfulSyncAt`（Canvas 同步状态，Phase 0 无同步，硬编码 false 是静默的错误数据），留 P0-2-7 / P0-2-11。**两个技术约束**：tasks 的 RLS 不看 `is_archived`（归档过滤必须显式做）、`.lte()` 对 null 求值不成立（TBD 任务要显式 `or` 保留）。**踩坑**：把 PostgREST 查询构造器抽成带泛型函数触发 `TS2589`，排序改为各写一份。tsc/lint/build 全绿，本地无头冒烟 **64/64**。测试账号 `p19-a/b@test.dev` 待 Steven 手动删 |
 | 2026-09-03 | **P0-1-9 生产验证通过**：Vercel 部署 `1b4864c` success，生产冒烟 **26/26**（端点已部署两个、range 窗口与排序、分页、跨用户隔离、`upcomingTasks`、PATCH 标记完成与 422、越权 404、`x-request-id` 回传、dashboard SSR、数据清理）。生产验证前先用 `gh api .../deployments` 确认部署 —— 首次查询时最新部署仍是昨天的 `0587138`，新路由 404 而旧路由 401，按 `CodingRules.md` §10.1 第 7 条判定为部署延迟而非代码问题，等待后自动创建。**待 Steven 手动**：删测试账号 `p19-a/b@test.dev`（本地）+ `p19-prod-a/b@test.dev`（生产） |
+| 2026-09-03 | **P0-1-9 验收通过 ✅ → M1 静态理解链路完整收口（2026-09-03 16:10，Steven 浏览器验收）**：三项浏览器交互全通过（勾 checkbox 标记完成并刷新 / 展开「已完成 N 项」看到删除线 / 卡片显示近期任务），测试账号由 Steven 手动删除，auth.users 无残留。commit `8022643`（代码）+ `1b4864c`（文档）+ `f5065b7`（生产验证）+ `777712c`（踩坑库），Vercel 部署 `1b4864c` success。**本轮 Bud 两次在模糊指令「Please continue.」处按 `CodingRules.md` §5 停下确认，未越界开工** —— 该规则第二次生效，可确认「Steven 会重复用 Please continue. 回应 Done Report」是稳定模式。**下一张卡 P0-1-10 Demo Workspace，Steven 在新会话开工**；开工前唯一阻塞是「示例数据来源」：A 真实公开 syllabus（推荐，代入感强）/ B 合成示例（须明确标注为演示数据，否则与产品「抗幻觉」立场冲突）。契约 §8 的 `POST /api/v1/demo/seed` + `DELETE /api/v1/demo` 已定义，不阻塞实现 |
