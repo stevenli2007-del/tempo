@@ -327,6 +327,11 @@
 
 统一用 **`PUT` 全量替换该板块**（幂等，前端表单整体提交）：
 
+> **读取路径（P0-1-6 定）**：五个板块**没有 GET 端点**。P0-1-6 的编辑表单初值由 dashboard
+> 服务端组件直查五张表（`lib/sections.ts`，RLS 保护），**不走 API**；
+> 完整的「课程详情含五板块」接口 `GET /api/v1/courses/:id` 归 **P0-1-8**。
+> 因此 P0-1-8 开工时，读取端点是新做的，不是从 P0-1-6 拆出来的。
+
 | 端点 | 板块 |
 |---|---|
 | `PUT /api/v1/courses/:id/grade-components` | 成绩构成 |
@@ -541,3 +546,4 @@
 | 2026-09-02 | **§3 download 端点补 `404 file_missing`**：行在、文件不在（悬挂行）时，原本把 Storage 的 `NoSuchKey` 直接抛成 **500**。判定谓词抽到 `lib/syllabi.ts` 的 `isStorageObjectNotFoundError()`，由 download 与 extract 共用，避免两处各写一份再漏一次 | 端到端冒烟抓到的真 bug |
 | 2026-09-03 | **§3 `/parse` 改为同步 200 + 落库规则收敛**（[ADR-012](./Decisions.md#adr-012)，P0-1-5a）：不再 202+轮询；部分失败 = `parseStatus='completed'` + `parseError` 写明失败板块；`GET /parse-status` 归 P0-1-11 待定 | ADR-012 |
 | 2026-09-03 | **§4 五板块保存契约按实现收敛**（P0-1-5b）：① request 不再含 `status`（由 `examDate` 派生，防止"无日期但已确认"的矛盾数据）；② response 明确为 `{ data: [...] }`；③ 修正粒度定为**字段级**（edit/add/delete 三类统一，`order_index` 除外）；④ 归因规则明确为「最新 syllabus 的最近一次成功解析」；⑤ 错误码表补齐（含 `details.staleIds`、归档课程 404）。均为实现期决策，无行为层面的需求变更 | P0-1-5b |
+| 2026-09-03 | **§4 补「读取路径」说明**（P0-1-6）：五板块**不设 GET 端点** —— 编辑表单初值由 dashboard 服务端组件直查五表（`lib/sections.ts`，RLS 保护），完整接口 `GET /api/v1/courses/:id`（含五板块）归 P0-1-8。写清这一点是为了避免后续会话误以为读端点已存在 | P0-1-6 |
