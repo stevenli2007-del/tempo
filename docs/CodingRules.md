@@ -218,7 +218,14 @@ Steven 说「完成 P0-1-5b 就收手」，Bud 交付 5b 后收到含糊的「Pl
    `state: success` 但端点仍 404 → 才是代码 / 构建问题。
    另注：临时脚本与生成的测试文件一律 `.tmp-` 前缀（`.gitignore` 已忽略），否则 `git add -A` 会把它们误暂存。
 
-8. 🔴 **React：「服务端数据变了要让表单跟上」→ 用 `key` 重挂载，别在 effect 里 setState。**
+8. 🔴 **拿 SSR 的 HTML 做断言时，两个 React 渲染事实会让"看起来对"的字符串匹配失败。**
+   ① **相邻文本节点之间会被插入 `<!-- -->`**：`已完成 {n} 项` 渲染成 `已完成 <!-- -->1<!-- --> 项`，
+   整句 `includes('已完成 1 项')` 永远不成立 —— 断言要按片段写（`/已完成[\s\S]{0,40}?项/`）。
+   ② **条件渲染的内容默认不在 DOM 里**：折叠区块收起时里面的条目根本没渲染，
+   搜它的 `className`（如 `line-through`）搜不到 —— **这是正确行为，不是 bug**，别为此改实现。
+   写断言前先想清楚「这个元素此刻到底会不会在 DOM 里」。
+
+9. 🔴 **React：「服务端数据变了要让表单跟上」→ 用 `key` 重挂载，别在 effect 里 setState。**
    本项目的 eslint（`react-hooks` 编译器规则）会连开两枪：`react-hooks/set-state-in-effect`
    拦 effect 里的同步 setState；改用 `useRef` 存标志又被 `react-hooks/refs` 拦（render 期不能读写 ref）。
    **正解（React 官方「用 key 重置状态」）**：父组件给子组件 `key={JSON.stringify(该板块数据)}`，
@@ -243,6 +250,9 @@ Steven 说「完成 P0-1-5b 就收手」，Bud 交付 5b 后收到含糊的「Pl
 | supabase-js `*_COLUMNS` 常量 | **必须写字面量字符串**，不能 `.join()` —— 退化成 `string` 后推不出返回行类型，`data` 被推断成 `GenericStringError` | `lib/syllabi.ts` 注释、`Phase-0-MVP.md` P0-1-1 执行卡 |
 | LLM 模型别名 | 请求 `deepseek-chat`，实际服务的是 `deepseek-v4-flash`。`llm_runs.model` 记**实际服务模型**，否则按模型维度对比准确率会失真 | `TechStack.md` §5.2、`Phase-0-MVP.md` P0-1-3 执行卡 |
 | 抽取层保留原文语言 | prompt 必须写死「不翻译」—— 译文无法与原文核对，且**翻译不可逆**，抽取层丢掉的原文找不回来 | `TechStack.md` §5.5、`Phase-0-MVP.md` P0-1-4 执行卡 |
+| PostgREST 构造器别抽成泛型函数 | 把带 `.select()` 的查询构造器当参数传给辅助函数 → `TS2589: Type instantiation is excessively deep`。排序这类几行的链式调用**各写一份**，比绕类型便宜 | `Phase-0-MVP.md` P0-1-9 执行卡、`lib/tasks.ts` 注释 |
+| `.lte()` 会吃掉 NULL 行 | 时间窗口过滤 `due_date <= X` 对 NULL 求值结果是 NULL（不成立），TBD 行整批消失。要显式 `or('due_date.lte."X",due_date.is.null')`（值含 `:` `+`，双引号包住） | `API-Contract.md` §5、`Phase-0-MVP.md` P0-1-9 执行卡 |
+| `tasks` 的 RLS 不看 `is_archived` | 策略 `tasks_via_course_all` 只经 `courses.user_id` 判定，归档课程的任务照样放行 → 总览页/单条查询都必须先取未归档课程 id 再 `.in('course_id', …)` | `lib/tasks.ts` 文件头注释、`Phase-0-MVP.md` P0-1-9 执行卡 |
 
 ---
 
