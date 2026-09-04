@@ -491,8 +491,10 @@ syllabus 数据、根本没有同步这回事。硬编码 `staleWarning: false` 
 // response 201 —— ⚠️ 绝不回显 token
 { "id": "…", "canvasDomain": "bcourses.berkeley.edu", "credentialType": "pat", "expiresAt": "2027-01-15T00:00:00-07:00", "status": "active" }
 ```
-- `expiresAt` 取用户实际填写值；**未填则存 `null`，服务端不做任何估算**（见 `Sync-Strategy.md` 第 10 节）。
-- 保存后立即触发一次同步。
+- `expiresAt` **必填**，取用户实际填写值。~~未填则存 `null`，服务端不做任何估算~~ → ⛔ **已被 2026-09-04 P0-2-1b 实测推翻**：bCourses 的 token 过期时间是强制必填项（弹窗 date + time 均带 `*`），用户手上必然有过期时间。校验规则：必填 / ISO 8601 / 必须晚于当前时间 / 距今不超过 90 天（实测上限）。见 `Sync-Strategy.md` 第 10 节。
+- `canvasDomain` 只接受纯主机名（`bcourses.berkeley.edu`），拒绝协议 / 端口 / 路径 / IP / localhost / 内网地址 —— 服务端会拿这个域名发请求，不校验等于开一个 SSRF 口子（P0-2-2 实现）。
+- **响应体不含任何密钥字段**（`CanvasCredentialMeta` 类型层面即无此字段，见 `types/canvas.ts`）。
+- ~~保存后立即触发一次同步~~ → ⏸ **P0-2-2 未实现**：同步编排属 P0-2-5，届时在此接入。
 
 ### `GET /api/v1/canvas/credentials`
 只返回元数据：`status` / `expiresAt` / `lastUsedAt` / `lastErrorAt` / `lastErrorMessage` / `canvasDomain`。**不含任何密钥字段。**

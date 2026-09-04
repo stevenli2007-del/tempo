@@ -240,6 +240,18 @@ Steven 说「完成 P0-1-5b 就收手」，Bud 交付 5b 后收到含糊的「Pl
    代价：服务端数据变化时未保存的编辑会丢（P0-1-6 的重新解析有二次确认并写明此点）。
    相关：**保存成功后要用响应里的 `data` 重建 draft**，否则新行没有 id，第二次保存会重复 insert。
 
+10. 🔴 **验证「加解密往返正确」，别把明文打进响应或日志 —— 让解密结果去做一件"只有解对了才会成功"的事。**
+    密封 credential 时最容易犯的错是为了验证而把明文 echo 出来，等于亲手把密钥写进日志/响应。
+    正确做法：**拿解密出的 token 去真实调一次外部 API**，调通即证明往返正确（解错了对方必然 401）。
+    响应里只返回「是否成功 + 解密后长度 + 对方返回的业务字段」，**永远不返回明文本身**。
+    配套：断言只读"调用成功"这一个信号，长度可用（长度不是秘密，明文才是）。
+
+11. 🔴 **服务端代理类接口，`domain` / `url` 入参必须做 SSRF 校验，这不是可选项。**
+    只要服务端会拿用户填的 host 去发请求，不校验 = 开放内网探测
+    （`169.254.169.254` 云元数据、`10.0.0.0/8`、`localhost`）。
+    最小实现：只接受纯主机名（正则 + 拒绝协议/端口/路径），并显式拒绝 IP、localhost 与内网段。
+    本项目实现见 `lib/canvas/validate.ts`。
+
 ### 10.2 坑索引（细节在各自文档）
 
 | 坑 | 一句话 | 权威位置 |
@@ -253,7 +265,8 @@ Steven 说「完成 P0-1-5b 就收手」，Bud 交付 5b 后收到含糊的「Pl
 | Storage 平台 schema DDL 走 UI | `storage.objects` 建策略报 `42501 must be owner`（owner 是 `supabase_storage_admin`）→ 只能 Dashboard UI。UI 会加策略名后缀，验收看 `pg_policies` 语义 | `Database.md` §7.3、`Phase-0-MVP.md` P0-1-1 执行卡 |
 | `createSignedUrl` 会检查存在性 | 对象不存在返回 `NoSuchKey`，`statusCode` 是**字符串** `'404'` —— 这是「悬挂行」判定信号，别当 500 抛。谓词收在 `lib/syllabi.ts` 的 `isStorageObjectNotFoundError()` | `API-Contract.md` §download、`Phase-0-MVP.md` P0-1-2 执行卡 |
 | `extract_method` CHECK 约束 | 取值 `pdf_text` / `docx` / `pptx` / `manual`；`docx` / `pptx` **没有** `_text` 后缀 | `Phase-0-MVP.md` P0-1-2 执行卡 |
-| supabase-js `*_COLUMNS` 常量 | **必须写字面量字符串**，不能 `.join()` —— 退化成 `string` 后推不出返回行类型，`data` 被推断成 `GenericStringError` | `lib/syllabi.ts` 注释、`Phase-0-MVP.md` P0-1-1 执行卡 |
+| supabase-js `*_COLUMNS` 常量 | **必须写字面量字符串**，不能 `.join()` —— 退化成 `string` 后推不出返回行类型，`data` 被推断成 `GenericStringError`。⚠️ **已在 P0-1-1 与 P0-2-2 两次独立踩到**，加新映射层时先去 P0-1-1 卡看一眼 | `lib/syllabi.ts` 注释、`Phase-0-MVP.md` P0-1-1 执行卡 |
+| supabase client 参数类型 | 映射层函数签名用 `Awaited<ReturnType<typeof createClient>>`（项目约定别名 `ServerSupabase`），**不要用裸 `SupabaseClient`** —— 后者缺 Database 泛型，`.select()` 返回类型同样退化成 `GenericStringError` | `lib/tasks.ts` / `lib/courses.ts` 写法、`Phase-0-MVP.md` P0-2-2 执行卡 |
 | LLM 模型别名 | 请求 `deepseek-chat`，实际服务的是 `deepseek-v4-flash`。`llm_runs.model` 记**实际服务模型**，否则按模型维度对比准确率会失真 | `TechStack.md` §5.2、`Phase-0-MVP.md` P0-1-3 执行卡 |
 | 抽取层保留原文语言 | prompt 必须写死「不翻译」—— 译文无法与原文核对，且**翻译不可逆**，抽取层丢掉的原文找不回来 | `TechStack.md` §5.5、`Phase-0-MVP.md` P0-1-4 执行卡 |
 | PostgREST 构造器别抽成泛型函数 | 把带 `.select()` 的查询构造器当参数传给辅助函数 → `TS2589: Type instantiation is excessively deep`。排序这类几行的链式调用**各写一份**，比绕类型便宜 | `Phase-0-MVP.md` P0-1-9 执行卡、`lib/tasks.ts` 注释 |
