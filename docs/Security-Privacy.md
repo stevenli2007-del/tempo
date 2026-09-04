@@ -204,7 +204,7 @@ CREATE POLICY "via course" ON tasks
 | A3 | Service Role Key 未出现在任何 `NEXT_PUBLIC_` 变量或前端产物中 | P0-0-6 | ☐ |
 | A4 | 生产环境变量已配置，部署后无密钥泄漏 | P0-0-6 | ☐ |
 | A5 | Canvas 凭证在数据库中为密文 | P0-2-2 | ✅ **2026-09-04 已验证**：用户自己 access_token 打 Supabase REST 直查 `secret_encrypted`，确认为 `v1:...` 四段密文且不含明文 |
-| A6 | 抓包确认前端所有响应不含 token | P0-2-2 | ✅ **2026-09-04 已验证（API 层）**：POST 201 / GET 200 / 诊断路由三类响应均断言不含 token 明文与 `secretEncrypted` 字段。⚠️ 本卡无前端 UI（关联 UI 在 P0-2-4），UI 层抓包待 P0-2-4 补验 |
+| A6 | 抓包确认前端所有响应不含 token | P0-2-2 | ✅ **2026-09-04 已验证（API 层）**：POST 201 / GET 200 / 诊断路由三类响应均断言不含 token 明文与 `secretEncrypted` 字段。**P0-2-4 补充（2026-09-04）**：关联 UI 的 SSR HTML 与全部 API 响应均已断言不含 token。⚠️ 仍未做的：**浏览器 DevTools Network 面板人工抓包**（`next dev` 在 WorkBuddy 起不来，Steven 浏览器验收只覆盖了功能正确性，未逐条看网络响应） |
 | A7 | 日志中无 token、无 syllabus 全文 | P0-2-3 | ☐ |
 | A8 | `llm_runs` 只存元数据，不存 prompt / 响应原文 | P0-1-3 | ☐ |
 | A9 | `/api/v1/sync/scheduled` 校验 CRON_SECRET（恒定时间比较） | P0-2-6 | ☐ |
