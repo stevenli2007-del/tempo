@@ -2,6 +2,7 @@ import { COURSE_COLUMNS, toCourse } from '@/lib/courses'
 import type { CourseRow } from '@/lib/courses'
 import { DEMO_COURSE, toDemoSectionsResult } from '@/lib/demo/seed-data'
 import { persistParsedSections } from '@/lib/parse/persist'
+import { ensureProfile } from '@/lib/profiles'
 import { getCurrentUser, internalError, jsonError, jsonOk } from '@/lib/api/response'
 
 /**
@@ -20,6 +21,11 @@ export async function POST(request: Request) {
     if (!user) {
       return jsonError(request, 401, 'unauthenticated', '请先登录')
     }
+
+    // 写 courses 前先确保 profiles 行存在。历史遗留：早前删测试账号时可能级联
+    // 删掉了本行（profiles 的 auth.users 外键 ON DELETE CASCADE），但 auth session
+    // 仍有效 —— 后续对 courses / profiles 的写入会因外键违反而 500。upsert 兜底。
+    await ensureProfile(supabase, user)
 
     // 重复 seed 保护：已存在 demo 课程 → 409。
     const { data: existing, error: listError } = await supabase

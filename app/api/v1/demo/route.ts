@@ -1,3 +1,4 @@
+import { ensureProfile } from '@/lib/profiles'
 import { getCurrentUser, internalError, jsonError, jsonOk } from '@/lib/api/response'
 
 /**
@@ -15,6 +16,9 @@ export async function DELETE(request: Request) {
     if (!user) {
       return jsonError(request, 401, 'unauthenticated', '请先登录')
     }
+
+    // 先确保 profiles 行存在，再往下走（理由见 seed 端点注释）。
+    await ensureProfile(supabase, user)
 
     const { data: demoCourses, error: listError } = await supabase
       .from('courses')

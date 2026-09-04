@@ -1,5 +1,6 @@
 import { COURSE_COLUMNS, parseCreateCourseInput, toCourse, toCourseInsert } from '@/lib/courses'
 import type { CourseRow } from '@/lib/courses'
+import { ensureProfile } from '@/lib/profiles'
 import { loadUpcomingTasks } from '@/lib/tasks'
 import { getCurrentUser, internalError, jsonError, jsonOk } from '@/lib/api/response'
 
@@ -66,6 +67,10 @@ export async function POST(request: Request) {
     if (!parsed.ok) {
       return jsonError(request, 400, 'validation_failed', parsed.message)
     }
+
+    // 写 courses 前先确保 profiles 行存在（见 seed 端点注释）。历史测试账号的
+    // profiles 行可能被级联删过，session 却仍有效，直接 insert courses 会外键 500。
+    await ensureProfile(supabase, user)
 
     // user_id 必须是会话里的用户：courses 的 RLS 用 WITH CHECK (auth.uid() = user_id) 卡着。
     const { data, error } = await supabase
