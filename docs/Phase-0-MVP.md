@@ -29,16 +29,15 @@
 
 ## 当前进度指针
 
-**当前 task**：`P0-2-3` Canvas API 客户端（拉课程列表）—— 🔵 **代码完成（2026-09-04，冒烟 17/17 全绿），待 Steven 验收**。**下一张卡 = P0-2-4**（课程关联 UI，依赖 P0-2-3 验收通过后开工）。
+**当前 task**：`P0-2-3` Canvas API 客户端（拉课程列表）—— ✅ **已验收通过（2026-09-04，Steven 生产验收）**。**下一张卡 = P0-2-4**（课程关联 UI），Steven 将在新对话框开工。
 
-> 🔵 **P0-2-3 代码完成（2026-09-04，Bud，待 Steven 验收）**：`GET /api/v1/canvas/courses`（代理拉课程列表）+ `lib/canvas/courses.ts`（忠实映射 CanvasCourse，不筛选学期）。复用 P0-2-2 的 `canvasGet` / `loadDecryptedCredential`。
+> ✅ **P0-2-3 已验收（2026-09-04，Steven 生产验收）**：`GET /api/v1/canvas/courses`（代理拉课程列表）+ `lib/canvas/courses.ts`（忠实映射 CanvasCourse，不筛选学期）。复用 P0-2-2 的 `canvasGet` / `loadDecryptedCredential`。
 > - **真实数据实测**（Steven CANVAS_PAT）：13 门 active 课，其中 **6 门 Fall 2026**（CHEM 1A / Chem 1AL / R4A / MATH 53-LEC / MATH 53-DIS / PHYSICS 7A），**其余 7 门是入学流程/培训类**（term = "Default Term"/"Projects"：GBO / PartySafe / Hazing / SHAPE 等）—— **✅ Steven 拍板（2026-09-04）**：P0-2-4 关联 UI 用「提示 + 询问用户是否拉进 Tempo」呈现，不静默过滤也不混排。代理层忠实返回不筛选。
 > - **两个实现期决策**：① `name` 用 Canvas `course_code`（非完整课名）—— 关联 UI 需区分同名 LEC/DIS（Math 53 分两个 id）；② Canvas 上游故障（5xx/超时/网络/坏 JSON）→ **502 `upstream_error`**，不伪装成 Tempo 自己的 500（契约 §1.4 + §6 已补）。
 > - **范围收敛**（Steven 拍板）：任务名虽写「拉课程 + 作业」，本卡**只做课程列表**（契约 §6 唯一端点）；作业拉取签名留到 P0-2-5 按同步真实需求再定，避免本卡写死代码无处验收。
 > - **错误映射**：未登录 401 `unauthenticated` ｜ 无凭据 404 `not_found` ｜ Canvas 拒 token 401 `credential_invalid` ｜ 限流 429 `rate_limited`。
 > - **自测**：`tsc` ✅ ｜ `lint` ✅ ｜ `build` ✅（`/api/v1/canvas/courses` 已进路由表）｜ **本地冒烟 17/17**：401 未登录 ｜ 404 无凭据 ｜ 真实 PAT 存库 → GET 200 返 13 门（Fall 2026 ≥6、MATH 53 两次 LEC+DIS、每项含 externalId/name/term）｜ 伪造 token → 401 `credential_invalid` ｜ POST/GET 响应无 token 泄漏 ｜ x-request-id 回传。
-> - **测试数据清理**：冒烟账号写入的 canvas_credentials 行已用各账号 token 删除；**auth 用户 `p023-a/b-<ts>@example.com` ×2 留待 Steven 在 Dashboard 删**。
-> - **交接点**：本卡**无 UI**（关联 UI 在 P0-2-4），验收靠 API 证据。命令与复现步骤见 P0-2-3 执行卡。
+> - **验收 & 交接完成**：本卡**无 UI**，Steven 生产验收 = 登录生产打 `GET /api/v1/canvas/courses`（未存凭据账号返 404 `not_found`，证明路由/鉴权/契约链路通）。**Vercel 已配 `CANVAS_TOKEN_ENCRYPTION_KEY` 并 Redeploy**（P0-2-2 交接点收口）。本地测试账号 `p023-a/b-*@example.com` ×2 已由 Steven 删除。
 
 > ✅ **P0-2-2 已验收（2026-09-04 10:14，Steven 验收）**：AES-256-GCM 加密 + `POST/GET /api/v1/canvas/credentials` + `lib/canvas/client.ts` 请求封装。63/63 自测全绿（冒烟 42 + 集成 8 + crypto 负向 13）。
 > - **Steven 侧两个交接点**：① Vercel 加环境变量 `CANVAS_TOKEN_ENCRYPTION_KEY`（值在本机 `.env.local`，**加完必须手动 Redeploy**）；② 执行迁移 `20260904100000_canvas_credentials_constraints.sql`（约束加固，不阻塞功能）。
@@ -545,7 +544,7 @@
 | **P0-2-1** | **Canvas token 可行性实测**：登录 bCourses → Settings → 确认"+ New Access Token"按钮是否可用；记录是否强制填过期时间、上限多久 | **Steven** | — | ✅ **结论：可用**（2026-09-01）。M2 走 PAT；P0-2-10 不执行 | ✅ |
 | **P0-2-1b** | **记录实测细节**：是否强制填写过期时间、上限天数、token 可撤销入口位置 | **Steven** | P0-2-1 | 三项信息记录在案（影响 P0-2-8 提醒逻辑的默认值） | ✅ **2026-09-04 完成**：强制必填 / 上限 **90 天** / 撤销在 Access Tokens 同页。已同步进 6 份文档（推翻原"约 120 天"） |
 | **P0-2-2** | 凭据加密存储（AES）+ 服务端 Canvas 请求封装（token 绝不出现在前端响应中） | Bud | P0-2-1（可用） | DB 中凭据为密文；抓包确认前端拿不到 token | ✅ **已验收（2026-09-04 10:14）** |
-| **P0-2-3** | Canvas API 客户端：拉取课程列表 + 作业列表（含 due date），含限流与错误处理 | Bud | P0-2-2 | 能正确拉取真实数据；API 报错有明确处理不崩溃 | 🔵 代码完成（2026-09-04），待 Steven 验收 |
+| **P0-2-3** | Canvas API 客户端：拉取课程列表 + 作业列表（含 due date），含限流与错误处理 | Bud | P0-2-2 | 能正确拉取真实数据；API 报错有明确处理不崩溃 | ✅ **已验收（2026-09-04）** |
 | **P0-2-4** | 课程关联 UI：手动将 Canvas 课程与 Tempo Workspace 关联（不做自动匹配） | Bud | P0-2-3 | 可选择并关联；关联后状态可见；可解除关联 | ⚪ |
 | **P0-2-5** | 首次全量同步：Canvas 作业 → `tasks` 表落库（去重 + 更新，不重复插入） | Bud | P0-2-4 | 重复同步不产生重复任务；due date 变更能更新 | ⚪ |
 | **P0-2-6** | 刷新机制：手动刷新按钮 + 后台定时轮询（**前期频率放宽**，数值见 `Sync-Strategy.md`） | Bud | P0-2-5 | 手动刷新可用；定时轮询按配置执行 | ⚪ |
@@ -588,7 +587,7 @@
   4. 删测试账号：`p022-a-*@example.com` / `p022-b-*@example.com` / `p022-diag-*@example.com`。
 - **未实现（明确不在本卡）**：① DELETE 撤销授权 → P0-2-9；② 保存后立即触发同步 → P0-2-5；③ 任何前端 UI → P0-2-4。
 
-#### 🎫 P0-2-3 · Canvas API 客户端：拉课程列表（🔵 代码完成 2026-09-04，待 Steven 验收 · 勿重做）
+#### 🎫 P0-2-3 · Canvas API 客户端：拉课程列表（✅ 已验收 2026-09-04 · 勿重做）
 
 - **做什么**：代理拉取用户 Canvas 课程列表，供 P0-2-4 关联 UI 选择。复用 P0-2-2 交付的 `canvasGet` / `loadDecryptedCredential`，**不要再写一套 fetch**。
 - **改哪些文件**：
@@ -604,9 +603,7 @@
 - **自测（Bud，2026-09-04）**：`tsc` ✅ ｜ `lint` ✅ ｜ `build` ✅ ｜ **本地冒烟 17/17**：401 未登录 ｜ 404 无凭据 ｜ 真实 PAT 存库 → GET 200 返 **13 门**（Fall 2026 恰 **6 门**、**MATH 53 出现两次** LEC+DIS、每项含 externalId/name/term）｜ 伪造 token → 401 `credential_invalid` ｜ POST/GET 响应均无 token/密文字段 ｜ x-request-id 回传。
   - ⚠️ **诚实标注**：`502 upstream_error` 分支**未做端到端触发**（需 Canvas 5xx/断网，难稳定复现）。该分支是 `mapCanvasFailure` 的一行 `default`，`canvasGet` 的错误分类（server_error/timeout/network/parse）已在 P0-2-2 完整测过，映射是直译，风险极低。
 - **真实数据发现（P0-2-4 关联 UI 必须考虑）**：Steven 账号 13 门 active 课里，**只有 6 门是 Fall 2026 教学课程**（CHEM 1A / Chem 1AL-LAB / R4A / MATH 53-LEC / MATH 53-DIS / PHYSICS 7A）；**其余 7 门是入学流程/培训类模块**（term = "Default Term"/"Projects"：Bear Pact Quiz / GBA 系列 / PartySafe / Hazing / SHAPE），`term` 不是干净学期名。**✅ Steven 已拍板（2026-09-04）**：UI 走「**提示 + 询问用户是否把这些课也拉进 Tempo**」，不静默过滤、也不强制全列 —— 用户对某门培训课说"是"就关联，说"否"就不出现（见 P0-2-4 开工提示）。
-- **待 Steven**：
-  1. **验收方式**：本卡**无 UI**，验收靠 API 证据，无需浏览器点击。复现：本地 `next build` + `next start`（或 Vercel 部署后）→ 用一个**已存真实凭据**的账号登录 → `GET /api/v1/canvas/courses` 应返课程数组；无凭据账号应 404。验收命令样例见冒烟脚本（P0-2-3 交付时的 `.tmp-smoke-canvas-courses.cjs`，已在本地删）。
-  2. 删测试账号：`p023-a-*@example.com` / `p023-b-*@example.com`（冒烟产物，本地库）。
+- **✅ 验收记录（2026-09-04，Steven）**：生产验证 = 登录生产打 `GET /api/v1/canvas/courses`，账号未存凭据 → 返 404 `not_found`（code 正确），证明路由/鉴权/契约链路通。**Vercel 已配 `CANVAS_TOKEN_ENCRYPTION_KEY` 并 Redeploy**（P0-2-2 交接点一并收口）。测试账号 `p023-a/b-*@example.com` 已删。
 - **🔜 下一张卡 P0-2-4（课程关联 UI：手动关联 Canvas 课程 ↔ Tempo Workspace）开工提示**：
   - 前端拉 `GET /api/v1/canvas/courses` 拿课程列表（**含真实数据里的培训类噪音课**）。
   - **噪音课呈现策略（Steven 2026-09-04 拍板）**：把教学课（term="Fall 2026" 之类）正常列给用户选；**非教学课（Default Term/Projects 培训模块）单独呈现 + 提示**："这些看起来不像课程（入学/培训类），要不要也拉进 Tempo？" 用户勾选才关联。**不静默过滤**（防漏掉用户真要的东西），也**不混排**（避免噪音淹没 6 门真课）。判定信号：`term` 不是标准学期名 + name 无课程代码特征，P0-2-4 定一个稳妥的分组规则即可，不用机器学习。
@@ -693,3 +690,4 @@ P0-0 基础设施
 | 2026-09-04 | **P0-2-1b 完成 + 6 份文档过期上限统一修正（commit `eecb157`）**：Steven 提供 bCourses "+ New Access Token" 弹窗截图，实测三项结论 —— ① 过期时间**强制必填**（date + time 均带 `*`）；② 上限 **90 天**（弹窗原文 "Maximum expiration is 90 days."）；③ 撤销在 Settings → Access Tokens 同页。**推翻** 2026-09-01 那条"90 天 → 约 120 天"的事实修正（历史条目保留，新条目标注推翻以保审计可追溯）。同步修正 `Sync-Strategy.md` / `Database.md` / `PRD.md` / `TechStack.md` / `Tempo_产品总蓝图.md` / `Decisions.md` 共 9 处；`canvas_credentials.expires_at` 由 nullable 改为 **NOT NULL**；删除"用户没填就存 null / 不要写死 90 天"等过时告诫。**Steven 拍板**：发现漂移后选"立刻统一改"而非拖延 |
 | 2026-09-04 | **P0-2-2 代码完成（待验收，63/63 自测全绿）**：AES-256-GCM 加密（`lib/canvas/crypto.ts`，密文格式 `v1:iv:tag:ct`，版本前缀为密钥轮换留口子）+ `POST/GET /api/v1/canvas/credentials` + `lib/canvas/client.ts` 请求封装（10s 超时 / 错误分类 / 读限流头）+ `lib/canvas/validate.ts`（**含 SSRF 防护**：域名只接受纯主机名，拒绝 IP/localhost/内网/协议/路径）。**关键实现期决策**：① 保存走"先查后写"不用 `upsert({onConflict})`（后者在 unique 约束未执行时直接报错）；② 客户端封装**不重试不写库**（重试与状态落库归 P0-2-5 同步编排）；③ `expiresAt` 按实测强制必填 + 上限 90 天。**自测**：冒烟 42/42（含库内密文直查验证、12 条 400 校验路径、跨用户隔离）+ 集成 8/8（**解密出的 token 真调 Canvas `/users/self` 成功**，证明加解密往返正确）+ crypto 负向 13/13（篡改密文 → GCM 认证失败、错误密钥抛错、错误消息不含明文）。**顺带查清 O-07**：bCourses 确实返回 `x-rate-limit-remaining`。**两个 Steven 交接点**：① Vercel 加 `CANVAS_TOKEN_ENCRYPTION_KEY`（加完必须手动 Redeploy）；② 执行迁移 `20260904100000_canvas_credentials_constraints.sql`（约束加固，不阻塞功能）。**明确未做**：DELETE 撤销授权（P0-2-9）、保存后触发同步（P0-2-5）、前端 UI（P0-2-4） |
 | 2026-09-04 | **P0-2-3 代码完成（待 Steven 验收，冒烟 17/17）**：`GET /api/v1/canvas/courses`（代理拉课程列表）+ `lib/canvas/courses.ts`（忠实映射 CanvasCourse，不筛选学期）。复用 P0-2-2 的 `canvasGet`/`loadDecryptedCredential`。**范围收敛（Steven 拍板）**：任务名虽含"作业列表"，本卡只做课程列表（契约 §6 唯一端点），作业拉取签名留到 P0-2-5。**真实数据实测**：13 门 active 课里 6 门 Fall 2026 教学课 + 7 门入学/培训类（Default Term/Projects），**P0-2-4 需考虑噪音课呈现**。**两个实现期决策**：`name` 用 course_code（区分 LEC/DIS）；上游故障 → 502 `upstream_error`（契约 §1.4/§6 已补）。**自测**：tsc/lint/build 全绿 + 冒烟 17/17（401 / 404 无凭据 / 真实 PAT 返 13 门含 MATH 53 ×2 / 伪造 token 401 credential_invalid / 无 token 泄漏 / x-request-id）。凭据行已清，auth 用户 `p023-a/b-*@example.com` 待 Steven 删 |
+| 2026-09-04 | **P0-2-3 验收通过 ✅（2026-09-04，Steven 生产验收）+ P0-2-2 交接点收口**：Steven 配好 Vercel `CANVAS_TOKEN_ENCRYPTION_KEY` 并 Redeploy（P0-2-2 交接点①完成），生产打 `GET /api/v1/canvas/courses` 返 404 `not_found`（账号未存凭据，code 契约正确），证明路由/鉴权/契约链路通。**噪音课呈现策略（Steven 拍板，commit `a879ad9`）**：教学课正常列给用户选 + **非教学课（Default Term/Projects 培训类）单独提示"这些看起来不像课程，要不要也拉进 Tempo？"，用户勾选才关联**，不静默过滤不混排 → 已写入 P0-2-4 开工提示。测试账号 `p023-a/b-*@example.com` ×2 已由 Steven 删除。进度指针推进至 **下一张卡 P0-2-4**（课程关联 UI），Steven 将在新会话开工。commit `def9b37`（代码）+ `1cf9848`（契约文档）+ `a879ad9`（噪音课决策）+ `a879ad9` 部署 success |
