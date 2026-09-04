@@ -208,7 +208,10 @@ Steven 说「完成 P0-1-5b 就收手」，Bud 交付 5b 后收到含糊的「Pl
 
 5. **删掉路由 / 文件后要重建再跑 `tsc`。** `.next/types/validator.ts` 会残留旧引用，报 `Cannot find module '...route.js'` —— 不是代码问题，重新 `npm run build` 即可。
 
-6. **验纯库层（无 HTTP 出口的模块）**：仓库**没有 tsx / ts-node / esbuild**（devDeps 只有 typescript + eslint + tailwind），直接跑 TS 会引入新依赖，违反 1.3。走 §5 的套路：临时诊断路由 + `npm run build` / `npm run start` + curl，验完删路由并重建。
+6. **验纯库层（无 HTTP 出口的模块）**：仓库**没有 tsx / ts-node / esbuild**（devDeps 只有 typescript + eslint + tailwind），装它们会引入新依赖，违反 1.3。
+   ✅ **首选：Node 22 自带类型擦除** —— `node --experimental-strip-types script.mjs` 可以**直接 import `.ts`**（`import type` 会被擦除，因此不解析 `@/` 别名也能跑；前提是**被验函数不带运行时依赖**）。比建诊断路由快一个数量级。
+   报 `MODULE_TYPELESS_PACKAGE_JSON` 只是警告，不影响执行。
+   要验的函数依赖服务端环境（DB / 环境变量）时，才退回 §5 的套路：临时诊断路由 + `npm run build` / `npm run start` + curl，验完删路由并重建。
    起后台服务**必须用 `run_in_background: true`**；写成 `(cmd &)` 的话，工具调用一结束进程就被回收，下一轮 curl 全是 502（不是代码问题）。关服务用 `lsof -ti:3000 | xargs kill`（沙箱里 `ps` 被拒）。
    临时路由 / 脚本**用完必须删除**，提交前 `git status` 复查。
 
