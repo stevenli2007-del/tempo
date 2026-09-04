@@ -40,7 +40,7 @@
 > - **验收 & 交接完成**：本卡**无 UI**，Steven 生产验收 = 登录生产打 `GET /api/v1/canvas/courses`（未存凭据账号返 404 `not_found`，证明路由/鉴权/契约链路通）。**Vercel 已配 `CANVAS_TOKEN_ENCRYPTION_KEY` 并 Redeploy**（P0-2-2 交接点收口）。本地测试账号 `p023-a/b-*@example.com` ×2 已由 Steven 删除。
 
 > ✅ **P0-2-2 已验收（2026-09-04 10:14，Steven 验收）**：AES-256-GCM 加密 + `POST/GET /api/v1/canvas/credentials` + `lib/canvas/client.ts` 请求封装。63/63 自测全绿（冒烟 42 + 集成 8 + crypto 负向 13）。
-> - **Steven 侧两个交接点**：① Vercel 加环境变量 `CANVAS_TOKEN_ENCRYPTION_KEY`（值在本机 `.env.local`，**加完必须手动 Redeploy**）；② 执行迁移 `20260904100000_canvas_credentials_constraints.sql`（约束加固，不阻塞功能）。
+> - **Steven 侧两个交接点 ✅ 全部 2026-09-04 实测收口**：① Vercel 加环境变量 `CANVAS_TOKEN_ENCRYPTION_KEY`（值与本机 `.env.local` 同） + 手动 Redeploy；② 迁移 `20260904100000_canvas_credentials_constraints.sql` **早在生产就位** —— Steven 重复执行遇 `42P07 already exists`，用 `information_schema` 验证 `expires_at` 已是 `NOT NULL` 且 `canvas_credentials_user_id_key` UNIQUE 约束存在。
 > - **本卡无 UI**，验收靠 API 证据 + 数据库直查，无需浏览器点击 —— 数据库验证方式：用自己账号的 access_token 直查 `canvas_credentials.secret_encrypted`，应看到 `v1:...` 四段密文。
 > - 顺带产出：P0-2-1b 实测结论已统一进 6 份文档（token 过期上限 **90 天**、强制必填）；**O-07 查清**（bCourses 确实返回 `x-rate-limit-remaining`）。
 
@@ -568,7 +568,7 @@
   - `lib/canvas/validate.ts` —— 三项校验（域名含 **SSRF 防护** / token / 过期时间）。
   - `lib/canvas/client.ts` —— `canvasGet()`：10s 超时、错误分类、`x-rate-limit-remaining` 读取。**不写库、不重试**（重试与状态落库是 P0-2-5 同步编排的职责）。
   - `app/api/v1/canvas/credentials/route.ts` —— POST(201) + GET(元数据)。
-  - `supabase/migrations/20260904100000_canvas_credentials_constraints.sql` —— 【Steven 手动】`expires_at` NOT NULL + `unique(user_id)`。
+  - `supabase/migrations/20260904100000_canvas_credentials_constraints.sql` —— `expires_at` NOT NULL + `unique(user_id)`（**2026-09-04 实测已在生产就位**）。
 - **关键约束**：
   - 🔴 **密钥环境变量 `CANVAS_TOKEN_ENCRYPTION_KEY`**（base64 32 字节，**绝不加 `NEXT_PUBLIC_`**）。轮换不是改变量 —— 要先解密全部凭证再重新加密。
   - 🔴 **SSRF 不是可选项**：服务端拿用户填的域名发请求，域名不校验 = 开放内网探测。`canvasDomain` 只接受纯主机名，拒绝协议/端口/路径/IP/localhost/`169.254.169.254`。
@@ -580,11 +580,11 @@
   - 冒烟：401（POST/GET）｜ 404 未连接 ｜ POST 201 且响应不含 token/密文字段 ｜ **库内密文验证**（用户自己 access_token 打 Supabase REST 直查 `secret_encrypted`，确认 4 段格式 + 以 `v1:` 开头 + 不含明文）｜ GET 元数据字段齐全 ｜ 重复 POST 不产生第二行 ｜ **12 条 400 校验路径**（含 4 条 SSRF：localhost / 169.254.169.254 / 10.0.0.5 / 带路径）｜ 跨用户隔离（userB GET 404 + REST 直查 0 行）｜ `x-request-id` 回传。
   - 集成：临时诊断路由验证**加解密往返** —— 解密出的 token 真去调 Canvas `/users/self` 成功（解错必 401），返回真实 user id + 限流头。**O-07 顺带查清：bCourses 确实返回 `x-rate-limit-remaining`**。
   - crypto 负向：往返正确｜IV 随机（两次加密结果不同）｜**篡改密文 → GCM 认证失败**｜错误密钥抛错｜密钥缺失/长度不对抛明确错误｜**所有错误消息不含明文与密文**（日志红线）。
-- **待 Steven**：
-  1. **【Steven 手动】Vercel 加环境变量** `CANVAS_TOKEN_ENCRYPTION_KEY`（值见本机 `.env.local`），**加完必须手动 Redeploy** 才注入。
-  2. **【Steven 手动】执行迁移** `20260904100000_canvas_credentials_constraints.sql`（约束加固，不执行不影响功能）。
-  3. **验收方式**：本卡**无 UI**（关联 UI 在 P0-2-4），验收靠 API 证据 + 数据库直查，**无需浏览器点击**。
-  4. 删测试账号：`p022-a-*@example.com` / `p022-b-*@example.com` / `p022-diag-*@example.com`。
+- **交接清单（2026-09-04 Steven 实测，全部 ✅ 已收口）**：
+  1. ✅ **Vercel 加 `CANVAS_TOKEN_ENCRYPTION_KEY`**（值与本机 `.env.local` 同） + 手动 Redeploy → 注入成功。
+  2. ✅ **`20260904100000_canvas_credentials_constraints.sql` 早就执行**：2026-09-04 实测重复跑遇 `42P07 already exists`，用 `information_schema` 验证两条约束都已生效（`expires_at.is_nullable=NO`、`canvas_credentials_user_id_key` 存在）。本卡脚本在生产库就位，无需再跑。
+  3. ✅ **验收**：本卡**无 UI**，验收靠 API 证据 + 数据库直查，**无需浏览器点击**。生产 401/404 契约正确。
+  4. ✅ **测试账号已删**：`p022-a/b-*@example.com` / `p022-diag-*@example.com` 已由 Steven 清理。
 - **未实现（明确不在本卡）**：① DELETE 撤销授权 → P0-2-9；② 保存后立即触发同步 → P0-2-5；③ 任何前端 UI → P0-2-4。
 
 #### 🎫 P0-2-3 · Canvas API 客户端：拉课程列表（✅ 已验收 2026-09-04 · 勿重做）
@@ -691,3 +691,4 @@ P0-0 基础设施
 | 2026-09-04 | **P0-2-2 代码完成（待验收，63/63 自测全绿）**：AES-256-GCM 加密（`lib/canvas/crypto.ts`，密文格式 `v1:iv:tag:ct`，版本前缀为密钥轮换留口子）+ `POST/GET /api/v1/canvas/credentials` + `lib/canvas/client.ts` 请求封装（10s 超时 / 错误分类 / 读限流头）+ `lib/canvas/validate.ts`（**含 SSRF 防护**：域名只接受纯主机名，拒绝 IP/localhost/内网/协议/路径）。**关键实现期决策**：① 保存走"先查后写"不用 `upsert({onConflict})`（后者在 unique 约束未执行时直接报错）；② 客户端封装**不重试不写库**（重试与状态落库归 P0-2-5 同步编排）；③ `expiresAt` 按实测强制必填 + 上限 90 天。**自测**：冒烟 42/42（含库内密文直查验证、12 条 400 校验路径、跨用户隔离）+ 集成 8/8（**解密出的 token 真调 Canvas `/users/self` 成功**，证明加解密往返正确）+ crypto 负向 13/13（篡改密文 → GCM 认证失败、错误密钥抛错、错误消息不含明文）。**顺带查清 O-07**：bCourses 确实返回 `x-rate-limit-remaining`。**两个 Steven 交接点**：① Vercel 加 `CANVAS_TOKEN_ENCRYPTION_KEY`（加完必须手动 Redeploy）；② 执行迁移 `20260904100000_canvas_credentials_constraints.sql`（约束加固，不阻塞功能）。**明确未做**：DELETE 撤销授权（P0-2-9）、保存后触发同步（P0-2-5）、前端 UI（P0-2-4） |
 | 2026-09-04 | **P0-2-3 代码完成（待 Steven 验收，冒烟 17/17）**：`GET /api/v1/canvas/courses`（代理拉课程列表）+ `lib/canvas/courses.ts`（忠实映射 CanvasCourse，不筛选学期）。复用 P0-2-2 的 `canvasGet`/`loadDecryptedCredential`。**范围收敛（Steven 拍板）**：任务名虽含"作业列表"，本卡只做课程列表（契约 §6 唯一端点），作业拉取签名留到 P0-2-5。**真实数据实测**：13 门 active 课里 6 门 Fall 2026 教学课 + 7 门入学/培训类（Default Term/Projects），**P0-2-4 需考虑噪音课呈现**。**两个实现期决策**：`name` 用 course_code（区分 LEC/DIS）；上游故障 → 502 `upstream_error`（契约 §1.4/§6 已补）。**自测**：tsc/lint/build 全绿 + 冒烟 17/17（401 / 404 无凭据 / 真实 PAT 返 13 门含 MATH 53 ×2 / 伪造 token 401 credential_invalid / 无 token 泄漏 / x-request-id）。凭据行已清，auth 用户 `p023-a/b-*@example.com` 待 Steven 删 |
 | 2026-09-04 | **P0-2-3 验收通过 ✅（2026-09-04，Steven 生产验收）+ P0-2-2 交接点收口**：Steven 配好 Vercel `CANVAS_TOKEN_ENCRYPTION_KEY` 并 Redeploy（P0-2-2 交接点①完成），生产打 `GET /api/v1/canvas/courses` 返 404 `not_found`（账号未存凭据，code 契约正确），证明路由/鉴权/契约链路通。**噪音课呈现策略（Steven 拍板，commit `a879ad9`）**：教学课正常列给用户选 + **非教学课（Default Term/Projects 培训类）单独提示"这些看起来不像课程，要不要也拉进 Tempo？"，用户勾选才关联**，不静默过滤不混排 → 已写入 P0-2-4 开工提示。测试账号 `p023-a/b-*@example.com` ×2 已由 Steven 删除。进度指针推进至 **下一张卡 P0-2-4**（课程关联 UI），Steven 将在新会话开工。commit `def9b37`（代码）+ `1cf9848`（契约文档）+ `a879ad9`（噪音课决策）+ `a879ad9` 部署 success |
+| 2026-09-04 | **P0-2-2 交接点② ✅ 收口（2026-09-04，Steven Dashboard 实测）**：迁移 `20260904100000_canvas_credentials_constraints.sql` **早就执行过**，并非"从未跑"—— Steven 在 Supabase Dashboard SQL Editor 重新跑遇 `42P07: relation "canvas_credentials_user_id_key" already exists`，用 `information_schema.columns` + `table_constraints` 验证：① `expires_at.is_nullable = NO`（NOT NULL 已生效）、② `canvas_credentials_user_id_key` 约束存在（UNIQUE 已生效）。两条约束**全部就位**，本卡脚本无须再跑。同步更新 P0-2-2 执行卡「待 Steven」清单（4 条全部 ✅）+ 进度指针 block（交接点标注从"待 Steven"改为"✅ 全部收口"）+ 571 行脚本描述去除【Steven 手动】标注 |
