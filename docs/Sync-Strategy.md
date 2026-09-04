@@ -205,7 +205,7 @@ await upsertTask(incoming);
 
 ## 10. Token 生命周期与过期提醒
 
-Canvas 学生 token 的过期时间是**强制必填**的，当前上限约 **120 天**（政策在变，不要写死）。因此：
+Canvas 学生 token 的过期时间是**强制必填**的（"+ New Access Token" 弹窗 Expiration date + Expiration time 均带 `*`），当前上限 **90 天**（2026-09-04 P0-2-1b 实测，弹窗原文 "Maximum expiration is 90 days."）。因此：
 
 | 阶段 | 状态 | 系统行为 | 用户看到 |
 |---|---|---|---|
@@ -215,7 +215,7 @@ Canvas 学生 token 的过期时间是**强制必填**的，当前上限约 **12
 | 调用报错 | `error` | 停止同步 | 横幅 + 引导重新生成 |
 | 用户撤销 | `revoked` | 停止一切同步，删除加密凭证 | 确认提示 |
 
-- **提醒基于用户实际填写的 `expires_at`**，不基于任何"默认 90 天"的假设。用户没填就存 `null`，按"未知"处理 —— **不猜**。
+- **提醒基于用户实际填写的 `expires_at`**（强制必填，库内必有值）。提醒窗口 T-14 / T-7 / T-3 / T-1 / 当天（见下表）按 `expires_at` 倒推。
 - 用户提供新 token → `status='active'` → **立即触发一次同步**（不要等下个周期）。
 - **Phase 0 不做邮件提醒**（应用内横幅足够，6 人规模）。邮件留到 Phase 1 与通知系统一起做。
 
@@ -318,3 +318,4 @@ Phase 0 不搭监控系统，**每周人工看一次 `sync_runs` 表**即可。�
 |---|---|---|
 | 2026-09-01 | 初版 | ADR-001（内核）、ADR-005（轮询策略）、PRD F4（失败可见性）、TechStack 第 8 节（平台配额） |
 | 2026-09-01 | O-06 关闭：PAT 入口实测可用，Phase 0 走 `canvas_pat`；`canvas_ical` 降级为长期 Plan B | P0-2-1 实测结论 |
+| 2026-09-04 | **§10 过期上限由"约 120 天（政策在变）"改为实测"90 天"**，移除"用户没填就存 null"过时描述（过期是强制必填，库内必有值）。同步修正 PRD/TechStack/Database/Tempo_产品总蓝图/Decisions 五份文档。P0-2-1b 实测结论：bCourses 弹窗原文 "Maximum expiration is 90 days." | P0-2-1b（Steven 实测截图） |

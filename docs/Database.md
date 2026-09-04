@@ -241,7 +241,7 @@ CREATE UNIQUE INDEX tasks_source_unique
 | `secret_encrypted` | text | **加密后的凭证**，绝不存明文。存什么取决于 `credential_type` |
 | `credential_type` | text | `pat`（Phase 0 默认）/ `ical` / `oauth`。后两者为 Plan B 与 Phase 1 预留 |
 | `canvas_domain` | text | 如 `"bcourses.berkeley.edu"` |
-| `expires_at` | timestamptz (nullable) | **凭证过期时间。取自用户实际填写的过期时间，不写死任何默认值** |
+| `expires_at` | timestamptz (**NOT NULL**) | **凭证过期时间。取自用户实际填写的过期时间（强制必填，无 fallback）。**2026-09-04 P0-2-1b 实测上限 90 天 |
 | `status` | text | `active` / `expired` / `revoked` / `error`，默认 `active` |
 | `last_used_at` | timestamptz (nullable) | 最后一次成功调用 Canvas 的时间 |
 | `last_error_at` | timestamptz (nullable) | 最近一次失败时间 |
@@ -251,9 +251,9 @@ CREATE UNIQUE INDEX tasks_source_unique
 
 **关于 `expires_at` 的重要事实（不要凭印象写）**：
 
-- Canvas 学生角色的 token，过期时间是**强制必填**的，不是选填。
-- 上限随 Instructure 政策变动，**当前约 120 天**（更早是 30 天，也曾普遍被写成 90 天 —— 那是个过时的数字）。
-- 因此：**不要**在代码里写"默认 90 天后过期"，**不要**在用户没填时用一个估算值兜底。用户填什么就存什么，没填就存 `null` 并按"未知"处理。
+- Canvas 学生角色的 token，过期时间是**强制必填**的，不是选填（bCourses "+ New Access Token" 弹窗 Expiration date + Expiration time 均带 `*`，2026-09-04 P0-2-1b 实测）。
+- 上限 **90 天**（2026-09-04 P0-2-1b 实测，弹窗原文 "Maximum expiration is 90 days."）。
+- 因此：**不要**凭印象写任何默认天数兜底。用户填什么就存什么，库内 `expires_at` 必有值（NOT NULL）。
 - 提醒逻辑基于用户实际填写的 `expires_at`，提前 14 天开始提醒。
 
 > **字段名变更说明**：初版此表字段名为 `access_token_encrypted`，现改为 `secret_encrypted`。理由是这张表将来要同时承载 PAT（存 token）、iCal（存 feed URL）、OAuth（存 refresh token）三种凭证，用 "access_token" 命名会限制它。项目尚未写码，现在改零成本。

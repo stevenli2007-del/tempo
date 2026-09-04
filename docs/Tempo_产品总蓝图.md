@@ -154,7 +154,7 @@ Phase 4: 生态与资源层        →  资源 hub、社区数据、深度代理
   - 拉取用户的 Canvas 课程列表与作业 due date
   - 用户手动将 Canvas 课程与 Tempo Workspace 关联（不做自动匹配，避免匹配错误；Phase 1 再引入匹配辅助）
   - 关联后，Canvas 作业自动出现在对应 Workspace 的任务列表中
-  - **Token 有效期约 120 天（学生 token 强制填过期时间，上限由学校配置且政策在收紧）**，到期前基于用户实际填写的过期时间提醒重新生成
+  - **Token 有效期 90 天（学生 token 强制填过期时间，2026-09-04 P0-2-1b 实测）**，到期前基于用户实际填写的过期时间提醒重新生成
   - 提供"撤销授权"入口，用户随时可断开
 - **手动刷新 + 自动定时轮询**：轮询频率前期放宽，优先保证数据新鲜度（详见 [`Sync-Strategy.md`](./Sync-Strategy.md)）
 - 基础总览页：各课程卡片 + 关键日期一览（合并 syllabus 考试日期 + Canvas 作业 due date）
@@ -317,6 +317,7 @@ Phase 4: 生态与资源层        →  资源 hub、社区数据、深度代理
 | 2026-09-01 | 新增"同步延迟是命门"章节，指向 Sync-Strategy.md | 讨论补充 |
 | 2026-09-01 | Phase 0 拆分为 M1（syllabus）/ M2（数据源同步）两个里程碑 | [ADR-002](./Decisions.md#adr-002) |
 | 2026-09-01 | token 有效期 90 天 → 约 120 天（学生 token 强制过期） | 事实修正 |
+| 2026-09-04 | **推翻**上一条：P0-2-1b 实测过期上限为 **90 天**（弹窗原文 "Maximum expiration is 90 days."）。同步修正全文档相关引用（PRD / TechStack / Database / Sync-Strategy / Decisions）。 | P0-2-1b 实测（Steven 提供截图） |
 | 2026-09-01 | 风险措辞拆分：ToS 风险 vs 法律风险分开定性 | [ADR-008](./Decisions.md#adr-008) |
 | 2026-09-01 | Phase 0 成功标准补充量化指标 | 讨论补充 |
 | 2026-09-01 | 新增原则 6「内核优先于表层」 | Steven 纠正 |
