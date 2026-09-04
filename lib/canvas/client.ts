@@ -5,9 +5,11 @@
  * 前端直连 Canvas 会把 token 暴露给浏览器，且受 CORS 限制根本发不出去。
  * 所有 Canvas 请求一律经由这里，token 只存在于本次调用的参数里。
  *
- * ### 这个模块只做两件事
+ * ### 这个模块只做三件事
  * 1. 发请求、超时、解析 JSON
  * 2. **把失败归类**，让调用方（P0-2-5 同步）能按 Sync-Strategy §8 的表决策
+ * 3. 解析 `Link` 头给出下一页路径（P0-2-5 加的翻页能力；**是否继续翻页由调用方决定** ——
+ *    翻页次数、请求预算是同步编排的策略，不是这一层的事）
  *
  * 它**不写数据库**、**不重试**、**不解密凭据**。
  * 重试与状态落库是同步编排层的职责，混进来会让"这次失败到底算谁的"说不清。
@@ -43,7 +45,7 @@ export function isRetryable(kind: CanvasFailureKind): boolean {
 }
 
 export type CanvasResult<T> =
-  | { ok: true; data: T; rateLimitRemaining: number | null }
+  | { ok: true; data: T; rateLimitRemaining: number | null; nextPath: string | null }
   | {
       ok: false
       kind: CanvasFailureKind
@@ -52,6 +54,37 @@ export type CanvasResult<T> =
       /** 429 时 Canvas 给的等待秒数，没有则为 null。 */
       retryAfterSeconds: number | null
     }
+
+/**
+ * 解析 Canvas 分页用的 `Link` 响应头，返回下一页的路径（含查询串）。
+ *
+ * ### 为什么只回传路径而不是完整 URL
+ * 调用方要把这个值原样喂回 `canvasGet(path)`，而 `canvasGet` 只接受路径 ——
+ * 回传完整 URL 会让调用方不得不自己拆字符串，那正是容易出错的地方
+ * （拼出 `https://domain/api/v1/...` 这种双域名 URL）。
+ *
+ * ### 实测形态（2026-09-04，bCourses）
+ * 单页时：`rel="current"` / `rel="first"` / `rel="last"` 三个都在，**没有 `next`**；
+ * 有多页时才出现 `rel="next"`。所以"取不到 next"就是"没有下一页"，不需要额外判断。
+ *
+ * @returns 下一页路径；没有下一页或头不可解析时返回 `null`
+ */
+export function parseNextPath(linkHeader: string | null): string | null {
+  if (!linkHeader) return null
+
+  for (const part of linkHeader.split(',')) {
+    const match = /<([^>]+)>\s*;\s*rel="?next"?/.exec(part)
+    if (!match) continue
+    try {
+      const url = new URL(match[1])
+      return `${url.pathname}${url.search}`
+    } catch {
+      // Link 头里给了个不是 URL 的东西 —— 当作没有下一页，不为此中断同步。
+      return null
+    }
+  }
+  return null
+}
 
 /**
  * 向 Canvas 发一个 GET 请求。
@@ -83,6 +116,9 @@ export async function canvasGet<T>(
     const remaining = response.headers.get('x-rate-limit-remaining')
     const rateLimitRemaining = remaining === null ? null : Number(remaining)
 
+    // P0-2-5 扩展：把 Link 头解析成下一页路径（翻页由同步编排层决定要不要继续）。
+    const nextPath = parseNextPath(response.headers.get('link'))
+
     if (!response.ok) {
       return {
         ok: false,
@@ -94,11 +130,11 @@ export async function canvasGet<T>(
     // 204 或空响应体：Canvas 的 DELETE 类接口会这样返回，GET 不该出现，但别崩。
     const text = await response.text()
     if (text.trim() === '') {
-      return { ok: true, data: undefined as T, rateLimitRemaining }
+      return { ok: true, data: undefined as T, rateLimitRemaining, nextPath }
     }
 
     try {
-      return { ok: true, data: JSON.parse(text) as T, rateLimitRemaining }
+      return { ok: true, data: JSON.parse(text) as T, rateLimitRemaining, nextPath }
     } catch {
       return {
         ok: false,

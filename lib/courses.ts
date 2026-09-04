@@ -168,6 +168,36 @@ export function parseUpdateCourseInput(body: unknown): ValidationResult<UpdateCo
   return { ok: true, value: patch }
 }
 
+// ---------- 同步状态（P0-2-5） ----------
+
+/**
+ * 同步结果写入的列。
+ *
+ * ⚠️ **`sync_status` 只有 `success` / `failed` 两个取值，没有 `partial`**
+ * （迁移 `20260902003000` :59-60 的 CHECK 约束只放行 never / success / failed）。
+ *
+ * 这不是遗漏：`partial` 天然是**一批**同步的属性（"N 门成功 M 门失败"），
+ * 不是某一门课的属性 —— 一门课的同步要么成功要么失败。
+ * 所以整体状态记在 `sync_runs.status`（它的 CHECK 含 `partial`），
+ * 逐课状态记在 `courses.sync_status`，两者合起来正好是 Sync-Strategy §9 要展示的东西，
+ * 且**不需要改表结构**（改 CHECK 约束要 Steven 手动跑 SQL，能不欠就不欠）。
+ */
+export function toSyncStateUpdate(state: {
+  lastSyncedAt: string
+  syncStatus: 'success' | 'failed'
+  syncError: string | null
+}): {
+  last_synced_at: string
+  sync_status: string
+  sync_error: string | null
+} {
+  return {
+    last_synced_at: state.lastSyncedAt,
+    sync_status: state.syncStatus,
+    sync_error: state.syncError,
+  }
+}
+
 // ---------- Canvas 关联（P0-2-4） ----------
 
 /**

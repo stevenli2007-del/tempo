@@ -54,3 +54,25 @@ export type CanvasCourse = {
   /** 学期名，如 "Fall 2026"。Canvas 可能不返回，缺失时为 null。 */
   term: string | null
 }
+
+/**
+ * Canvas 作业（P0-2-5 同步的输入形状，`GET /api/v1/courses/:id/assignments` 的映射结果）。
+ *
+ * 刻意**不含** description / points_possible / submission 状态等字段 ——
+ * Security-Privacy 的最小权限要求与 Sync-Strategy §14（只同步作业标题与截止日期）：
+ * 多拿一个字段就多一处合规义务，而 Phase 0 的界面一个都用不上。
+ */
+export type CanvasAssignment = {
+  /** 源侧作业 ID（字符串），落库为 `tasks.source_id`，是去重的唯一依据。 */
+  externalId: string
+  title: string
+  /**
+   * 截止时刻（ISO 8601）；`null` = Canvas 上没设截止日期。
+   *
+   * ⚠️ **不编造日期**（Database.md §3.9）：没有就是 null，落库后 UI 显示 TBD，
+   * 绝不回填"学期末"之类的假值 —— 假日期比没有日期危险得多。
+   */
+  dueAt: string | null
+  /** 该作业在 Canvas 上的最后更新时间，用于判断是否真的变了（Database.md §4.2）。 */
+  externalUpdatedAt: string | null
+}

@@ -7,6 +7,7 @@ import {
 import type { CourseRow } from '@/lib/courses'
 import { getCurrentUser, internalError, jsonError, jsonOk } from '@/lib/api/response'
 import { UUID_PATTERN } from '@/lib/api/params'
+import { runCanvasSync } from '@/lib/sync/canvas-sync'
 
 /**
  * 课程 ↔ Canvas 课程的关联端点（API-Contract.md 第 6 节，P0-2-4）。
@@ -30,9 +31,18 @@ import { UUID_PATTERN } from '@/lib/api/params'
  * ### 归档课程
  * 一律 404（ADR-010 + 归档=删除语义）：已归档的课不该还能改关联。
  *
- * ### 关于"关联后触发一次同步"
- * 契约 §6 写了 `POST` 后触发同步 —— 但同步编排是 P0-2-5，本卡**不实现**。
- * 现在硬塞一个空跑的同步调用，等于给用户一个假的成功信号。
+ * ### 关于"关联后触发一次同步"（P0-2-5 已接上）
+ * 契约 §6 写了 `POST` 后触发同步，本卡原本刻意留空（"现在硬塞一个空跑的同步调用，
+ * 等于给用户一个假的成功信号"）。P0-2-5 有了真正的同步编排，这里补上，但**只同步这一门课**。
+ *
+ * 三条边界：
+ * 1. **同步失败不影响关联结果。** 关联本身已经成功写入，同步的成败由
+ *    `courses.sync_status` / `sync_error` 记账（Sync-Strategy §2 S2「失败必须可见」落在那里），
+ *    不该让一个已经成功的写操作因为下游失败而回滚或报错。
+ * 2. **不做节流。** 用户刚点完关联就被"同步太频繁"拦下是最差的一种体验，
+ *    而按课程触发的成本只有一个 Canvas 请求。
+ * 3. **不等待它的结果进响应。** 响应体仍是 course 对象（契约形状不变），
+ *    同步结果用户下次看课程页的状态区即可 —— 为此让关联按钮多等几秒不值得。
  */
 
 interface RouteContext {
@@ -133,6 +143,14 @@ export async function POST(request: Request, { params }: RouteContext) {
     if (!data) {
       // 并发归档/删除。不猜，让调用方重试。
       return jsonError(request, 404, 'not_found', '课程不存在或无权访问')
+    }
+
+    // 关联成功后立刻同步这门课（契约 §6，P0-2-5 接上）。
+    // 整体 try/catch：同步的失败不回滚关联，也不改变本端点的响应形状。
+    try {
+      await runCanvasSync(supabase, user.id, { trigger: 'manual', courseIds: [id] })
+    } catch (error) {
+      console.error('[canvas-link] 关联后触发同步失败:', id, error)
     }
 
     return jsonOk(request, toCourse(data as CourseRow))

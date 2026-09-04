@@ -90,7 +90,7 @@ export async function loadCredentialMeta(
  */
 export async function loadDecryptedCredential(
   supabase: ServerSupabase,
-): Promise<{ id: string; canvasDomain: string; token: string; expiresAt: string } | null> {
+): Promise<{ id: string; canvasDomain: string; token: string; expiresAt: string; status: string } | null> {
   const { data, error } = await supabase
     .from('canvas_credentials')
     .select(CREDENTIAL_FULL_COLUMNS)
@@ -109,5 +109,56 @@ export async function loadDecryptedCredential(
     canvasDomain: row.canvas_domain,
     token: decryptSecret(row.secret_encrypted ?? ''),
     expiresAt: row.expires_at,
+    // P0-2-5 加：同步编排要先看 status 再决定发不发请求（失效的 token 一个请求都不该发），
+    // 顺带返回省一次往返。这是纯新增字段，不影响既有调用方。
+    status: row.status,
+  }
+}
+
+// ---------- 同步结果回写（P0-2-5） ----------
+
+/**
+ * 一次成功的 Canvas 调用后刷新 `last_used_at`。
+ *
+ * 这个字段是排障时唯一能回答"这个 token 到底有没有真的用过"的东西 ——
+ * `expires_at` 只能说明它该什么时候失效。
+ */
+export async function touchCredentialSuccess(
+  supabase: ServerSupabase,
+  credentialId: string,
+): Promise<void> {
+  const { error } = await supabase
+    .from('canvas_credentials')
+    .update({ last_used_at: new Date().toISOString(), last_error_message: null })
+    .eq('id', credentialId)
+
+  if (error) {
+    throw error
+  }
+}
+
+/**
+ * 凭证被 Canvas 拒绝 / 解密失败 → 置 `status = 'error'` 并记下原因。
+ *
+ * Sync-Strategy §8：401 / 403 **绝不重试**，立即停止该用户的同步。
+ * 状态落到库里，UI（P0-2-7）才有东西可展示；靠抛异常只在当次请求里可见，
+ * 用户下次打开应用时看到的是一个静默的"没同步"。
+ */
+export async function markCredentialFailed(
+  supabase: ServerSupabase,
+  credentialId: string,
+  message: string,
+): Promise<void> {
+  const { error } = await supabase
+    .from('canvas_credentials')
+    .update({
+      status: 'error',
+      last_error_at: new Date().toISOString(),
+      last_error_message: message,
+    })
+    .eq('id', credentialId)
+
+  if (error) {
+    throw error
   }
 }
