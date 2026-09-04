@@ -274,6 +274,20 @@ Steven 说「完成 P0-1-5b 就收手」，Bud 交付 5b 后收到含糊的「Pl
     ③ **写入字段是封闭集合，绝不含用户可改的字段** —— 整行 upsert 会把用户
     标记的"已完成"打回未完成（这个 bug 在这类应用里最常见）。
     配套：删除用软删除且**支持恢复**（外部误删后恢复很常见，软删除能自愈）。
+
+14. 🔴 **「加载中 / 成功 / 失败」三态语义不能用 JS 的 `undefined` 隐式承载。**
+    「`Map.get(key)` 不存在」「数组 `.find()` 没找到」「`await` 返回 undefined」
+    在 JS 里**长得一样**，但语义分别是「这 key 没数据」「没匹配项」「查询挂了」。
+    用其中任何一种 `undefined` 当"加载失败"信号，**第一次出现"该实体不存在"的
+    正常场景时就会误报成错误**。
+    正确做法：分两个独立 prop / 状态传 —— 一个传数据（永远收数组或显式 null），
+    另一个传错误（来自上游的真实 error.message）。
+    反例（P0-2-5 实测踩到）：`loadUpcomingTasks` 返回的 Map 里只放"有任务"的课，
+    `Map.get(course.id)` 在无任务的课上是 undefined，调用方却 `toUpcomingViews(undefined) → null`
+    让卡片渲染「近期任务加载失败」。**所有关联 Canvas 后还没拉到任务的课都误报**。
+    修法：卡片永远收数组（`[]` = 无任务），真错误由独立的 `loadError` prop 控制。
+    **这类 bug 在没引入"中间态数据"之前不会暴露**（P0-1-9 没暴露是因为课程都
+    还没关联 Canvas；P0-2-5 引入中间态才暴露）。
     本项目实现见 `lib/sync/canvas-tasks.ts` 文件头。
 
 ### 10.2 坑索引（细节在各自文档）
@@ -300,7 +314,8 @@ Steven 说「完成 P0-1-5b 就收手」，Bud 交付 5b 后收到含糊的「Pl
 | 节流检查的位置 | 排在「是否真的会发请求」之后，否则会盖住真正可行动的错误（token 失效被说成"太频繁"） | 本节 10.1 第 12 条、`Sync-Strategy.md` §4 |
 | `courses.sync_status` 没有 `partial` | CHECK 只放行 never/success/failed。`partial` 是**一批**同步的属性，记在 `sync_runs.status`；逐课只有成功/失败。别为此改表结构（改 CHECK 要 Steven 手动跑 SQL） | `lib/courses.ts` `toSyncStateUpdate()` 注释、`API-Contract.md` §6 |
 | `last_seen_at` 只在变化时刷新 | `tasks` 上有 `trg_tasks_updated_at` 触发器，任何 UPDATE 都刷 `updated_at` —— "每次同步刷 last_seen_at"与"不刷 updated_at"物理上不可兼得，实现选了后者 | `lib/sync/canvas-tasks.ts` 文件头、`Sync-Strategy.md` §7 |
+| 三态语义别用 `undefined` 隐式承载 | `Map.get` 不存在 / `.find` 没找到 / 查询挂了 在 JS 里**长得一样**，用其中任何一种 `undefined` 当"加载失败"信号，第一次出现"该实体不存在"的正常场景就会误报 | 本节 10.1 第 14 条、`components/courses/course-card.tsx` 注释 |
 
 ---
 
-*创建：2026-09-01 ｜ 最近更新：2026-09-03（新增 §10 踩坑库：从 `.workbuddy/memory/MEMORY.md` 迁入，改为「方法论 + 索引」制，细节留在各自主题文档）*
+*创建：2026-09-01 ｜ 最近更新：2026-09-04（§10.1 第 14 条：三态语义别用 `undefined` 隐式承载；§10.2 新增一行坑索引）*
