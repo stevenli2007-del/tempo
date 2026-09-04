@@ -29,9 +29,12 @@
 
 ## 当前进度指针
 
-**当前 task**：`P0-2-5` 首次全量同步（Canvas 作业 → `tasks` 落库）—— 🔵 **代码完成（2026-09-04 20:10），自测 80/80，待 Steven 验收**。执行卡见 [P0-2-5](#-p0-2-5--首次全量同步canvas-作业--tasks-落库-代码完成-2026-09-04-待-steven-验收)。
+**当前 task**：`P0-2-5` 首次全量同步（Canvas 作业 → `tasks` 落库）—— ✅ **已验收（2026-09-04 13:44，Steven「效果完美」）· 勿重做**。执行卡见 [P0-2-5](#-p0-2-5--首次全量同步canvas-作业--tasks-落库-代码完成-2026-09-04-待-steven-验收)。
 
-> 🔵 **P0-2-5 交付摘要（2026-09-04）**：`POST /api/v1/sync/now`（契约 §6）+ `lib/sync/canvas-sync.ts`（编排：串行 / 重试 / 熔断 / 状态落库）+ `lib/sync/canvas-tasks.ts`（落库：去重 / 增量更新 / 软删除 + 恢复）+ `lib/sync/runs.ts`（`sync_runs` 映射）+ `lib/canvas/assignments.ts`（作业端点与映射）+ `canvasGet` 加 `Link` 翻页能力；`POST canvas-link` 成功后**接上了按课程触发同步**（P0-2-4 刻意留的口子）。
+> 🔜 **下一张卡**：`P0-2-6` 刷新机制 —— **下个窗口继续**（Steven 2026-09-04 收工指示）。头两件事：① 手动「同步」按钮（本次暴露痛点：没有按钮只能靠「解除→重绑」触发同步）；② 打开应用自动同步。另含两个待办：`/sync/scheduled` 定时兜底需 service role key（`.env.local` 无，须先配）+ migration 补档（`sync_runs` / `courses` 同步列 / `canvas_credentials` 均不在 migration 文件里，schema 未版本化）。
+
+> ✅ **P0-2-5 已验收通过（2026-09-04 13:44，Steven 生产验收）**：`POST /api/v1/sync/now`（契约 §6）+ `lib/sync/canvas-sync.ts`（编排：串行 / 重试 / 熔断 / 状态落库）+ `lib/sync/canvas-tasks.ts`（落库：去重 / 增量更新 / 软删除 + 恢复）+ `lib/sync/runs.ts`（`sync_runs` 映射）+ `lib/canvas/assignments.ts`（作业端点与映射）+ `canvasGet` 加 `Link` 翻页能力；`POST canvas-link` 成功后**接上了按课程触发同步**（P0-2-4 刻意留的口子）。
+> - **验收方式**：Steven 在 Chem 1A 详情页「解除关联 → 重新关联」，后端立刻按课触发同步 → 作业落库 → 总览卡片出现（CHEM 1A 5 条近 7 天任务）。**坐实了根因**：Chem 1A 是在旧版（canvas-link 未接同步的 P0-2-4）关联的，那次关联不触发同步，之后重登/刷新也从不触发（自动同步是 P0-2-6 的事）→ tasks 表一直空 → 卡片「近期没有待办」。**Math 53 LEC/DIS 都是 0 条作业，「近期没有待办」是正确状态。**
 > - **Steven 拍板的三件事**：① **无 due date 的作业照样同步，落库为 TBD**（实测 CHEM 1A 25 条里 9 条无日期：考勤打卡 + 4 个考试）；② **关联成功后立刻触发一次该课程的同步**；③ **跳过 `upcoming_events` 主扫描**，只走逐课 `assignments`。
 > - **真实数据实测**：CHEM 1A 25 条 / PHYSICS 7A 6 条 / MATH 53 LEC **0 条**（空课程不是失败态）；一趟同步三门课串行耗时 6.0 秒。
 > - **自测 80/80**（本地 52 + 多课程 28）：重复同步 created/updated/deleted 全 0；人为改坏标题 + 日期 + 标记完成后同步 → 标题与日期被改回、**`status=done` 没被覆盖**；幽灵作业 → 软删除且可恢复；假 token → 课程 failed + 凭证置 error + 再次调用 401；一门课失败 → 整批 `partial` 且其他课仍 success。
@@ -561,8 +564,8 @@
 | **P0-2-2** | 凭据加密存储（AES）+ 服务端 Canvas 请求封装（token 绝不出现在前端响应中） | Bud | P0-2-1（可用） | DB 中凭据为密文；抓包确认前端拿不到 token | ✅ **已验收（2026-09-04 10:14）** |
 | **P0-2-3** | Canvas API 客户端：拉取课程列表 + 作业列表（含 due date），含限流与错误处理 | Bud | P0-2-2 | 能正确拉取真实数据；API 报错有明确处理不崩溃 | ✅ **已验收（2026-09-04）** |
 | **P0-2-4** | 课程关联 UI：手动将 Canvas 课程与 Tempo Workspace 关联（不做自动匹配） | Bud | P0-2-3 | 可选择并关联；关联后状态可见；可解除关联 | ✅ **已验收通过（2026-09-04 11:36，Steven 浏览器验收）** |
-| **P0-2-5** | 首次全量同步：Canvas 作业 → `tasks` 表落库（去重 + 更新，不重复插入） | Bud | P0-2-4 | 重复同步不产生重复任务；due date 变更能更新 | 🔵 **代码完成（2026-09-04）**：自测 80/80，待 Steven 验收 |
-| **P0-2-6** | 刷新机制：手动刷新按钮 + 后台定时轮询（**前期频率放宽**，数值见 `Sync-Strategy.md`） | Bud | P0-2-5 | 手动刷新可用；定时轮询按配置执行 | ⚪ |
+| **P0-2-5** | 首次全量同步：Canvas 作业 → `tasks` 表落库（去重 + 更新，不重复插入） | Bud | P0-2-4 | 重复同步不产生重复任务；due date 变更能更新 | ✅ **已验收（2026-09-04 13:44，Steven「效果完美」）· 勿重做** |
+| **P0-2-6** | 刷新机制：手动刷新按钮 + 后台定时轮询（**前期频率放宽**，数值见 `Sync-Strategy.md`） | Bud | P0-2-5 | 手动刷新可用；定时轮询按配置执行 | 🔵 **下一张（2026-09-04 拍板，下窗口继续）** |
 | **P0-2-7** | **同步状态 UI**：显示最后同步时间 + **失败可见性**（失败时展示最后成功时间与失败原因，绝不静默展示旧数据） | Bud | P0-2-6 | 断网/token 失效时显示明确错误提示，而非旧数据 | ⚪ |
 | **P0-2-8** | Token 过期提醒：基于**用户实际填写的过期时间**（非写死天数）提前提醒 | Bud | P0-2-2 | 用临近过期的测试 token 验证提醒触发 | ⚪ |
 | **P0-2-9** | 撤销授权入口：一键断开 Canvas 授权 + 删除已存凭据 | Bud | P0-2-2 | 断开后凭据从库中清除；同步停止且状态正确显示 | ⚪ |
@@ -663,7 +666,7 @@
   - `POST /api/v1/courses/:id/canvas-link` 成功后的「触发一次同步」也在这里接上（契约 §6 写了，本卡刻意没做）。
 - **未实现（明确不在本卡）**：① ~~同步 → P0-2-5~~（✅ P0-2-5 已接上：关联成功后按课程触发一次）；② 撤销 Canvas 授权（DELETE credentials）→ P0-2-9；③ 设置页（F6）→ P0-3-2 —— 连接表单暂内嵌在详情页，将来可整体搬过去。
 
-#### 🎫 P0-2-5 · 首次全量同步（Canvas 作业 → `tasks` 落库）（🔵 代码完成 2026-09-04，待 Steven 验收）
+#### 🎫 P0-2-5 · 首次全量同步（Canvas 作业 → `tasks` 落库）（✅ 已验收 2026-09-04 13:44，Steven「效果完美」· 勿重做）
 
 - **做什么**：把已关联课程的 Canvas 作业拉下来、对齐到 `tasks`，并让用户能主动触发一次同步。**这是 M2 的核心卡** —— 之前四张卡都在铺路（凭据 / 客户端 / 关联），这一张才第一次让 Tempo 自己拿到数据。
 - **改哪些文件**：
@@ -706,9 +709,13 @@
   - 边界：空课程（Math 53 LEC 0 条作业）是 success 不是失败；归档课不参与同步；30 秒内 429 + `retryAfter`；running 行 → 409。
   - 越权：B 改 A 的任务 404；B 看不到任何任务。
   - ⚠️ **诚实边界**：以上都是 API / 数据库级验证。**没有 UI**（同步状态 UI 是 P0-2-7，刷新按钮是 P0-2-6），Steven 现在只能在生产/本地用 curl 或浏览器直接打 `POST /api/v1/sync/now` 验收。
+- ✅ **Steven 生产验收（2026-09-04 13:44）**：在 Chem 1A 详情页「解除关联 → 重新关联」触发同步后，作业立即落库、总览卡片出现近 7 天任务（Homework 2/3 逾期 / Homework 4 / Week 1/2 Discussion Quiz 等 5 条）。Steven 反馈「效果简直完美」。**本卡收口，勿重做。**
+  - **根因坐实**：Chem 1A 是在旧版（canvas-link 未接同步的 P0-2-4）关联的，那次关联不触发同步；此后重登/刷新从不触发（自动同步是 P0-2-6 的事）→ tasks 一直空 → 卡片「近期没有待办」。**Math 53 LEC/DIS 都是 0 条作业，「近期没有待办」是正确状态，非 bug。**
+  - 🔜 **P0-2-6 头一件事（本次暴露）**：得补**手动「同步」按钮** —— 现在唯一触发方式就是"解除→重绑"这种绕路操作，不用户友好。加上打开应用自动同步，用户才不用每次手动。
 - **🔜 下一张卡 P0-2-6（刷新机制）开工提示**：
   - 编排函数 `runCanvasSync()` 已经支持 `trigger`（`app_open` / `manual` / `scheduled`）与两个节流常量 `MANUAL_THROTTLE_MS`（30s）/ `APP_OPEN_THROTTLE_MS`（60s），**接触发入口即可**，不用改编排。
   - 定时兜底走 `POST /api/v1/sync/scheduled`（契约 §6）：需 `CRON_SECRET` + **恒定时间比较**；批量遍历全部有效凭据用户 —— 这一步**需要 service role**（现在只有 user-scoped client），是 P0-2-6 要解决的头一件事。
+  - ⚠️ **migration 补档（P0-2-6 一并处理）**：`sync_runs` / `courses.sync_status`/`last_synced_at`/`sync_error`/`canvas_course_id` / `canvas_credentials` 全都不在 `supabase/migrations/` 里 —— 是靠 P0-2-2 的手动 SQL 建进 prod 的，schema **未版本化**。补一份收口 migration（用 `CREATE TABLE IF NOT EXISTS` / `ALTER TABLE ... ADD COLUMN IF NOT EXISTS` 幂等写法，prod 已建过也能安全重跑）。
   - 状态展示要的数据已经齐了：`courses.last_synced_at` / `sync_status` / `sync_error` + `sync_runs`（含 `partial` 与逐课程 failures）。
   - 已知留白：`last_seen_at` 只在发生变化时刷新（详见 `lib/sync/canvas-tasks.ts` 文件头），P0-2-7 若想展示"这条任务最后一次在 Canvas 上被看到的时间"，需要改这个取舍（代价是每次同步都刷 `updated_at`）。
 
