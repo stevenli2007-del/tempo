@@ -29,7 +29,18 @@
 
 ## 当前进度指针
 
-**当前 task**：`P0-2-3` Canvas API 客户端（拉课程列表）—— ✅ **已验收通过（2026-09-04，Steven 生产验收）**。**下一张卡 = P0-2-4**（课程关联 UI），Steven 将在新对话框开工。
+**当前 task**：`P0-2-4` 课程关联 UI —— 🔵 **代码完成（2026-09-04，Bud）：本地冒烟 40/40 + 真实数据 15/15 + 分组规则真实数据 6/7 分对 + 详情页 SSR 12/12**。**待 Steven 浏览器验收**。
+
+> 🔵 **P0-2-4 代码完成（2026-09-04，Bud，待 Steven 浏览器验收）**：`POST`/`DELETE /api/v1/courses/:id/canvas-link` + `components/courses/canvas-link.tsx`（详情页关联控件：已关联态 / 选择列表 / 解除二次确认）+ `components/courses/canvas-connect-form.tsx`（未连接时内嵌 token 连接表单）+ `lib/canvas/group-courses.ts`（教学课 / 其他分组）。**接线位置：详情页 `/courses/[id]`「Canvas 关联」区块**（P0-1-8 拍板的「一门课的全部操作集中在详情页」）。
+> - **Steven 已拍板的噪音课策略**（P0-2-3 收尾）：教学课正常列 + 其他项单独一组带提示「这些看起来不像课程（入学 / 培训类），需要的话也可以关联」，**用户主动点才关联** —— 不静默过滤、不混排。
+> - **真实数据分组结果（13 门）**：教学课 **6 门**（CHEM 1A / Chem 1AL / R4A / MATH 53-DIS / MATH 53-LEC / PHYSICS 7A）+ 其他 **7 门**（GBO-FL26 / GBA-FL26-ENROLLMENT COURSE / GBA:GBP-INTL-FL26 / HazingPrev-FL26 / GBA:L&S-FYR-FL26(A) / PartySafe-AOD-FL26 / SHAPE Student Training），**与 Steven 的描述完全一致**。
+> - 🔴 **分组规则里「空格是必需的」**：入学类模块叫 `GBO-FL26` —— 学期限定符 FL26 贴着字母写。课程代码正则若允许可选空格，`FL26` 会命中「字母+数字」→ 入学模块被判成教学课，分组白做。真实课程代码（`CHEM 1A` / `MATH 53`）字母与数字之间都有空格。
+> - **三个实现期决策**：① 重复提交同一 ID → **200 幂等**（不是契约原文的 409）；② 关联**不触发**同步（P0-2-5）；③ 解除关联**不动** `last_synced_at` / `sync_status` / `sync_error`（真实历史，且此刻无 canvas 任务）。详见 `API-Contract.md` §6 与变更记录。
+> - **「关联」按钮不预拉课程列表**：拉列表要打一次 Canvas（走限流额度），用户可能只是打开详情页看看。代价是已关联的课在未点开前只显示 Canvas 课程 ID —— 刻意取舍，点「更改」即显示课名。
+> - ⚠️ **诚实边界**：本卡**有 UI**，但 `next dev` 在 WorkBuddy 起不来（CodingRules §5），**浏览器交互必须由 Steven 本地验收**：点「关联 Canvas 课程」→ 未连接时弹连接表单 → 粘 token → 看到分组列表 → 点「关联」→ 详情页显示已关联 → 点「解除关联」二次确认 → 回到未关联态。
+> - **测试账号待 Steven 手动删**：`p024-a-*` / `p024-b-*` / `p024r-real-*` / `p024g-group-*` / `p024u-*`（均 `@example.com`，业务数据已清）。
+
+> ✅ **P0-2-3 已验收（2026-09-04，Steven 生产验收）**：`GET /api/v1/canvas/courses`（代理拉课程列表）+ `lib/canvas/courses.ts`（忠实映射 CanvasCourse，不筛选学期）。复用 P0-2-2 的 `canvasGet` / `loadDecryptedCredential`。
 
 > ✅ **P0-2-3 已验收（2026-09-04，Steven 生产验收）**：`GET /api/v1/canvas/courses`（代理拉课程列表）+ `lib/canvas/courses.ts`（忠实映射 CanvasCourse，不筛选学期）。复用 P0-2-2 的 `canvasGet` / `loadDecryptedCredential`。
 > - **真实数据实测**（Steven CANVAS_PAT）：13 门 active 课，其中 **6 门 Fall 2026**（CHEM 1A / Chem 1AL / R4A / MATH 53-LEC / MATH 53-DIS / PHYSICS 7A），**其余 7 门是入学流程/培训类**（term = "Default Term"/"Projects"：GBO / PartySafe / Hazing / SHAPE 等）—— **✅ Steven 拍板（2026-09-04）**：P0-2-4 关联 UI 用「提示 + 询问用户是否拉进 Tempo」呈现，不静默过滤也不混排。代理层忠实返回不筛选。
@@ -545,7 +556,7 @@
 | **P0-2-1b** | **记录实测细节**：是否强制填写过期时间、上限天数、token 可撤销入口位置 | **Steven** | P0-2-1 | 三项信息记录在案（影响 P0-2-8 提醒逻辑的默认值） | ✅ **2026-09-04 完成**：强制必填 / 上限 **90 天** / 撤销在 Access Tokens 同页。已同步进 6 份文档（推翻原"约 120 天"） |
 | **P0-2-2** | 凭据加密存储（AES）+ 服务端 Canvas 请求封装（token 绝不出现在前端响应中） | Bud | P0-2-1（可用） | DB 中凭据为密文；抓包确认前端拿不到 token | ✅ **已验收（2026-09-04 10:14）** |
 | **P0-2-3** | Canvas API 客户端：拉取课程列表 + 作业列表（含 due date），含限流与错误处理 | Bud | P0-2-2 | 能正确拉取真实数据；API 报错有明确处理不崩溃 | ✅ **已验收（2026-09-04）** |
-| **P0-2-4** | 课程关联 UI：手动将 Canvas 课程与 Tempo Workspace 关联（不做自动匹配） | Bud | P0-2-3 | 可选择并关联；关联后状态可见；可解除关联 | ⚪ |
+| **P0-2-4** | 课程关联 UI：手动将 Canvas 课程与 Tempo Workspace 关联（不做自动匹配） | Bud | P0-2-3 | 可选择并关联；关联后状态可见；可解除关联 | 🔵 **代码完成（2026-09-04，40/40 + 15/15 + SSR 12/12），待浏览器验收** |
 | **P0-2-5** | 首次全量同步：Canvas 作业 → `tasks` 表落库（去重 + 更新，不重复插入） | Bud | P0-2-4 | 重复同步不产生重复任务；due date 变更能更新 | ⚪ |
 | **P0-2-6** | 刷新机制：手动刷新按钮 + 后台定时轮询（**前期频率放宽**，数值见 `Sync-Strategy.md`） | Bud | P0-2-5 | 手动刷新可用；定时轮询按配置执行 | ⚪ |
 | **P0-2-7** | **同步状态 UI**：显示最后同步时间 + **失败可见性**（失败时展示最后成功时间与失败原因，绝不静默展示旧数据） | Bud | P0-2-6 | 断网/token 失效时显示明确错误提示，而非旧数据 | ⚪ |
@@ -610,6 +621,43 @@
   - 关联写库走契约 `POST /api/v1/courses/:id/canvas-link`（存 `courses.canvas_course_id` = Canvas `externalId`）；解除走 DELETE。
   - `CanvasCourse.externalId` 是字符串（源头是数字，已 String() 化），关联存储时直接用，别重复转。
 - **未实现（明确不在本卡）**：作业列表拉取 → P0-2-5（Steven 拍板，避免死代码 + 无处验收）；DELETE 撤销授权 → P0-2-9；任何前端 UI → P0-2-4。
+
+#### 🎫 P0-2-4 · 课程关联 UI（🔵 代码完成 2026-09-04 · 待 Steven 浏览器验收）
+
+- **做什么**：用户手动把一门 Tempo 课关联到一门 Canvas 课 —— 关联、状态可见、可解除。**不做自动匹配**（PRD F4：同名课程 LEC/DIS 自动匹配必错，选哪门是用户的判断）。
+- **改哪些文件**：
+  - `app/api/v1/courses/[id]/canvas-link/route.ts`（新增）—— POST 关联 / DELETE 解除，两个都幂等。
+  - `lib/courses.ts`（改）—— `parseCanvasLinkInput()`（ID 外形校验）+ `toCanvasCourseIdUpdate()`（列名只在这里出现一次）+ `toCourse()` 补 `canvasCourseId`。
+  - `types/course.ts`（改）—— `Course` 新增 `canvasCourseId: string | null`。
+  - `lib/canvas/group-courses.ts`（新增）—— 教学课 / 其他分组的纯函数（规则判断，不用模型）。
+  - `components/courses/canvas-link.tsx`（新增）—— 关联控件：默认态 / 选择态 / 连接态三态。
+  - `components/courses/canvas-connect-form.tsx`（新增）—— 未连接时内嵌的 token 连接表单。
+  - `app/(routes)/courses/[id]/page.tsx`（改）—— 加「Canvas 关联」区块。
+  - `docs/API-Contract.md`（改）—— §2 新增字段、§6 两个端点（含 409 三态表）、§10 总表、§11 变更记录。
+- **关键约束**：
+  - 🔴 **关联 UI 放详情页**（`/courses/[id]`），沿 P0-1-8 拍板的「一门课的全部操作集中在详情页」；端点是 `courses/:id/canvas-link`，天然就是 per-course。
+  - 🔴 **409 三态**：本课已关联另一个 Canvas 课 / 该 Canvas 课已被别的 Tempo 课关联 → 409；**重复提交同一 ID → 200 幂等**（契约原文"重复关联 → 409"的收敛：再点一次已关联项在 UI 上是常见动作，防呆不该用在这里）。
+  - 🔴 **归档课程一律 404**（ADR-010 + 归档=删除）。**越权同样 404**（RLS 让别人的行根本查不出来）。
+  - **关联不触发同步** —— 同步编排是 P0-2-5，现在空跑等于给假的成功信号。
+  - **不校验 ID 在 Canvas 上是否真的存在** —— 省一次上游请求（限流额度），UI 只能从列表选；直接调 API 填错，最坏是 P0-2-5 同步时明确报错。
+  - **解除关联不动 `last_synced_at` / `sync_status` / `sync_error`** —— 那是真实同步历史。契约原文「解除后任务标记为不再更新」等 P0-2-5 落了 canvas 任务、P0-2-7 做状态 UI 时再处理。
+  - **`CanvasCourse.externalId` 已是字符串**（P0-2-3 就 `String()` 化了），直接存，别再转一次。
+- **噪音课分组（Steven 2026-09-04 拍板的具体形态）**：
+  - 规则在 `lib/canvas/group-courses.ts`：**`term` 是标准学期名**（`Fall 2026`）**或 `name` 有课程代码特征**（`CHEM 1A` / `MATH 53-LEC-001`）→ 教学课；否则进「其他项目」。
+  - 两个信号取**或**：宁可把培训模块错分进教学课（只是分组不好看），也不能把真课分进其他（等于替用户藏选项，违反「不静默过滤」前提）。
+  - 🔴 **课程代码正则的空格是必需的**：`GBO-FL26` 这种入学模块把学期限定符（FL26）贴着字母写，允许可选空格会让它们被判成教学课。真实课程代码（`CHEM 1A` / `MATH 53`）字母与数字之间都有空格。
+  - **两组都能关联**，分组只影响展示位置与提示文案。
+- **自测（Bud，2026-09-04）**：`tsc` ✅ ｜ `lint` ✅ ｜ `build` ✅（`/api/v1/courses/[id]/canvas-link` 已进路由表）｜ **本地冒烟 40/40**：401（POST/DELETE）｜ 400（非法 uuid / 空体 / 7 条 ID 校验：缺失·空串·空格·非字符串·带空格·超长·非法字符）｜ 404（越权 / 不存在 / 归档课 POST+DELETE）｜ 关联 200 + 落库 + 响应无密钥字段 + `x-request-id` 回传 ｜ 同 ID 重复 → 200 幂等 ｜ 换 ID → 409 ｜ 同一 Canvas 课挂第二门 Tempo 课 → 409（文案带课程名）｜ 跨用户同 ID → 200（RLS 隔离）｜ `GET /courses` 与 `/courses/:id` 都返回 `canvasCourseId` ｜ 解除 → null + 幂等 + 可重关联 ｜ 未存凭据时 `/canvas/courses` → 404（UI 据此弹连接表单）。
+  - **真实数据 15/15**（`.tmp-smoke-p024-real.mjs`，跑完已删）：用 Steven 的真实 PAT 走完整链路 —— 保存凭据 201（复刻连接表单 `datetime-local → Date → ISO` 的换算）→ 拉到 **13 门** → 关联真实 Canvas 课 → 详情读回 → 解除 → 清凭据与课程。全程响应与 HTML 均不含 token。
+  - **分组规则真实数据验证**：13 门分成 **6 教学课 / 7 其他**，与 Steven 的描述逐门对得上。
+  - **详情页 SSR 12/12**：已关联态（区块 / 已关联文案 / Canvas 课程 ID / 更改 / 解除关联 / 无 token 泄漏）6 项 + 未关联态（区块 / 未关联文案 / 关联按钮 / 不出现解除 / 不出现更改）6 项。
+  - ⚠️ **诚实边界**：以上都是 RSC 传输载荷级别的验证。**点击类交互（点开关联 → 弹连接表单 → 选课 → 关联 → 解除）必须 Steven 本地 `npm run dev` 验收** —— `next dev` 在 WorkBuddy 起不来（CodingRules §5）。
+- **🔜 下一张卡 P0-2-5（首次全量同步：Canvas 作业 → tasks 落库）开工提示**：
+  - 关联关系已经有了：`courses.canvas_course_id` 存着 Canvas 课程 ID。同步时遍历**已关联且未归档**的课。
+  - 拉取作业要用 `canvasGet`（P0-2-2）；⚠️ **同步必须串行**（Sync-Strategy §2 的 Canvas 并发惩罚），且**多门课要处理翻页** —— `canvasGet` 目前不返回 `Link` 头，需先给它加这个能力（对已验收 client 的独立扩展，别夹带在别的改动里）。
+  - **重试与状态落库归本卡**（P0-2-2 的 client 刻意不重试、不写库，`isRetryable()` 已暴露给调用方）。
+  - `POST /api/v1/courses/:id/canvas-link` 成功后的「触发一次同步」也在这里接上（契约 §6 写了，本卡刻意没做）。
+- **未实现（明确不在本卡）**：① 同步 → P0-2-5；② 撤销 Canvas 授权（DELETE credentials）→ P0-2-9；③ 设置页（F6）→ P0-3-2 —— 连接表单暂内嵌在详情页，将来可整体搬过去。
 
 ---
 
@@ -691,4 +739,5 @@ P0-0 基础设施
 | 2026-09-04 | **P0-2-2 代码完成（待验收，63/63 自测全绿）**：AES-256-GCM 加密（`lib/canvas/crypto.ts`，密文格式 `v1:iv:tag:ct`，版本前缀为密钥轮换留口子）+ `POST/GET /api/v1/canvas/credentials` + `lib/canvas/client.ts` 请求封装（10s 超时 / 错误分类 / 读限流头）+ `lib/canvas/validate.ts`（**含 SSRF 防护**：域名只接受纯主机名，拒绝 IP/localhost/内网/协议/路径）。**关键实现期决策**：① 保存走"先查后写"不用 `upsert({onConflict})`（后者在 unique 约束未执行时直接报错）；② 客户端封装**不重试不写库**（重试与状态落库归 P0-2-5 同步编排）；③ `expiresAt` 按实测强制必填 + 上限 90 天。**自测**：冒烟 42/42（含库内密文直查验证、12 条 400 校验路径、跨用户隔离）+ 集成 8/8（**解密出的 token 真调 Canvas `/users/self` 成功**，证明加解密往返正确）+ crypto 负向 13/13（篡改密文 → GCM 认证失败、错误密钥抛错、错误消息不含明文）。**顺带查清 O-07**：bCourses 确实返回 `x-rate-limit-remaining`。**两个 Steven 交接点**：① Vercel 加 `CANVAS_TOKEN_ENCRYPTION_KEY`（加完必须手动 Redeploy）；② 执行迁移 `20260904100000_canvas_credentials_constraints.sql`（约束加固，不阻塞功能）。**明确未做**：DELETE 撤销授权（P0-2-9）、保存后触发同步（P0-2-5）、前端 UI（P0-2-4） |
 | 2026-09-04 | **P0-2-3 代码完成（待 Steven 验收，冒烟 17/17）**：`GET /api/v1/canvas/courses`（代理拉课程列表）+ `lib/canvas/courses.ts`（忠实映射 CanvasCourse，不筛选学期）。复用 P0-2-2 的 `canvasGet`/`loadDecryptedCredential`。**范围收敛（Steven 拍板）**：任务名虽含"作业列表"，本卡只做课程列表（契约 §6 唯一端点），作业拉取签名留到 P0-2-5。**真实数据实测**：13 门 active 课里 6 门 Fall 2026 教学课 + 7 门入学/培训类（Default Term/Projects），**P0-2-4 需考虑噪音课呈现**。**两个实现期决策**：`name` 用 course_code（区分 LEC/DIS）；上游故障 → 502 `upstream_error`（契约 §1.4/§6 已补）。**自测**：tsc/lint/build 全绿 + 冒烟 17/17（401 / 404 无凭据 / 真实 PAT 返 13 门含 MATH 53 ×2 / 伪造 token 401 credential_invalid / 无 token 泄漏 / x-request-id）。凭据行已清，auth 用户 `p023-a/b-*@example.com` 待 Steven 删 |
 | 2026-09-04 | **P0-2-3 验收通过 ✅（2026-09-04，Steven 生产验收）+ P0-2-2 交接点收口**：Steven 配好 Vercel `CANVAS_TOKEN_ENCRYPTION_KEY` 并 Redeploy（P0-2-2 交接点①完成），生产打 `GET /api/v1/canvas/courses` 返 404 `not_found`（账号未存凭据，code 契约正确），证明路由/鉴权/契约链路通。**噪音课呈现策略（Steven 拍板，commit `a879ad9`）**：教学课正常列给用户选 + **非教学课（Default Term/Projects 培训类）单独提示"这些看起来不像课程，要不要也拉进 Tempo？"，用户勾选才关联**，不静默过滤不混排 → 已写入 P0-2-4 开工提示。测试账号 `p023-a/b-*@example.com` ×2 已由 Steven 删除。进度指针推进至 **下一张卡 P0-2-4**（课程关联 UI），Steven 将在新会话开工。commit `def9b37`（代码）+ `1cf9848`（契约文档）+ `a879ad9`（噪音课决策）+ `a879ad9` 部署 success |
+| 2026-09-04 | **P0-2-4 课程关联 UI 代码完成（🔵 待 Steven 浏览器验收）**：`POST`/`DELETE /api/v1/courses/:id/canvas-link`（均幂等，归档课 404）+ `components/courses/canvas-link.tsx`（详情页关联控件）+ `components/courses/canvas-connect-form.tsx`（未连接时内嵌 token 连接表单，P0-2-2 留下的「前端 UI 归 P0-2-4」在此收口）+ `lib/canvas/group-courses.ts`（教学课 / 其他分组）+ `Course` 新增 `canvasCourseId`。**三个实现期决策**：① 重复提交同一 ID → 200 幂等（收敛契约原文的「重复关联 → 409」）；② 关联不触发同步（P0-2-5）；③ 解除关联不动同步字段（真实历史，且此刻无 canvas 任务）。**噪音课分组按 Steven 拍板落地**：教学课正常列 + 其他项单独一组带提示，真实 13 门分成 **6 / 7** 完全对得上；🔴 课程代码正则的**空格是必需的**（`GBO-FL26` 的 FL26 贴着字母写，允许可选空格会把入学模块判成教学课）。**自测**：tsc/lint/build 全绿 + 本地冒烟 **40/40** + 真实 PAT 端到端 **15/15** + 分组规则真实数据验证 + 详情页 SSR **12/12**（已关联 / 未关联两态）。**下一张卡 P0-2-5**（首次全量同步），开工提示已写进执行卡（含「`canvasGet` 需先加返回 `Link` 头的能力」与「同步必须串行」） |
 | 2026-09-04 | **P0-2-2 交接点② ✅ 收口（2026-09-04，Steven Dashboard 实测）**：迁移 `20260904100000_canvas_credentials_constraints.sql` **早就执行过**，并非"从未跑"—— Steven 在 Supabase Dashboard SQL Editor 重新跑遇 `42P07: relation "canvas_credentials_user_id_key" already exists`，用 `information_schema.columns` + `table_constraints` 验证：① `expires_at.is_nullable = NO`（NOT NULL 已生效）、② `canvas_credentials_user_id_key` 约束存在（UNIQUE 已生效）。两条约束**全部就位**，本卡脚本无须再跑。同步更新 P0-2-2 执行卡「待 Steven」清单（4 条全部 ✅）+ 进度指针 block（交接点标注从"待 Steven"改为"✅ 全部收口"）+ 571 行脚本描述去除【Steven 手动】标注 |

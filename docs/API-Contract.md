@@ -103,6 +103,7 @@
       "instructorName": "Douskey",
       "isDemo": false,
       "isArchived": false,
+      "canvasCourseId": "1558822",        // P0-2-4 新增，未关联时为 null
       "canvasLinked": true,
       "lastSyncedAt": "2026-09-20T14:03:00-07:00",
       "syncStatus": "success",
@@ -119,6 +120,11 @@
 > **该字段可选**：缺失表示「没能加载到」，而不是「这门课没有任务」。
 > 两者在 UI 上必须分开，把加载失败渲染成"没有任务"等于静默的错误数据（CodingRules 7）。
 > `POST /api/v1/courses` 的响应不带这个字段（新建的课程还没有任务）。
+
+> **`canvasCourseId`（P0-2-4 新增）**：关联的 Canvas 课程 ID，未关联时为 `null`；
+> `canvasLinked` 由它是否为空派生。
+> 只给布尔值不够 —— 关联 UI 要显示"关联的是哪门课"，换关联和解除关联都得指着这个 ID 说；
+> 它不是凭据也不是敏感信息（只是一个课程号），可以安全下发。
 
 ### `POST /api/v1/courses`
 ```jsonc
@@ -525,15 +531,43 @@ syllabus 数据、根本没有同步这回事。硬编码 `staleWarning: false` 
 | 502 | `upstream_error` | Canvas 上游故障（5xx / 超时 / 网络 / 坏 JSON）。这是"服务端代理第三方"失败，不伪装成 Tempo 自己的 500 |
 
 
-### `POST /api/v1/courses/:id/canvas-link`
+### `POST /api/v1/courses/:id/canvas-link` — 关联（✅ P0-2-4 已实现）
 ```jsonc
-// request  { "externalCourseId": "12345" }
-// response 200 → course 对象（含 canvasLinked: true），并触发一次该课程的同步
+// request  { "externalCourseId": "1558822" }   // Canvas 课程 ID（字符串，非数字）
+// response 200 → course 对象（canvasCourseId 已填上、canvasLinked: true）
 ```
-重复关联 → `409 already_linked`。
 
-### `DELETE /api/v1/courses/:id/canvas-link` — 解除关联
-解除后该课程的 Canvas 任务保留但标记为不再更新（`last_seen_at` 停止刷新，UI 不再展示同步状态）。
+- `externalCourseId` 必填，字符集 `[A-Za-z0-9_-]`、长度 1–64。
+  Canvas 给的是数字 ID，Tempo 当字符串存（ID 不参与算术）。
+  ⚠️ **不校验这个 ID 在 Canvas 上是否真的存在** —— 那要多发一次上游请求（连带限流与失败分支），
+  而 UI 只能从列表里选；直接调 API 填错了，最坏是同步时拉不到作业（P0-2-5 会明确报错）。
+- ⏸ **不触发同步**（契约原文写了"并触发一次该课程的同步"）：同步编排是 P0-2-5，
+  现在塞一个空跑的同步调用等于给假的成功信号。
+
+**409 的三种情形（都说"已关联"，但含义不同，文案必须分开）**
+
+| 情形 | 响应 | 文案 |
+|---|---|---|
+| 这门 Tempo 课已关联**另一个** Canvas 课 | 409 `already_linked` | 请先解除关联 |
+| 这个 Canvas 课已被**另一门 Tempo 课**关联 | 409 `already_linked` | 已关联到「课程名」，一门 Canvas 课只能关联一门 Tempo 课 |
+| 重复提交**同一个** ID | **200 幂等**（不报错） | — |
+
+> 第三条是对契约原文"重复关联 → 409"的**收敛**：契约当初写的是防"用户重复点按钮产生脏数据"，
+> 但"再点一次已关联的那一项"在 UI 上是常见动作，为此弹一个报错是把防呆用错了地方。
+> 真正的脏数据风险（同一 Canvas 课挂两门 Tempo 课、静默换关联）仍然用 409 挡着。
+
+**其余错误码**：未登录 401 `unauthenticated` ｜ 非法 uuid / 请求体不是 JSON / `externalCourseId` 不合法 → 400 ｜
+**课程不存在、不属于当前用户、已归档 → 404 `not_found`**（ADR-010 + 归档=删除语义）。
+
+### `DELETE /api/v1/courses/:id/canvas-link` — 解除关联（✅ P0-2-4 已实现）
+置 `canvas_course_id = null`，返回更新后的 course 对象。
+
+- **幂等**：本来就没关联时重复调用返回 200 + 当前状态，不报错（多标签页重复点的场景）。
+- **归档课程 → 404**（与 POST 同口径）。
+- ⏸ 契约原文"解除后该课程的 Canvas 任务保留但标记为不再更新（`last_seen_at` 停止刷新）"**尚未实现**：
+  Phase 0 此刻还没有任何 `source = canvas` 的任务（同步在 P0-2-5）。解除只清关联本身，
+  `last_synced_at` / `sync_status` / `sync_error` **不动** —— 那是真实的同步历史，不该被抹掉。
+  等 P0-2-5 落了 canvas 任务、P0-2-7 做同步状态 UI 时再定"已解除关联"怎么显示。
 
 ### `POST /api/v1/sync/now`
 手动/打开时触发同步。服务端按 `Sync-Strategy.md` 节流（手动 30s / 自动 60s），超限返回 `429` + `retryAfter`。
@@ -622,7 +656,7 @@ syllabus 数据、根本没有同步这回事。硬编码 `staleWarning: false` 
 | POST/DELETE | `/api/v1/tasks[/:id]` | 手动任务增删 | ⚪ 未实现（P0-1-9 仅 syllabus 数据） |
 | POST/GET/DELETE | `/api/v1/canvas/credentials` | 凭证保存 / 元数据 / 撤销 | P0-2-2, P0-2-9 |
 | GET | `/api/v1/canvas/courses` | Canvas 课程列表（代理） | P0-2-3 |
-| POST/DELETE | `/api/v1/courses/:id/canvas-link` | 课程关联 / 解除 | P0-2-4 |
+| POST/DELETE | `/api/v1/courses/:id/canvas-link` | 课程关联 / 解除 | ✅ P0-2-4 |
 | POST | `/api/v1/sync/now` | 手动同步 | P0-2-6 |
 | POST | `/api/v1/sync/scheduled` | 定时同步（CRON_SECRET） | P0-2-6 |
 | GET | `/api/v1/sync/status` | 同步状态 | P0-2-7 |
@@ -650,3 +684,4 @@ syllabus 数据、根本没有同步这回事。硬编码 `staleWarning: false` 
 | 2026-09-03 | **§2 `GET /api/v1/courses/:id` 按 P0-1-8 实现收敛**：① `syllabus` 由「只给 `{id,fileName,parseStatus}`」放宽为**返回完整 Syllabus 对象** —— UI 需要 `extractStatus` / `parseError` 才能渲染「解析失败可重试」；② 补错误码表（401 / 400 / 404），**已归档课程按 404 处理**（归档 = 删除，与 §4 保存端点一致）；③ 读逻辑收敛到 `lib/course-detail.ts`，端点与详情页服务端组件共用一份 | P0-1-8 |
 | 2026-09-03 | **§5 两个端点验收通过（Steven 浏览器验收，P0-1-9 ✅）**：`GET /api/v1/tasks` 与 `PATCH /api/v1/tasks/:id` 本地无头 64/64 + 生产 26/26，浏览器交互（标记完成 → 列表刷新 / 已完成折叠与删除线）通过，契约 §5 现状即实现现状，无需再收敛。**§5 的 `POST` / `DELETE`（手动任务）仍为未实现**，留给后续卡片 | P0-1-9 |
 | 2026-09-03 | **§8 Demo 端点按 P0-1-10 实现落地**：`POST /api/v1/demo/seed`（建 `is_demo=true` 课程 + 复用 `persistParsedSections` 落五板块 + `syncExamToTask` 派生考试任务，运行时零 LLM；重复 → `409 already_linked`；失败回滚课程）+ `DELETE /api/v1/demo`（级联清子数据 + 复位 `demo_seeded_at`，幂等 `200 {deleted:0}`）。预置数据 = Steven 真实 syllabus（CHEM 1A Fall 2026），`courseOutline`/`officeHours` 按拍板留空，演示课程不建 syllabi 行。现状即实现现状 | P0-1-10 |
+| 2026-09-04 | **§6 `POST`/`DELETE /api/v1/courses/:id/canvas-link` 实现落地**（P0-2-4）：① **`Course` 新增 `canvasCourseId`**（未关联为 `null`；`canvasLinked` 由它派生）—— 关联 UI 要显示"关联的是哪门课"，只有布尔值说不出来；② **409 拆成三种情形**：本课已关联另一个 Canvas 课 / 该 Canvas 课已挂到另一门 Tempo 课 / 重复提交同一 ID（**最后一种按 200 幂等处理，不报错** —— 契约原文"重复关联 → 409"的收敛，理由见 §6）；③ 两个端点都幂等，归档课程一律 404；④ 明确**不触发同步**（同步编排是 P0-2-5，现在空跑等于给假成功信号）；⑤ 明确**不校验 ID 在 Canvas 上是否存在**（省一次上游请求与限流额度，UI 只能从列表选）；⑥ 解除关联只清 `canvas_course_id`，`last_synced_at` / `sync_status` / `sync_error` 不动（真实同步历史，且此刻还没有任何 canvas 任务） | P0-2-4 |
