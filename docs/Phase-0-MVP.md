@@ -32,7 +32,7 @@
 **当前 task**：`P0-2-3` Canvas API 客户端（拉课程列表）—— 🔵 **代码完成（2026-09-04，冒烟 17/17 全绿），待 Steven 验收**。**下一张卡 = P0-2-4**（课程关联 UI，依赖 P0-2-3 验收通过后开工）。
 
 > 🔵 **P0-2-3 代码完成（2026-09-04，Bud，待 Steven 验收）**：`GET /api/v1/canvas/courses`（代理拉课程列表）+ `lib/canvas/courses.ts`（忠实映射 CanvasCourse，不筛选学期）。复用 P0-2-2 的 `canvasGet` / `loadDecryptedCredential`。
-> - **真实数据实测**（Steven CANVAS_PAT）：13 门 active 课，其中 **6 门 Fall 2026**（CHEM 1A / Chem 1AL / R4A / MATH 53-LEC / MATH 53-DIS / PHYSICS 7A），**其余 7 门是入学流程/培训类**（term = "Default Term"/"Projects"：GBO / PartySafe / Hazing / SHAPE 等）—— **P0-2-4 关联 UI 必须考虑是否过滤或提示**，代理层忠实返回不筛选。
+> - **真实数据实测**（Steven CANVAS_PAT）：13 门 active 课，其中 **6 门 Fall 2026**（CHEM 1A / Chem 1AL / R4A / MATH 53-LEC / MATH 53-DIS / PHYSICS 7A），**其余 7 门是入学流程/培训类**（term = "Default Term"/"Projects"：GBO / PartySafe / Hazing / SHAPE 等）—— **✅ Steven 拍板（2026-09-04）**：P0-2-4 关联 UI 用「提示 + 询问用户是否拉进 Tempo」呈现，不静默过滤也不混排。代理层忠实返回不筛选。
 > - **两个实现期决策**：① `name` 用 Canvas `course_code`（非完整课名）—— 关联 UI 需区分同名 LEC/DIS（Math 53 分两个 id）；② Canvas 上游故障（5xx/超时/网络/坏 JSON）→ **502 `upstream_error`**，不伪装成 Tempo 自己的 500（契约 §1.4 + §6 已补）。
 > - **范围收敛**（Steven 拍板）：任务名虽写「拉课程 + 作业」，本卡**只做课程列表**（契约 §6 唯一端点）；作业拉取签名留到 P0-2-5 按同步真实需求再定，避免本卡写死代码无处验收。
 > - **错误映射**：未登录 401 `unauthenticated` ｜ 无凭据 404 `not_found` ｜ Canvas 拒 token 401 `credential_invalid` ｜ 限流 429 `rate_limited`。
@@ -603,12 +603,13 @@
   - **同步不需 `Promise.all`**（Sync-Strategy §2 Canvas 并发惩罚）：本卡是**单请求**，无并发问题；P0-2-5 同步拉多门课才必须串行。
 - **自测（Bud，2026-09-04）**：`tsc` ✅ ｜ `lint` ✅ ｜ `build` ✅ ｜ **本地冒烟 17/17**：401 未登录 ｜ 404 无凭据 ｜ 真实 PAT 存库 → GET 200 返 **13 门**（Fall 2026 恰 **6 门**、**MATH 53 出现两次** LEC+DIS、每项含 externalId/name/term）｜ 伪造 token → 401 `credential_invalid` ｜ POST/GET 响应均无 token/密文字段 ｜ x-request-id 回传。
   - ⚠️ **诚实标注**：`502 upstream_error` 分支**未做端到端触发**（需 Canvas 5xx/断网，难稳定复现）。该分支是 `mapCanvasFailure` 的一行 `default`，`canvasGet` 的错误分类（server_error/timeout/network/parse）已在 P0-2-2 完整测过，映射是直译，风险极低。
-- **真实数据发现（P0-2-4 关联 UI 必须考虑）**：Steven 账号 13 门 active 课里，**只有 6 门是 Fall 2026 教学课程**（CHEM 1A / Chem 1AL-LAB / R4A / MATH 53-LEC / MATH 53-DIS / PHYSICS 7A）；**其余 7 门是入学流程/培训类模块**（term = "Default Term"/"Projects"：Bear Pact Quiz / GBA 系列 / PartySafe / Hazing / SHAPE），`term` 不是干净学期名。是否过滤/分组提示属于 P0-2-4 产品决策。
+- **真实数据发现（P0-2-4 关联 UI 必须考虑）**：Steven 账号 13 门 active 课里，**只有 6 门是 Fall 2026 教学课程**（CHEM 1A / Chem 1AL-LAB / R4A / MATH 53-LEC / MATH 53-DIS / PHYSICS 7A）；**其余 7 门是入学流程/培训类模块**（term = "Default Term"/"Projects"：Bear Pact Quiz / GBA 系列 / PartySafe / Hazing / SHAPE），`term` 不是干净学期名。**✅ Steven 已拍板（2026-09-04）**：UI 走「**提示 + 询问用户是否把这些课也拉进 Tempo**」，不静默过滤、也不强制全列 —— 用户对某门培训课说"是"就关联，说"否"就不出现（见 P0-2-4 开工提示）。
 - **待 Steven**：
   1. **验收方式**：本卡**无 UI**，验收靠 API 证据，无需浏览器点击。复现：本地 `next build` + `next start`（或 Vercel 部署后）→ 用一个**已存真实凭据**的账号登录 → `GET /api/v1/canvas/courses` 应返课程数组；无凭据账号应 404。验收命令样例见冒烟脚本（P0-2-3 交付时的 `.tmp-smoke-canvas-courses.cjs`，已在本地删）。
   2. 删测试账号：`p023-a-*@example.com` / `p023-b-*@example.com`（冒烟产物，本地库）。
 - **🔜 下一张卡 P0-2-4（课程关联 UI：手动关联 Canvas 课程 ↔ Tempo Workspace）开工提示**：
-  - 前端拉 `GET /api/v1/canvas/courses` 拿课程列表（**含真实数据里的培训类噪音课，UI 需决定怎么呈现**）。
+  - 前端拉 `GET /api/v1/canvas/courses` 拿课程列表（**含真实数据里的培训类噪音课**）。
+  - **噪音课呈现策略（Steven 2026-09-04 拍板）**：把教学课（term="Fall 2026" 之类）正常列给用户选；**非教学课（Default Term/Projects 培训模块）单独呈现 + 提示**："这些看起来不像课程（入学/培训类），要不要也拉进 Tempo？" 用户勾选才关联。**不静默过滤**（防漏掉用户真要的东西），也**不混排**（避免噪音淹没 6 门真课）。判定信号：`term` 不是标准学期名 + name 无课程代码特征，P0-2-4 定一个稳妥的分组规则即可，不用机器学习。
   - 关联写库走契约 `POST /api/v1/courses/:id/canvas-link`（存 `courses.canvas_course_id` = Canvas `externalId`）；解除走 DELETE。
   - `CanvasCourse.externalId` 是字符串（源头是数字，已 String() 化），关联存储时直接用，别重复转。
 - **未实现（明确不在本卡）**：作业列表拉取 → P0-2-5（Steven 拍板，避免死代码 + 无处验收）；DELETE 撤销授权 → P0-2-9；任何前端 UI → P0-2-4。
