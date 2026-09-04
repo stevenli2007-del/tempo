@@ -1,6 +1,7 @@
 import Link from 'next/link'
 import { notFound, redirect } from 'next/navigation'
 
+import { CanvasLink } from '@/components/courses/canvas-link'
 import { CourseActions } from '@/components/courses/course-actions'
 import { SyllabusUpload } from '@/components/courses/syllabus-upload'
 import { SectionEditor } from '@/components/sections/section-editor'
@@ -93,6 +94,11 @@ export default async function CourseDetailPage({ params }: PageProps) {
         </div>
 
         <CourseActions course={detail} />
+
+        <section className="rounded-xl border border-border bg-card p-5 shadow-sm">
+          <h2 className="mb-3 text-sm font-medium text-foreground">Canvas 关联</h2>
+          <CanvasLink courseId={detail.id} canvasCourseId={detail.canvasCourseId} />
+        </section>
 
         <section className="rounded-xl border border-border bg-card p-5 shadow-sm">
           <h2 className="text-sm font-medium text-foreground">Syllabus</h2>

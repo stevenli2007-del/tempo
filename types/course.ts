@@ -27,6 +27,14 @@ export type Course = {
   instructorName: string | null
   isDemo: boolean
   isArchived: boolean
+  /**
+   * 关联的 Canvas 课程 ID（`courses.canvas_course_id`），未关联时为 null。
+   *
+   * P0-2-4 新增：关联 UI 要展示「已关联到哪门 Canvas 课」，光有布尔值不够 ——
+   * 布尔只能说"关联了"，说不出"关联的是哪门"，解除/更换时用户无从判断。
+   * 这不是敏感信息（只是 Canvas 的课程号），可以安全地下发到前端。
+   */
+  canvasCourseId: string | null
   /** 由 canvas_course_id 是否为空派生，不单独存字段。 */
   canvasLinked: boolean
   lastSyncedAt: string | null

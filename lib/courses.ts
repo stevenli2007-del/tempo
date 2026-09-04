@@ -39,6 +39,7 @@ export function toCourse(row: CourseRow): Course {
     instructorName: row.instructor_name,
     isDemo: row.is_demo,
     isArchived: row.is_archived,
+    canvasCourseId: row.canvas_course_id,
     canvasLinked: row.canvas_course_id !== null,
     lastSyncedAt: row.last_synced_at,
     syncStatus: toSyncStatus(row.sync_status),
@@ -165,6 +166,52 @@ export function parseUpdateCourseInput(body: unknown): ValidationResult<UpdateCo
   if (c !== undefined) patch.courseCode = c
   if (i !== undefined) patch.instructorName = i
   return { ok: true, value: patch }
+}
+
+// ---------- Canvas 关联（P0-2-4） ----------
+
+/**
+ * Canvas 课程 ID 的外形约束。
+ *
+ * Canvas 给的是数字（`1558822`），Tempo 只当字符串存（ID 不参与算术）。
+ * 字符集限制到「字母数字 + 连字符 + 下划线」并限长，是为了挡住误粘贴的
+ * 一整段文本 —— 那种值关联进去，同步时只会变成一个永远拉不到的课程号。
+ *
+ * 刻意**不**去 Canvas 校验这个 ID 是否真的存在：那要多发一次上游请求
+ * （连带限流与失败分支），而 UI 只能从列表里选，直接调 API 的人填错了
+ * 最坏也就是同步时拿不到作业（P0-2-5 会明确报错）。不为一个理论上的
+ * 误用付出一次真实的网络往返。
+ */
+const CANVAS_COURSE_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/
+
+/**
+ * 校验 `POST /canvas-link` 的请求体，返回 trim 后的 Canvas 课程 ID。
+ */
+export function parseCanvasLinkInput(body: unknown): ValidationResult<string> {
+  if (typeof body !== 'object' || body === null) {
+    return { ok: false, message: '请求体必须是 JSON 对象' }
+  }
+
+  const value = (body as Record<string, unknown>).externalCourseId
+  if (typeof value !== 'string' || value.trim() === '') {
+    return { ok: false, message: 'externalCourseId 必填' }
+  }
+
+  const externalCourseId = value.trim()
+  if (!CANVAS_COURSE_ID_PATTERN.test(externalCourseId)) {
+    return { ok: false, message: 'externalCourseId 不是合法的 Canvas 课程 ID' }
+  }
+
+  return { ok: true, value: externalCourseId }
+}
+
+/**
+ * 关联与解除关联都只动这一列 —— 列名只在 `lib/courses.ts` 出现一次。
+ *
+ * @param externalCourseId 关联目标；`null` = 解除关联。
+ */
+export function toCanvasCourseIdUpdate(externalCourseId: string | null): { canvas_course_id: string | null } {
+  return { canvas_course_id: externalCourseId }
 }
 
 // ---------- 写库用的列映射 ----------
