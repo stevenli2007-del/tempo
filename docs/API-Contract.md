@@ -75,6 +75,7 @@
 | 415 | 文件类型不支持 | `unsupported_file_type` |
 | 422 | **业务校验失败**：派生任务被非法编辑等 | `derived_task_immutable` / `validation_failed` |
 | 429 | 触发节流或 Canvas 限流 | `rate_limited`（带 `retryAfter` 秒） |
+| 502 | Canvas 上游故障（5xx / 超时 / 网络 / 坏 JSON） | `upstream_error` |
 | 500 | 服务端异常 | `internal_error`（**message 不暴露内部细节**） |
 
 ### 1.5 其他硬性规则
@@ -503,12 +504,26 @@ syllabus 数据、根本没有同步这回事。硬编码 `staleWarning: false` 
 删除加密凭证 + 将 `status` 置为 `revoked` + 停止同步。**已同步的 `tasks` 保留**（用户的学习记录不该因为断开连接而消失），但同步状态显示为"未连接"。
 
 ### `GET /api/v1/canvas/courses`
-服务端代理拉取用户的 Canvas 课程列表，供关联 UI 使用。
+服务端代理拉取用户的 Canvas 课程列表，供关联 UI 使用。**忠实返回全部 active enrollment 课程（含 term），代理层不做学期/教学课程筛选** —— 是否过滤掉 "Default Term"/"Projects" 里的入学流程类模块（GBO / PartySafe 等）是 P0-2-4 关联 UI 的产品决策。
 
 ```jsonc
-{ "data": [ { "externalId": "12345", "name": "MATH 53 - Multivariable Calculus", "term": "Fall 2026" } ] }
+// response 200
+{ "data": [ { "externalId": "1557957", "name": "MATH 53-LEC-001", "term": "Fall 2026" } ] }
 ```
-⚠️ **只读课程列表**，不返回成绩、花名册等任何其他信息（最小权限，见 `Security-Privacy.md`）。
+- `name` = Canvas 的 `course_code`（非完整课程名）—— 关联 UI 需靠它区分同名课程的 lecture/section（Steven 账号实测 Math 53 分 LEC/DIS 两个 id）。
+- `term` = Canvas term 名，可能为 `"Default Term"` / `"Projects"`（入学培训类模块的 term），缺失时为 `null`。
+- ⚠️ **只读课程列表**，不返回成绩、花名册等任何其他信息（最小权限，见 `Security-Privacy.md`）。
+
+**错误码**（P0-2-3 实现补充）：
+
+| HTTP | `code` | 触发 |
+|---|---|---|
+| 401 | `unauthenticated` | 未登录 |
+| 404 | `not_found` | 未连接 Canvas（无凭据；与 `GET /api/v1/canvas/credentials` 同口径，ADR-010） |
+| 401 | `credential_invalid` | 已连接但 Canvas 拒绝该 token（401/403）→ UI 应引导用户重新生成 |
+| 429 | `rate_limited` | Canvas 限流 |
+| 502 | `upstream_error` | Canvas 上游故障（5xx / 超时 / 网络 / 坏 JSON）。这是"服务端代理第三方"失败，不伪装成 Tempo 自己的 500 |
+
 
 ### `POST /api/v1/courses/:id/canvas-link`
 ```jsonc
