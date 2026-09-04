@@ -29,8 +29,12 @@
 
 ## 当前进度指针
 
-**当前 task**：`P0-1-10` Demo Workspace —— ✅ **代码完成，待 Steven 验收**（Bud 2026-09-03 自测 14/14 冒烟 + dashboard SSR 渲染验证全过；浏览器交互归 Steven 本地验收）
+**当前 task**：`P0-1-10` Demo Workspace —— ✅ **已验收通过（2026-09-04 09:18，Steven 浏览器验收）**。**下一张卡 = M2 动态感知（Canvas 同步），入口 P0-2-1 已 ✅**，待 Steven 定 P0-2 序列在新会话开工。
 
+> ✅ **P0-1-10 已验收通过（2026-09-04 09:18，Steven 浏览器验收）**：点「先看看效果」成功产生 CHEM 1A 示例课程。**P0-1-9 + P0-1-10 双收口，M1 静态理解 + Demo Workspace 冷启动全部完成**。
+> - 期间修复一个生产 500（commit `0f922c3`）：删 auth 测试账号会经 `profiles.auth.users` 外键 **ON DELETE CASCADE** 连带删掉该 user 的 profiles 行，但浏览器 session 仍有效 → seed/course-create 写库时外键违反 500。新增 `lib/profiles.ts` 的 `ensureProfile()`（幂等 upsert），在 `demo/seed` / `demo` / `courses` POST 三个 handler 顶部调用兜底。本地复现（删 profile → seed 原 500、修后 201）验证通过。
+> - ⚠️ **清理遗留测试 auth 账号时注意**：Dashboard 删 `@example.com` 测试号若删到你当前登录的账号，会连带清 profile（现已自动兜底重建，但会造成困惑）。调试遗留号：`debug-seed-*` ×2、`orphan-profile-*` ×1、`ui-check-*` ×1（均 `@example.com`），待下次清理。
+>
 > ✅ **P0-1-9 已验收通过（2026-09-03 16:10，Steven 浏览器验收）**：三个端点/UI 全部通过，测试账号已由 Steven 删除。**M1 静态理解链路完整收口**（上传 → 提取 → 解析 → 落库 → 编辑 → 展示 → 总览 → 标记完成）。commit `8022643`/`1b4864c`/`f5065b7`/`777712c`，Vercel 部署 `1b4864c` success。
 >
 > ✅ **P0-1-10 实现完成（2026-09-03，Bud）**：Demo 数据源 = Steven 提供的真实 syllabus `Syllabus 2.pdf`（CHEM 1A Fall 2026，选项 A）。五板块由 `lib/parse` 真实解析结果固化进 `lib/demo/seed-data.ts`（非手写），seed 端点复用 `persistParsedSections` 落库 + `syncExamToTask` 派生考试任务（与正常上传解析同一套落库逻辑）。无 LLM 实时调用。冒烟 14/14 + SSR 渲染验证通过。
@@ -39,9 +43,9 @@
 > - 演示课程**不建 syllabi 行**（`file_url`/`file_name` 为 NOT NULL，避免悬挂 Storage 对象 + 失效下载链接）；卡片显示「还没有 syllabus」属预期。
 > - 🔜 **下一张卡**：M2 动态感知（Canvas 同步），入口 `P0-2-1` 已 ✅，待 Steven 定 P0-2 序列开工。
 
-> 🛑 **本轮收工状态（2026-09-03 16:12，Steven 收工）**：**P0-1-9 验收通过 ✅ → M1 静态理解链路完整收口**。本轮 Bud 两次按 `CodingRules.md` §5 在模糊指令「Please continue.」处停下确认（未越界开工）。下一张卡 **P0-1-10 Demo Workspace**，Steven 将在**新会话**开工，开工前需先定示例数据来源（A 真实公开 syllabus / B 合成示例）。
+> 🛑 **本轮收工状态（2026-09-04 09:18，Steven 收工）**：**P0-1-10 验收通过 ✅ → 冷启动闭环完成，M2 待开工**。Steven 在新会话点「先看看效果」成功产生 CHEM 1A 示例课程，P0-1-10 浏览器验收通过。期间修复生产 500（`ensureProfile` 兜底，commit `0f922c3`，见上）。**下一张卡 = M2 动态感知（P0-2 Canvas 同步），入口 P0-2-1 已 ✅**，Steven 将在新会话定 P0-2 序列开工。调试遗留测试号 `debug-seed-*` ×2 / `orphan-profile-*` ×1 / `ui-check-*` ×1（`@example.com`）待下次清理。
 
-> 🛑 **本轮收工状态（2026-09-03 16:12，Steven 收工）**：**P0-1-9 验收通过 ✅ → M1 静态理解链路完整收口**。本轮 Bud 两次按 `CodingRules.md` §5 在模糊指令「Please continue.」处停下确认（未越界开工）。下一张卡 **P0-1-10 Demo Workspace**，Steven 将在**新会话**开工，开工前需先定示例数据来源（A 真实公开 syllabus / B 合成示例）。
+> 🛑 **历史存档 · 勿据此行动（2026-09-03 16:12，Steven 收工）**：**P0-1-9 验收通过 ✅ → M1 静态理解链路完整收口**。本轮 Bud 两次按 `CodingRules.md` §5 在模糊指令「Please continue.」处停下确认（未越界开工）。下一张卡 **P0-1-10 Demo Workspace**，Steven 将在**新会话**开工，开工前需先定示例数据来源（A 真实公开 syllabus / B 合成示例）。
 > - ✅ **测试账号已全部清理（2026-09-03 16:10，Steven 手动删）**：`p19-a/b@test.dev`（本地）+ `p19-prod-a/b@test.dev`（生产）已从 auth.users 移除。**auth.users 现在无测试残留**。
 > - 工作区干净（无 `.tmp-*` 残留），`origin/main` 已同步到 `777712c`。
 
@@ -211,7 +215,7 @@
 | **P0-1-7** | Workspace CRUD：创建（学期 + 课程名必填，编码/教师选填）、列表按学期分组、编辑、删除 | Bud | P0-0-6 | 建课后出现在总览页与列表；删除有二次确认 | ✅ |
 | **P0-1-8** | 课程详情页：展示五板块最终信息 | Bud | P0-1-6, P0-1-7 | 保存后的数据完整展示；缺失项显示 TBD 而非空白 | ✅ 已验收（2026-09-03 11:50） |
 | **P0-1-9** | 总览页 v1：课程卡片（显示近期 1-2 个任务）+ 跨课程近期任务列表（仅 syllabus 数据，按日期排序） | Bud | P0-1-8 | 能看到"最近 7 天所有课程要做的事"；可跳转课程详情 | ✅ **2026-09-03 验收通过**（本地 64/64 + 生产 26/26）。**M1 收口** |
-| **P0-1-10** | 冷启动：**Demo Workspace**（预置示例课程，含已解析 syllabus 与示例任务） | Bud | P0-1-9 | 新用户从进入站点到看到有内容的总览页 ≤ 30 秒 | ✅ 代码完成（2026-09-03，Bud 自测 14/14 冒烟 + SSR 渲染验证；待 Steven 浏览器验收） |
+| **P0-1-10** | 冷启动：**Demo Workspace**（预置示例课程，含已解析 syllabus 与示例任务） | Bud | P0-1-9 | 新用户从进入站点到看到有内容的总览页 ≤ 30 秒 | ✅ **2026-09-04 验收通过**（Steven 浏览器：点「先看看效果」产生 CHEM 1A 示例） |
 | **P0-1-11** | 解析过程可视化：上传后先显示文本预览，再逐步填充五个板块 + 进度提示 | Bud | P0-1-6 | 用户不再干等；每一步有明确状态反馈 | ⚪ |
 
 ---
@@ -418,7 +422,7 @@
 - **✅ Steven 验收（2026-09-03 11:50，在 P0-1-8 详情页上验）**：展开 / 切 tab / 打字 / 保存 / 上移下移 / 解析按钮全部通过。测试账号已删。
 - **剩余留白**（已确认可接受）：① dashboard 一次性加载所有课程的五板块 —— **已随 P0-1-8 卡片瘦身消失**；② 解析触发是同步等待（约 3-5 秒），过程动画归 P0-1-11。
 
-#### 🎫 P0-1-10 · Demo Workspace（冷启动）· ✅ **代码完成（2026-09-03，Bud 自测 14/14 冒烟 + SSR 渲染验证；待 Steven 浏览器验收）**
+#### 🎫 P0-1-10 · Demo Workspace（冷启动）· ✅ **已验收通过（2026-09-04 09:18，Steven 浏览器验收）· 勿重做**
 - **做什么**：新用户一键生成预置示例课程（含已解析 syllabus 与示例任务），标记 `is_demo=true`；可一键清空。让"从进入站点到看到有内容的总览页 ≤ 30 秒"。
 - **数据源（Steven 拍板选项 A）**：`Syllabus 2.pdf` = CHEM 1A Fall 2026（Berkeley Dr. Debjani Roy & Dr. Alexis Shusterman），**真实公开 syllabus**。五板块由 `lib/parse` 真实解析结果固化进 `lib/demo/seed-data.ts`（非手写），每条 `sourceExcerpt` 是逐字摘录，抗幻觉不破。
 - **改哪些文件**：
@@ -433,8 +437,11 @@
   2. **`courseOutline` 与 `officeHours` 按 Steven 拍板留空**：前者是解析器对 L1–L40 讲座编号课表稳定漏抽的真 bug（归 P0 期后改进卡）；后者原文无具体时间，模型正确返回空。
   3. **演示课程不建 syllabi 行**：`syllabi.file_url`/`file_name` 为 NOT NULL，建行必指向 Storage 对象，否则卡片下载入口 404。无 syllabi 行时卡片显示「还没有 syllabus」属预期。
   4. **删 demo 课程靠 `ON DELETE CASCADE`**：五板块 + 派生的 tasks 全对 `courses` 设了级联；`courses` 是 `for all` RLS 策略，`DELETE` 放行，只能删自己的。
-- **自测（Bud，2026-09-03）**：`tsc` ✅ ｜ `lint` ✅ ｜ `build` ✅ ｜ 冒烟 **14/14**（seed 201 + isDemo、重复 409、五板块落库 + 派生 4 条 exam 任务、卡片近期任务含考试、跨用户隔离、delete 级联清子数据 + 幂等）+ dashboard SSR 渲染验证（课程名 / 「示例」badge / 派生考试均渲染；已 seed 后「先看看效果」入口不出现）。**遗留两个测试 auth 账号待 Steven 在 Supabase Dashboard 删除**。
-- **🔜 下一张卡**：M2 动态感知（Canvas 同步），`P0-2-1` 已 ✅，待 Steven 定 P0-2 序列开工。
+- **自测（Bud，2026-09-03）**：`tsc` ✅ ｜ `lint` ✅ ｜ `build` ✅ ｜ 冒烟 **14/14**（seed 201 + isDemo、重复 409、五板块落库 + 派生 4 条 exam 任务、卡片近期任务含考试、跨用户隔离、delete 级联清子数据 + 幂等）+ dashboard SSR 渲染验证（课程名 / 「示例」badge / 派生考试均渲染；已 seed 后「先看看效果」入口不出现）。
+- **修复（Bud，2026-09-03，commit `0f922c3`）**：生产点「先看看效果」报 500 —— 根因是删 auth 测试账号经 `profiles.auth.users` 外键 **ON DELETE CASCADE** 连带删掉该 user 的 profiles 行（browser session 仍有效），写 `profiles.demo_seeded_at` 撞外键违反。新增 `lib/profiles.ts` `ensureProfile()` 幂等 upsert 兜底，在 `demo/seed` / `demo` / `courses` POST handler 顶部调用。本地复现（删 profile → seed 原 500、修后 201）✅。
+- **✅ Steven 验收（2026-09-04 09:18，Steven 浏览器验收）**：点「先看看效果」成功产生 CHEM 1A 示例课程。**P0-1-10 验收通过 · 勿重做**。
+- **⚠️ 清理遗留测试 auth 账号时注意**：Dashboard 删 `@example.com` 测试号若删到当前登录账号，会连带清 profile（现已自动兜底重建）。调试遗留号 `debug-seed-*` ×2、`orphan-profile-*` ×1、`ui-check-*` ×1 待下次清理。
+- **🔜 下一张卡**：M2 动态感知（Canvas 同步），入口 `P0-2-1` 已 ✅，待 Steven 在新会话定 P0-2 序列开工。
 
 #### 🎫 P0-1-9 · 总览页 v1 · ✅ **已验收通过（2026-09-03 16:10，Steven 浏览器验收）· 勿重做**
 - **做什么**：跨课程近期任务列表（按日期排序）+ 卡片近期 1-2 个任务 + 「标记完成」。**这是 M1 的最后一张卡**，做完 M1 静态理解链路完整收口。
@@ -609,3 +616,4 @@ P0-0 基础设施
 | 2026-09-03 | **P0-1-9 生产验证通过**：Vercel 部署 `1b4864c` success，生产冒烟 **26/26**（端点已部署两个、range 窗口与排序、分页、跨用户隔离、`upcomingTasks`、PATCH 标记完成与 422、越权 404、`x-request-id` 回传、dashboard SSR、数据清理）。生产验证前先用 `gh api .../deployments` 确认部署 —— 首次查询时最新部署仍是昨天的 `0587138`，新路由 404 而旧路由 401，按 `CodingRules.md` §10.1 第 7 条判定为部署延迟而非代码问题，等待后自动创建。**待 Steven 手动**：删测试账号 `p19-a/b@test.dev`（本地）+ `p19-prod-a/b@test.dev`（生产） |
 | 2026-09-03 | **P0-1-9 验收通过 ✅ → M1 静态理解链路完整收口（2026-09-03 16:10，Steven 浏览器验收）**：三项浏览器交互全通过（勾 checkbox 标记完成并刷新 / 展开「已完成 N 项」看到删除线 / 卡片显示近期任务），测试账号由 Steven 手动删除，auth.users 无残留。commit `8022643`（代码）+ `1b4864c`（文档）+ `f5065b7`（生产验证）+ `777712c`（踩坑库），Vercel 部署 `1b4864c` success。**本轮 Bud 两次在模糊指令「Please continue.」处按 `CodingRules.md` §5 停下确认，未越界开工** —— 该规则第二次生效，可确认「Steven 会重复用 Please continue. 回应 Done Report」是稳定模式。**下一张卡 P0-1-10 Demo Workspace，Steven 在新会话开工**；开工前唯一阻塞是「示例数据来源」：A 真实公开 syllabus（推荐，代入感强）/ B 合成示例（须明确标注为演示数据，否则与产品「抗幻觉」立场冲突）。契约 §8 的 `POST /api/v1/demo/seed` + `DELETE /api/v1/demo` 已定义，不阻塞实现 |
 | 2026-09-03 | **P0-1-10 Demo Workspace 代码完成（待 Steven 浏览器验收）**：示例数据 = Steven 提供的真实 `Syllabus 2.pdf`（CHEM 1A Fall 2026，选项 A）。五板块由 `lib/parse` 真实解析结果固化进 `lib/demo/seed-data.ts`，seed 端点复用 `persistParsedSections` 落库 + `syncExamToTask` 派生考试任务，**运行时零 LLM 依赖**。新增 `POST /api/v1/demo/seed`（重复 409 already_linked、失败回滚课程）+ `DELETE /api/v1/demo`（级联清子数据 + 复位 `demo_seeded_at`、幂等）+ `components/courses/demo-controls.tsx`（「先看看效果」CTA + 「清空示例数据」）+ 课程卡「示例」badge + dashboard 空状态入口。**Steven 拍板留空** `courseOutline`（解析器对 L1–L40 讲座编号课表稳定漏抽，已记 bug 归 P0 期后改进卡）与 `officeHours`（原文无具体时间，模型正确返回空）；演示课程**不建 syllabi 行**（避免悬挂 Storage 对象）。自测 `tsc`/`lint`/`build` 全绿 + 冒烟 **14/14** + dashboard SSR 渲染验证全过。**遗留两个测试 auth 账号待 Steven 在 Supabase Dashboard 删除**。DeepSeek 期间触发 429 每日限流（非余额耗尽，约 2026-09-04 13:04 北京时间重置），不阻塞本卡 |
+| 2026-09-04 | **P0-1-10 验收通过 ✅（2026-09-04 09:18，Steven 浏览器验收）+ 一处生产 500 修复**：Steven 点「先看看效果」成功产生 CHEM 1A 示例课程，**P0-1-10 验收通过 · 勿重做**，冷启动闭环（M1 链路 + Demo Workspace）全部打通。此前生产点「先看看效果」报 500 的根因排查与修复（commit `0f922c3`）：**删 auth 测试账号会经 `profiles.auth.users` 外键 ON DELETE CASCADE 连带删掉该 user 的 profiles 行，但 browser session 仍有效 → seed/course-create 写 `profiles.demo_seeded_at` / insert courses 撞外键违反 → 500**。新增 `lib/profiles.ts` 的 `ensureProfile()`（幂等 upsert，`on conflict id do nothing`，RLS WITH CHECK 放行）在 `demo/seed` / `demo` / `courses` POST handler 顶部兜底调用。本地复现孤儿场景（删 profile → seed 原 500、修后 201）验证通过，`tsc`/`lint`/`build` 全绿。进度指针推进至 **M2 动态感知（P0-2 Canvas 同步）**，入口 P0-2-1 已 ✅，待 Steven 在新会话定 P0-2 序列开工。**提醒**：Dashboard 删 `@example.com` 测试号若删到当前登录账号会连带清 profile（现已自动兜底重建）；调试遗留号 `debug-seed-*` ×2、`orphan-profile-*` ×1、`ui-check-*` ×1 待下次清理 |
