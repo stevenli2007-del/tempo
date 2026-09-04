@@ -40,11 +40,11 @@ interface CourseCardProps {
   /**
    * 近期未完成的任务（最多 2 条）。已完成的不算 —— 卡片的语义是"接下来要做什么"。
    *
-   * `null` 表示**没能加载到**，不是"这门课没有任务"。两者在 UI 上必须分开：
-   * 把加载失败渲染成"没有任务"等于静默的错误数据（CodingRules 7）。
+   * 永远传数组：`[]` 表示这门课没有未完成的任务（正常状态），
+   * 非空表示有任务。**不再用 `null` 表示"加载失败"** —— 那种状态改由 `loadError` 控制。
    */
-  upcomingTasks: UpcomingTaskView[] | null
-  /** tasks 查询失败时的错误原文。仅在 `upcomingTasks === null` 时展示。 */
+  upcomingTasks: UpcomingTaskView[]
+  /** tasks 查询失败时的错误原文。仅在非空时显示「加载失败」分支。 */
   loadError?: string | null
 }
 
@@ -115,17 +115,15 @@ export function CourseCard({ course, syllabus, upcomingTasks, loadError }: Cours
           </p>
           <p className="mt-2 text-xs text-muted-foreground">{syllabusStatusText(syllabus)}</p>
 
-          {upcomingTasks === null ? (
+          {loadError ? (
             <div className="mt-2 space-y-1">
               <p className="text-xs text-destructive">近期任务加载失败</p>
-              {loadError ? (
-                <p
-                  className="break-all text-[10px] leading-tight text-muted-foreground/80"
-                  title={loadError}
-                >
-                  {loadError}
-                </p>
-              ) : null}
+              <p
+                className="break-all text-[10px] leading-tight text-muted-foreground/80"
+                title={loadError}
+              >
+                {loadError}
+              </p>
             </div>
           ) : upcomingTasks.length === 0 ? (
             <p className="mt-2 text-xs text-muted-foreground/70">近期没有待办</p>

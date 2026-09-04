@@ -58,15 +58,21 @@ function formatDue(
   return { label: DUE_FORMATTER.format(due), isOverdue: due.getTime() < now.getTime() }
 }
 
-/** 卡片近期任务 → 视图模型。`undefined`（没查到）与 `[]`（确实没有）要保持区分。 */
-function toUpcomingViews(
-  tasks: UpcomingTask[] | undefined,
-  now: Date,
-): UpcomingTaskView[] | null {
-  if (!tasks) {
-    return null
-  }
-  return tasks.map((task) => {
+/**
+ * 卡片近期任务 → 视图模型。
+ *
+ * `undefined` 表示**没查到这门课的任何任务**（"近期没有待办"语义，不当错误渲染）。
+ * `[]` 也表示"没查到任务"（显式空数组）。
+ *
+ * 把这两种合并到 `[]` —— 旧版本用 `null` 表示"加载失败"、与 undefined 区分，
+ * 但实际上：
+ *   ① "加载失败"应**由调用方**显式判断 `tasksError` 后决定渲染分支，而不是依赖
+ *      `undefined` 这个隐式信号（Map.get 不存在与查询失败在 JS 里**长得一样**）；
+ *   ② 卡片只展示"这门课没有未完成的任务"，与"加载失败"是两种不同的状态，分开用 prop 传。
+ */
+function toUpcomingViews(tasks: UpcomingTask[] | undefined, now: Date): UpcomingTaskView[] {
+  const list = tasks ?? []
+  return list.map((task) => {
     const { label, isOverdue } = formatDue(task.dueDate, now)
     return { id: task.id, title: task.title, dueLabel: label, isOverdue }
   })
@@ -277,13 +283,11 @@ export default async function DashboardPage() {
                   key={course.id}
                   course={course}
                   syllabus={syllabiByCourse.get(course.id) ?? null}
-                  // 任务查询失败时 byCourse 是空 Map，get 出来是 undefined → 传 null
-                  // → 卡片显示「加载失败」而不是「近期没有待办」。
-                  // 错误原文也带过去，便于一眼定位是 PostgREST 列缺失还是 RLS 问题。
-                  upcomingTasks={toUpcomingViews(
-                    tasksError ? undefined : upcomingByCourse.get(course.id),
-                    now,
-                  )}
+                  // 卡片分支不再用「undefined → null」隐式判定加载失败：
+                  // Map.get() 不存在（这门课没任务）与查询错误是两种不同状态，
+                  // 全部转成「空数组」让卡片显示「近期没有待办」；
+                  // 真正的加载失败由 `loadError`（来自 tasksError）显式控制。
+                  upcomingTasks={toUpcomingViews(upcomingByCourse.get(course.id), now)}
                   loadError={tasksError}
                 />
               ))}
