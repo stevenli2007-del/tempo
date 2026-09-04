@@ -255,6 +255,27 @@ Steven 说「完成 P0-1-5b 就收手」，Bud 交付 5b 后收到含糊的「Pl
     最小实现：只接受纯主机名（正则 + 拒绝协议/端口/路径），并显式拒绝 IP、localhost 与内网段。
     本项目实现见 `lib/canvas/validate.ts`。
 
+12. 🔴 **节流 / 限流类检查要排在「是否真的会消耗那个资源」的判定之后。**
+    限流保护的是某个具体资源（外部 API 额度、发信额度）。若把它排在最前面，
+    **一个请求都不会发的情形也会被拦，而它盖住的往往是真正可行动的错误** ——
+    实测反例：同步端点原本先查节流，结果 token 已失效的用户点同步看到的是
+    「同步太频繁，27 秒后重试」，而正确提示应是「凭证失效，请重新生成 token」。
+    **顺序原则**：先判定"这次到底要不要消耗资源"（有没有目标、凭证能不能用），
+    确认要消耗了再校验频率。这样每种返回都指向用户真正能做的那个动作。
+    本项目顺序：锁 → 凭据是否存在 → 凭据是否可用 → 有没有目标 → 节流。
+
+13. 🔴 **写「外部源 → 本地表」的同步，三条不变量，缺一条就会出事故。**
+    ① **删除判定必须绑定"本次拉取是否完整"** —— 翻页被熔断截断 / 中途失败时
+    把没拿到的行判成"外部已删除"，是同步里最伤用户的一类事故（数据凭空消失）。
+    宁可晚一轮再删，也不要在不完整的结果集上做删除。
+    ② **时间比较用 epoch 不用字符串** —— 同一个时刻有两种合法写法
+    （Postgres 回 `2026-09-04T06:59:00+00:00`、Canvas 给 `2026-09-04T06:59:00Z`），
+    直接 `===` 会永远判成"变了"，导致每次同步把全表重写一遍。
+    ③ **写入字段是封闭集合，绝不含用户可改的字段** —— 整行 upsert 会把用户
+    标记的"已完成"打回未完成（这个 bug 在这类应用里最常见）。
+    配套：删除用软删除且**支持恢复**（外部误删后恢复很常见，软删除能自愈）。
+    本项目实现见 `lib/sync/canvas-tasks.ts` 文件头。
+
 ### 10.2 坑索引（细节在各自文档）
 
 | 坑 | 一句话 | 权威位置 |
@@ -275,6 +296,10 @@ Steven 说「完成 P0-1-5b 就收手」，Bud 交付 5b 后收到含糊的「Pl
 | PostgREST 构造器别抽成泛型函数 | 把带 `.select()` 的查询构造器当参数传给辅助函数 → `TS2589: Type instantiation is excessively deep`。排序这类几行的链式调用**各写一份**，比绕类型便宜 | `Phase-0-MVP.md` P0-1-9 执行卡、`lib/tasks.ts` 注释 |
 | `.lte()` 会吃掉 NULL 行 | 时间窗口过滤 `due_date <= X` 对 NULL 求值结果是 NULL（不成立），TBD 行整批消失。要显式 `or('due_date.lte."X",due_date.is.null')`（值含 `:` `+`，双引号包住） | `API-Contract.md` §5、`Phase-0-MVP.md` P0-1-9 执行卡 |
 | `tasks` 的 RLS 不看 `is_archived` | 策略 `tasks_via_course_all` 只经 `courses.user_id` 判定，归档课程的任务照样放行 → 总览页/单条查询都必须先取未归档课程 id 再 `.in('course_id', …)` | `lib/tasks.ts` 文件头注释、`Phase-0-MVP.md` P0-1-9 执行卡 |
+| 同步的三条不变量 | ① 删除判定绑定「本次拉取是否完整」；② 时间比较用 epoch 不用字符串（同刻两种写法）；③ 写入字段封闭、不含用户可改字段 | 本节 10.1 第 13 条、`lib/sync/canvas-tasks.ts` 文件头、`Sync-Strategy.md` §7 |
+| 节流检查的位置 | 排在「是否真的会发请求」之后，否则会盖住真正可行动的错误（token 失效被说成"太频繁"） | 本节 10.1 第 12 条、`Sync-Strategy.md` §4 |
+| `courses.sync_status` 没有 `partial` | CHECK 只放行 never/success/failed。`partial` 是**一批**同步的属性，记在 `sync_runs.status`；逐课只有成功/失败。别为此改表结构（改 CHECK 要 Steven 手动跑 SQL） | `lib/courses.ts` `toSyncStateUpdate()` 注释、`API-Contract.md` §6 |
+| `last_seen_at` 只在变化时刷新 | `tasks` 上有 `trg_tasks_updated_at` 触发器，任何 UPDATE 都刷 `updated_at` —— "每次同步刷 last_seen_at"与"不刷 updated_at"物理上不可兼得，实现选了后者 | `lib/sync/canvas-tasks.ts` 文件头、`Sync-Strategy.md` §7 |
 
 ---
 
