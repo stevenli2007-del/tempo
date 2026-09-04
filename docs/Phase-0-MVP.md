@@ -29,7 +29,14 @@
 
 ## 当前进度指针
 
-**当前 task**：`P0-2-5` 首次全量同步（Canvas 作业 → `tasks` 落库）—— ⚪ **未开工，Steven 将在新对话框开这张卡**。开工提示见 [P0-2-4 执行卡](#-p0-2-4--课程关联-ui-已验收通过-2026-09-04-1136-steven-浏览器验收-勿重做) 末尾。
+**当前 task**：`P0-2-5` 首次全量同步（Canvas 作业 → `tasks` 落库）—— 🔵 **代码完成（2026-09-04 20:10），自测 80/80，待 Steven 验收**。执行卡见 [P0-2-5](#-p0-2-5--首次全量同步canvas-作业--tasks-落库-代码完成-2026-09-04-待-steven-验收)。
+
+> 🔵 **P0-2-5 交付摘要（2026-09-04）**：`POST /api/v1/sync/now`（契约 §6）+ `lib/sync/canvas-sync.ts`（编排：串行 / 重试 / 熔断 / 状态落库）+ `lib/sync/canvas-tasks.ts`（落库：去重 / 增量更新 / 软删除 + 恢复）+ `lib/sync/runs.ts`（`sync_runs` 映射）+ `lib/canvas/assignments.ts`（作业端点与映射）+ `canvasGet` 加 `Link` 翻页能力；`POST canvas-link` 成功后**接上了按课程触发同步**（P0-2-4 刻意留的口子）。
+> - **Steven 拍板的三件事**：① **无 due date 的作业照样同步，落库为 TBD**（实测 CHEM 1A 25 条里 9 条无日期：考勤打卡 + 4 个考试）；② **关联成功后立刻触发一次该课程的同步**；③ **跳过 `upcoming_events` 主扫描**，只走逐课 `assignments`。
+> - **真实数据实测**：CHEM 1A 25 条 / PHYSICS 7A 6 条 / MATH 53 LEC **0 条**（空课程不是失败态）；一趟同步三门课串行耗时 6.0 秒。
+> - **自测 80/80**（本地 52 + 多课程 28）：重复同步 created/updated/deleted 全 0；人为改坏标题 + 日期 + 标记完成后同步 → 标题与日期被改回、**`status=done` 没被覆盖**；幽灵作业 → 软删除且可恢复；假 token → 课程 failed + 凭证置 error + 再次调用 401；一门课失败 → 整批 `partial` 且其他课仍 success。
+> - ⏸ **P0-2-6 接手的东西**：手动刷新按钮 / 打开应用自动同步（`app_open`）/ 定时兜底 `/sync/scheduled`（编排函数已支持 `trigger` 与 `App_open` 节流常量，只差触发入口）。
+>
 
 > ✅ **P0-2-4 已验收通过（2026-09-04 11:36，Steven 浏览器验收）· 勿重做**：`POST`/`DELETE /api/v1/courses/:id/canvas-link` + `components/courses/canvas-link.tsx`（详情页关联控件：已关联态 / 选择列表 / 解除二次确认）+ `components/courses/canvas-connect-form.tsx`（未连接时内嵌 token 连接表单）+ `lib/canvas/group-courses.ts`（教学课 / 其他分组）。**接线位置：详情页 `/courses/[id]`「Canvas 关联」区块**（P0-1-8 拍板的「一门课的全部操作集中在详情页」）。
 > - **Steven 已拍板的噪音课策略**（P0-2-3 收尾）：教学课正常列 + 其他项单独一组带提示「这些看起来不像课程（入学 / 培训类），需要的话也可以关联」，**用户主动点才关联** —— 不静默过滤、不混排。
@@ -554,7 +561,7 @@
 | **P0-2-2** | 凭据加密存储（AES）+ 服务端 Canvas 请求封装（token 绝不出现在前端响应中） | Bud | P0-2-1（可用） | DB 中凭据为密文；抓包确认前端拿不到 token | ✅ **已验收（2026-09-04 10:14）** |
 | **P0-2-3** | Canvas API 客户端：拉取课程列表 + 作业列表（含 due date），含限流与错误处理 | Bud | P0-2-2 | 能正确拉取真实数据；API 报错有明确处理不崩溃 | ✅ **已验收（2026-09-04）** |
 | **P0-2-4** | 课程关联 UI：手动将 Canvas 课程与 Tempo Workspace 关联（不做自动匹配） | Bud | P0-2-3 | 可选择并关联；关联后状态可见；可解除关联 | ✅ **已验收通过（2026-09-04 11:36，Steven 浏览器验收）** |
-| **P0-2-5** | 首次全量同步：Canvas 作业 → `tasks` 表落库（去重 + 更新，不重复插入） | Bud | P0-2-4 | 重复同步不产生重复任务；due date 变更能更新 | ⚪ |
+| **P0-2-5** | 首次全量同步：Canvas 作业 → `tasks` 表落库（去重 + 更新，不重复插入） | Bud | P0-2-4 | 重复同步不产生重复任务；due date 变更能更新 | 🔵 **代码完成（2026-09-04）**：自测 80/80，待 Steven 验收 |
 | **P0-2-6** | 刷新机制：手动刷新按钮 + 后台定时轮询（**前期频率放宽**，数值见 `Sync-Strategy.md`） | Bud | P0-2-5 | 手动刷新可用；定时轮询按配置执行 | ⚪ |
 | **P0-2-7** | **同步状态 UI**：显示最后同步时间 + **失败可见性**（失败时展示最后成功时间与失败原因，绝不静默展示旧数据） | Bud | P0-2-6 | 断网/token 失效时显示明确错误提示，而非旧数据 | ⚪ |
 | **P0-2-8** | Token 过期提醒：基于**用户实际填写的过期时间**（非写死天数）提前提醒 | Bud | P0-2-2 | 用临近过期的测试 token 验证提醒触发 | ⚪ |
@@ -654,7 +661,56 @@
   - 拉取作业要用 `canvasGet`（P0-2-2）；⚠️ **同步必须串行**（Sync-Strategy §2 的 Canvas 并发惩罚），且**多门课要处理翻页** —— `canvasGet` 目前不返回 `Link` 头，需先给它加这个能力（对已验收 client 的独立扩展，别夹带在别的改动里）。
   - **重试与状态落库归本卡**（P0-2-2 的 client 刻意不重试、不写库，`isRetryable()` 已暴露给调用方）。
   - `POST /api/v1/courses/:id/canvas-link` 成功后的「触发一次同步」也在这里接上（契约 §6 写了，本卡刻意没做）。
-- **未实现（明确不在本卡）**：① 同步 → P0-2-5；② 撤销 Canvas 授权（DELETE credentials）→ P0-2-9；③ 设置页（F6）→ P0-3-2 —— 连接表单暂内嵌在详情页，将来可整体搬过去。
+- **未实现（明确不在本卡）**：① ~~同步 → P0-2-5~~（✅ P0-2-5 已接上：关联成功后按课程触发一次）；② 撤销 Canvas 授权（DELETE credentials）→ P0-2-9；③ 设置页（F6）→ P0-3-2 —— 连接表单暂内嵌在详情页，将来可整体搬过去。
+
+#### 🎫 P0-2-5 · 首次全量同步（Canvas 作业 → `tasks` 落库）（🔵 代码完成 2026-09-04，待 Steven 验收）
+
+- **做什么**：把已关联课程的 Canvas 作业拉下来、对齐到 `tasks`，并让用户能主动触发一次同步。**这是 M2 的核心卡** —— 之前四张卡都在铺路（凭据 / 客户端 / 关联），这一张才第一次让 Tempo 自己拿到数据。
+- **改哪些文件**：
+
+  | 文件 | 作用 |
+  |---|---|
+  | `lib/canvas/client.ts`（改） | `parseNextPath()`：解析 `Link` 头取下一页路径；成功结果多一个 `nextPath` 字段。**对已验收 client 的独立扩展**，是否翻页由编排层决定 |
+  | `lib/canvas/assignments.ts`（新） | `assignmentsPath()` + `toCanvasAssignments()`：端点形状与字段映射，过滤学生端看不见的条目 |
+  | `types/canvas.ts`（改） | 新增 `CanvasAssignment` |
+  | `lib/sync/canvas-tasks.ts`（新） | 落库：新增 / 增量更新 / 软删除 / 恢复。**绝不碰 `status`** |
+  | `lib/sync/runs.ts`（新） | `sync_runs` 唯一映射点：锁 / 节流查询 / 起止 |
+  | `lib/sync/canvas-sync.ts`（新） | 编排：串行、重试退避、三级熔断、课程级隔离、状态落账 |
+  | `types/sync.ts`（新） | `SyncSummary` / `SyncOutcome` / `SyncSkipReason` |
+  | `lib/courses.ts`（改） | `toSyncStateUpdate()`（列名只此一处） |
+  | `lib/canvas/credentials.ts`（改） | `touchCredentialSuccess` / `markCredentialFailed`；`loadDecryptedCredential` 多返回 `status` |
+  | `app/api/v1/sync/now/route.ts`（新） | 契约 §6 的手动同步端点 |
+  | `app/api/v1/courses/[id]/canvas-link/route.ts`（改） | 关联成功后触发一次该课程的同步 |
+
+- **关键约束**：
+  - 🔴 **串行，禁止 `Promise.all`** —— Canvas 对并发有 pre-flight penalty（Sync-Strategy §2）。串起来慢一点，但不会被限流反噬。
+  - 🔴 **三级熔断**（§6.3）：单次同步 ≤ 20 请求 / ≤ 60 秒 / 单课 ≤ 3 页。任一触发 → 剩下的课留到下一轮，整批标 `partial`（**不是 failed** —— 已经成功的部分是有效的）。
+  - 🔴 **401 / 403 绝不重试**（§8）：立即把凭证置 `error` 并停止后续课程。5xx / 超时 / 网络 → 最多 2 次（1s → 4s + 抖动）；429 → 最多 1 次（等 `Retry-After`，封顶 10 秒）。
+  - 🔴 **写入字段集合是封闭的**：`title` / `due_date` / `external_updated_at` / `last_seen_at` / `is_deleted`。**没有 `status`** —— 整行 upsert 会把用户勾掉的"已完成"打回 pending（Database.md 4.1）。
+  - 🔴 **拉取不完整时不做删除**（`complete=false`）：翻页被熔断截断时把没拿到的行判成"外部已删除"，是同步里最伤用户的一类事故。宁可晚一轮再删。
+  - 🔴 **`sync_status` 没有 `partial`**：DB 的 CHECK 只放行 never/success/failed。partial 是**一批**同步的属性，记在 `sync_runs.status`；逐课只有成功/失败。**为此不改表结构**（改 CHECK 要 Steven 手动跑 SQL）。
+  - **时间比较用 epoch 不用字符串**：Postgres 回 `2026-09-04T06:59:00+00:00`，Canvas 给 `2026-09-04T06:59:00Z` —— 直接 `===` 会永远判成"变了"，每次同步都写一遍全表。
+  - **唯一索引冲突（23505）降级处理**：批量插入失败时退化为逐条插入并跳过冲突行，一行撞车不让整门课失败。
+- **检查顺序（有讲究，别随手重排）**：锁 → 凭据是否存在 → 凭据是否可用 → 有没有课可同步 → **节流**。
+  节流**刻意排最后**：它保护的是 Canvas 的限流额度，一个请求都不会发的时候回"同步太频繁"是错误引导（实测踩到：token 失效时用户看到的是"27 秒后重试"，而真正该做的是重新生成 token）。
+- **三个实现期决策（Steven 2026-09-04 拍板 / Bud 落地）**：
+  1. **无 due date 的作业照样同步，落库为 TBD**。实测 CHEM 1A 的 25 条里 9 条没日期（考勤打卡 + 4 个考试）。代价：4 个考试会与 syllabus 的 `exam_dates` 派生任务同名并列（一个带日期、一个 TBD）—— **这是 P0-2-11「合并展示、考试以 `exam_dates` 为权威源」要收的口子**，本卡不替它做决定。
+  2. **关联成功后立刻同步那门课**（契约 §6 原文，P0-2-4 刻意留空）。三条边界：同步失败**不影响**关联结果（关联已成功写入，成败由 `courses.sync_status` 记账）；**不走节流**；结果**不进响应体**（响应仍是 course 对象，形状不变）。
+  3. **跳过 `upcoming_events` 主扫描**（Sync-Strategy §4 第 4 步）。两条理由：它只返回**未来**事件，会系统性丢掉"逾期未完成"的作业（与「不隐藏」原则直接冲突）；它不带 `updated_at`，做不了变更判定，逐课详情**依然非拉不可**，那个"1 个请求"省不下来，只是多出一个要合并的数据源。已在 `Sync-Strategy.md` §4 记录。
+- **自测（Bud，2026-09-04）**：`tsc` ✅ ｜ `lint` ✅ ｜ `build` ✅（`/api/v1/sync/now` 已进路由表）｜ **本地冒烟 52/52 + 多课程 28/28 = 80/80**，全部跑真实 PAT 与真实课程数据：
+  - 正常：CHEM 1A 落库 25 条（9 条 TBD），**逐条比对 Canvas 的标题与 due date 全部一致**；无重复（`source_id` 唯一）；`sync_runs` 记账正确。
+  - 幂等：重复同步 created/updated/deleted **全 0**（无变化不写库，不刷 `updated_at`）。
+  - 变更：人为改坏标题 + 日期并标记 done → 同步后标题与日期改回、**`status=done` 保留**。
+  - 删除：幽灵作业 → 软删除（`is_deleted=true`，行还在）；把真实作业标记删除 → 下次同步**恢复**。
+  - 失败：假 token → 课程 failed + 凭证置 `error` + 再次调用 401 `credential_invalid`；不存在的 Canvas 课 → `partial` + failures 带课程名，其他三门课仍 success（课程级隔离）。
+  - 边界：空课程（Math 53 LEC 0 条作业）是 success 不是失败；归档课不参与同步；30 秒内 429 + `retryAfter`；running 行 → 409。
+  - 越权：B 改 A 的任务 404；B 看不到任何任务。
+  - ⚠️ **诚实边界**：以上都是 API / 数据库级验证。**没有 UI**（同步状态 UI 是 P0-2-7，刷新按钮是 P0-2-6），Steven 现在只能在生产/本地用 curl 或浏览器直接打 `POST /api/v1/sync/now` 验收。
+- **🔜 下一张卡 P0-2-6（刷新机制）开工提示**：
+  - 编排函数 `runCanvasSync()` 已经支持 `trigger`（`app_open` / `manual` / `scheduled`）与两个节流常量 `MANUAL_THROTTLE_MS`（30s）/ `APP_OPEN_THROTTLE_MS`（60s），**接触发入口即可**，不用改编排。
+  - 定时兜底走 `POST /api/v1/sync/scheduled`（契约 §6）：需 `CRON_SECRET` + **恒定时间比较**；批量遍历全部有效凭据用户 —— 这一步**需要 service role**（现在只有 user-scoped client），是 P0-2-6 要解决的头一件事。
+  - 状态展示要的数据已经齐了：`courses.last_synced_at` / `sync_status` / `sync_error` + `sync_runs`（含 `partial` 与逐课程 failures）。
+  - 已知留白：`last_seen_at` 只在发生变化时刷新（详见 `lib/sync/canvas-tasks.ts` 文件头），P0-2-7 若想展示"这条任务最后一次在 Canvas 上被看到的时间"，需要改这个取舍（代价是每次同步都刷 `updated_at`）。
 
 ---
 
@@ -739,3 +795,4 @@ P0-0 基础设施
 | 2026-09-04 | **P0-2-4 课程关联 UI 代码完成（🔵 待 Steven 浏览器验收）**：`POST`/`DELETE /api/v1/courses/:id/canvas-link`（均幂等，归档课 404）+ `components/courses/canvas-link.tsx`（详情页关联控件）+ `components/courses/canvas-connect-form.tsx`（未连接时内嵌 token 连接表单，P0-2-2 留下的「前端 UI 归 P0-2-4」在此收口）+ `lib/canvas/group-courses.ts`（教学课 / 其他分组）+ `Course` 新增 `canvasCourseId`。**三个实现期决策**：① 重复提交同一 ID → 200 幂等（收敛契约原文的「重复关联 → 409」）；② 关联不触发同步（P0-2-5）；③ 解除关联不动同步字段（真实历史，且此刻无 canvas 任务）。**噪音课分组按 Steven 拍板落地**：教学课正常列 + 其他项单独一组带提示，真实 13 门分成 **6 / 7** 完全对得上；🔴 课程代码正则的**空格是必需的**（`GBO-FL26` 的 FL26 贴着字母写，允许可选空格会把入学模块判成教学课）。**自测**：tsc/lint/build 全绿 + 本地冒烟 **40/40** + 真实 PAT 端到端 **15/15** + 分组规则真实数据验证 + 详情页 SSR **12/12**（已关联 / 未关联两态）。**下一张卡 P0-2-5**（首次全量同步），开工提示已写进执行卡（含「`canvasGet` 需先加返回 `Link` 头的能力」与「同步必须串行」） |
 | 2026-09-04 | **P0-2-4 验收通过 ✅（2026-09-04 11:36，Steven 浏览器验收，第 14 张卡）**：生产环境粘入 PAT → 13 门课全部抓出、教学课 / 其他分组符合预期、关联与解除关联交互全部正常。5 个测试 auth 账号（`p024-a-*` / `p024-b-*` / `p024r-real-*` / `p024g-group-*` / `p024u-*`）已由 Steven 删除。**M2 动态感知前 4 张卡（P0-2-1 / 2-2 / 2-3 / 2-4）全部收口**。进度指针推进至 **P0-2-5**（首次全量同步：Canvas 作业 → `tasks` 落库），Steven 将在新对话框开工；开工提示见 P0-2-4 执行卡末尾（遍历已关联未归档课 / `canvasGet` 需先加 `Link` 头能力 / 同步必须串行 / 重试与状态落库归本卡 / 接上关联成功后的触发同步） |
 | 2026-09-04 | **P0-2-2 交接点② ✅ 收口（2026-09-04，Steven Dashboard 实测）**：迁移 `20260904100000_canvas_credentials_constraints.sql` **早就执行过**，并非"从未跑"—— Steven 在 Supabase Dashboard SQL Editor 重新跑遇 `42P07: relation "canvas_credentials_user_id_key" already exists`，用 `information_schema.columns` + `table_constraints` 验证：① `expires_at.is_nullable = NO`（NOT NULL 已生效）、② `canvas_credentials_user_id_key` 约束存在（UNIQUE 已生效）。两条约束**全部就位**，本卡脚本无须再跑。同步更新 P0-2-2 执行卡「待 Steven」清单（4 条全部 ✅）+ 进度指针 block（交接点标注从"待 Steven"改为"✅ 全部收口"）+ 571 行脚本描述去除【Steven 手动】标注 |
+| 2026-09-04 | **P0-2-5 首次全量同步 代码完成（🔵 待 Steven 验收，自测 80/80）**：`POST /api/v1/sync/now` + `lib/sync/canvas-sync.ts`（编排）+ `lib/sync/canvas-tasks.ts`（落库）+ `lib/sync/runs.ts`（sync_runs 映射）+ `lib/canvas/assignments.ts`（作业端点）+ `canvasGet` 加 `Link` 翻页能力 + `POST canvas-link` 成功后按课程触发同步。**Steven 拍板三件事**：① 无 due date 的作业照样同步落库为 TBD（实测 CHEM 1A 25 条里 9 条无日期：考勤打卡 + 4 个考试）；② 关联成功后立刻触发一次该课程同步；③ 跳过 `upcoming_events` 主扫描（它只返回未来事件，会系统性丢掉逾期未完成的作业，且不带 `updated_at` 做不了变更判定，逐课详情仍非拉不可）。**自测 80/80**（本地 52 + 多课程 28，全跑真实 PAT/真实课程）：逐条比对 Canvas 标题与 due date 全一致；重复同步 created/updated/deleted 全 0；人为改坏标题+日期+标记 done → 同步后前两者改回、**status=done 保留**；幽灵作业软删除且可恢复；假 token → 课程 failed + 凭证置 error + 再调用 401；一门课失败 → 整批 `partial` 且其他课仍 success；空课程（Math 53 LEC 0 条）是 success 不是失败。**实现期发现的一个设计问题**：节流最初排在凭据检查之前，导致 token 失效时用户看到的是"同步太频繁，27 秒后重试"（错误引导）—— 已改为锁 → 凭据 → 课程 → **节流** 的最后一位。**明确未做**：手动刷新按钮 / 打开应用自动同步 / 定时兜底（P0-2-6，编排已支持 `trigger` 与节流常量）、同步状态 UI（P0-2-7）、总览页合并两类任务（P0-2-11）。**下一张卡 P0-2-6 的头一件事**：定时兜底要遍历全部用户，**需要 service role**（现在只有 user-scoped client） |
