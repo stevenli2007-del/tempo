@@ -277,12 +277,14 @@ export default async function DashboardPage() {
                   key={course.id}
                   course={course}
                   syllabus={syllabiByCourse.get(course.id) ?? null}
+                  // 任务查询失败时 byCourse 是空 Map，get 出来是 undefined → 传 null
+                  // → 卡片显示「加载失败」而不是「近期没有待办」。
+                  // 错误原文也带过去，便于一眼定位是 PostgREST 列缺失还是 RLS 问题。
                   upcomingTasks={toUpcomingViews(
-                    // 任务查询失败时 byCourse 是空 Map，get 出来是 undefined → 传 null
-                    // → 卡片显示「加载失败」而不是「近期没有待办」。
                     tasksError ? undefined : upcomingByCourse.get(course.id),
                     now,
                   )}
+                  loadError={tasksError}
                 />
               ))}
             </div>

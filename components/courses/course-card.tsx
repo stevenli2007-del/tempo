@@ -44,6 +44,8 @@ interface CourseCardProps {
    * 把加载失败渲染成"没有任务"等于静默的错误数据（CodingRules 7）。
    */
   upcomingTasks: UpcomingTaskView[] | null
+  /** tasks 查询失败时的错误原文。仅在 `upcomingTasks === null` 时展示。 */
+  loadError?: string | null
 }
 
 function UpcomingTasks({ tasks }: { tasks: UpcomingTaskView[] }) {
@@ -63,7 +65,7 @@ function UpcomingTasks({ tasks }: { tasks: UpcomingTaskView[] }) {
   )
 }
 
-export function CourseCard({ course, syllabus, upcomingTasks }: CourseCardProps) {
+export function CourseCard({ course, syllabus, upcomingTasks, loadError }: CourseCardProps) {
   const router = useRouter()
   const [isConfirmingDelete, setIsConfirmingDelete] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -114,7 +116,17 @@ export function CourseCard({ course, syllabus, upcomingTasks }: CourseCardProps)
           <p className="mt-2 text-xs text-muted-foreground">{syllabusStatusText(syllabus)}</p>
 
           {upcomingTasks === null ? (
-            <p className="mt-2 text-xs text-destructive">近期任务加载失败</p>
+            <div className="mt-2 space-y-1">
+              <p className="text-xs text-destructive">近期任务加载失败</p>
+              {loadError ? (
+                <p
+                  className="break-all text-[10px] leading-tight text-muted-foreground/80"
+                  title={loadError}
+                >
+                  {loadError}
+                </p>
+              ) : null}
+            </div>
           ) : upcomingTasks.length === 0 ? (
             <p className="mt-2 text-xs text-muted-foreground/70">近期没有待办</p>
           ) : (
