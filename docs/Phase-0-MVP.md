@@ -31,8 +31,9 @@
 
 **当前 task**：`P0-2-6` 刷新机制 **第一拍（T1 打开应用自动同步 + T2 手动同步按钮）—— 🔵 代码完成 / 自测通过（2026-09-05），待 Steven 验收**。执行卡见 [P0-2-6](#-p0-2-6--刷新机制第一拍t1-打开应用自动同步--t2-手动同步按钮代码完成-2026-09-05-待-steven-验收)。
 
-> 🔜 **第一拍交付内容**：① `POST /api/v1/sync/now` 支持可选 body `{trigger: 'manual' | 'app_open'}`（双档节流 30s/60s，服务端权威；`scheduled`/非法值 → 400）；② `components/sync/sync-controls.tsx`（挂载 + `visibilitychange` 自动同步、手动「同步 Canvas」按钮，无关联课程不渲染不触发）；③ dashboard 接线。自测 tsc/lint/build ✅ + 冒烟 18/18。
-> 🔜 **第二拍（T3 定时兜底）等 Steven 验收第一拍后再开工**：`/sync/scheduled` 遍历全部有效凭据用户需 **service role**（`.env.local` 无，须先配）+ `vercel.json` cron。~~migration 补档~~ **2026-09-05 核实推翻**：`sync_runs` / `courses` 同步列 / `canvas_credentials` 全部在 `20260902003000_initial_schema.sql` 里，schema 一直是版本化的（此前结论源于 09-04 诊断时无 service role 读不到生产 DB 的误判）。
+> ✅ **第一拍已验收通过（2026-09-05，Steven）**：① `/sync/now` 支持可选 body `{trigger: 'manual' | 'app_open'}`（双档节流 30s/60s，服务端权威；`scheduled`/非法值 → 400）；② `components/sync/sync-controls.tsx`（挂载 + `visibilitychange` 自动同步、手动「同步 Canvas」按钮，无关联课程不渲染不触发）；③ dashboard 接线。自测 tsc/lint/build ✅ + 冒烟 18/18。执行卡见 [P0-2-6 第一拍](#-p0-2-6--刷新机制第一拍t1-打开应用自动同步--t2-手动同步按钮代码完成-2026-09-05-待-steven-验收)。
+> 🔜 **第二拍（T3 平台定时兜底）代码完成 / 自测 18/18（2026-09-05），待 Steven 验收**：`GET|POST /api/v1/sync/scheduled`（CRON_SECRET 恒定时间比较 + fail closed）+ `lib/sync/scheduled.ts`（串行逐用户、聚合统计、240s 预算）+ `lib/supabase/admin.ts`（service role 唯一入口）+ `vercel.json` 两条 cron。**同步层四处查询补强制 `userId` 过滤**（service role 绕过 RLS，靠隐式隔离会跨用户串数据）。**⚠️ 完整链路（真 service role 跑一遍）尚未自测** —— 等 Steven 把 `SUPABASE_SERVICE_ROLE_KEY` 配进 `.env.local`。
+> ~~migration 补档~~ **2026-09-05 核实推翻**：`sync_runs` / `courses` 同步列 / `canvas_credentials` 全部在 `20260902003000_initial_schema.sql` 里，schema 一直是版本化的（此前结论源于 09-04 诊断时无 service role 读不到生产 DB 的误判）。
 
 > ✅ **P0-2-5 已验收通过（2026-09-04 13:44，Steven 生产验收）**：`POST /api/v1/sync/now`（契约 §6）+ `lib/sync/canvas-sync.ts`（编排：串行 / 重试 / 熔断 / 状态落库）+ `lib/sync/canvas-tasks.ts`（落库：去重 / 增量更新 / 软删除 + 恢复）+ `lib/sync/runs.ts`（`sync_runs` 映射）+ `lib/canvas/assignments.ts`（作业端点与映射）+ `canvasGet` 加 `Link` 翻页能力；`POST canvas-link` 成功后**接上了按课程触发同步**（P0-2-4 刻意留的口子）。
 > - **验收方式**：Steven 在 Chem 1A 详情页「解除关联 → 重新关联」，后端立刻按课触发同步 → 作业落库 → 总览卡片出现（CHEM 1A 5 条近 7 天任务）。**坐实了根因**：Chem 1A 是在旧版（canvas-link 未接同步的 P0-2-4）关联的，那次关联不触发同步，之后重登/刷新也从不触发（自动同步是 P0-2-6 的事）→ tasks 表一直空 → 卡片「近期没有待办」。**Math 53 LEC/DIS 都是 0 条作业，「近期没有待办」是正确状态。**
@@ -566,7 +567,7 @@
 | **P0-2-3** | Canvas API 客户端：拉取课程列表 + 作业列表（含 due date），含限流与错误处理 | Bud | P0-2-2 | 能正确拉取真实数据；API 报错有明确处理不崩溃 | ✅ **已验收（2026-09-04）** |
 | **P0-2-4** | 课程关联 UI：手动将 Canvas 课程与 Tempo Workspace 关联（不做自动匹配） | Bud | P0-2-3 | 可选择并关联；关联后状态可见；可解除关联 | ✅ **已验收通过（2026-09-04 11:36，Steven 浏览器验收）** |
 | **P0-2-5** | 首次全量同步：Canvas 作业 → `tasks` 表落库（去重 + 更新，不重复插入） | Bud | P0-2-4 | 重复同步不产生重复任务；due date 变更能更新 | ✅ **已验收（2026-09-04 13:44，Steven「效果完美」）· 勿重做** |
-| **P0-2-6** | 刷新机制：**打开应用自动同步（T1，主力）** + 手动刷新按钮（T2）+ 后台定时兜底（T3，频率见 `Sync-Strategy.md`） | Bud | P0-2-5 | 打开应用/聚焦标签页自动同步（60s 节流）；手动刷新可用（30s 节流）；定时兜底按配置执行 | 🔵 **第一拍（T1+T2）代码完成/自测通过（2026-09-05），待 Steven 验收**；第二拍 T3 未开工 |
+| **P0-2-6** | 刷新机制：**打开应用自动同步（T1，主力）** + 手动刷新按钮（T2）+ 后台定时兜底（T3，频率见 `Sync-Strategy.md`） | Bud | P0-2-5 | 打开应用/聚焦标签页自动同步（60s 节流）；手动刷新可用（30s 节流）；定时兜底按配置执行 | 🔵 **第一拍（T1+T2）✅ 已验收（2026-09-05，Steven）**；第二拍（T3）代码完成/自测 18/18，待 Steven 验收 |
 | **P0-2-7** | **同步状态 UI**：显示最后同步时间 + **失败可见性**（失败时展示最后成功时间与失败原因，绝不静默展示旧数据） | Bud | P0-2-6 | 断网/token 失效时显示明确错误提示，而非旧数据 | ⚪ |
 | **P0-2-8** | Token 过期提醒：基于**用户实际填写的过期时间**（非写死天数）提前提醒 | Bud | P0-2-2 | 用临近过期的测试 token 验证提醒触发 | ⚪ |
 | **P0-2-9** | 撤销授权入口：一键断开 Canvas 授权 + 删除已存凭据 | Bud | P0-2-2 | 断开后凭据从库中清除；同步停止且状态正确显示 | ⚪ |
@@ -734,6 +735,24 @@
 - **⚠️ 诚实边界**：以上为 API/SSR 级验证；按钮点击、聚焦标签页触发自动同步的体感需 **Steven 本地 `npm run dev` 浏览器验收**。
 - **待 Steven**：① 浏览器验收第一拍；② 删 4 个测试 auth 账号（`p026-a-1788637754178` / `p026-b-1788637748968` / `p026-a-1788637835557` / `p026-b-1788637831861`，均 `@example.com`；前两个有遗留 course+credential 业务数据，随 auth 用户级联删除）。
 - **第二拍（T3）开工前置**：service role key（`.env.local` 无）+ `CRON_SECRET` + `vercel.json` cron 配置 —— **等 Steven 验收第一拍后再动**。
+- ✅ **2026-09-05 Steven 验收通过**（T1 自动同步 + T2 手动按钮）。**第一拍收口，勿重做。**
+
+---
+
+## P0-2-6 第二拍 T3 平台定时兜底：代码完成 2026-09-05，待 Steven 验收
+
+**范围**：Sync-Strategy §3 的 T3 —— 每天两次定点扫描全部用户，捕捉"用户没打开期间的变化"，顺带保活 Supabase（免费层一周无活动自动暂停）。
+
+- **改动清单**：
+  - `app/api/v1/sync/scheduled/route.ts`（新增）：**GET 与 POST 都导出**（Vercel Cron 只发 GET，契约原文写的 POST 是错的，Sync-Strategy §3.2 的 T4 示例又是 GET —— 收口为双方法等价）。鉴权 `Authorization: Bearer ${CRON_SECRET}`，**sha256 + `timingSafeEqual` 恒定时间比较**；**fail closed**：`CRON_SECRET` 未配置 → 500 `cron_not_configured`（不管带什么凭证都拒绝执行）、`SUPABASE_SERVICE_ROLE_KEY` 未配置 → 500 `service_role_key_missing`。`dynamic = 'force-dynamic'`（被缓存一次 = 定时扫描全部落空）。
+  - `lib/sync/scheduled.ts`（新增）：串行逐用户 `runCanvasSync(trigger: 'scheduled')`；**不做节流**（防重跑靠 5 分钟锁）；单用户异常不影响他人；**整批 240 秒预算**（Vercel 上限 300s），超时计 `usersDeferred` 留下一轮；响应只给聚合计数 + 错误消息，**不含 user_id / 课程名**（`user_id` 只进日志）。
+  - `lib/supabase/admin.ts`（新增）：service role 客户端，**全项目唯一的 RLS 绕过入口**，文件头写明三条红线与唯一合法用途。
+  - `vercel.json`（新增）：两条 cron，`0 10 * * *` / `0 22 * * *`（UTC，对应 03:00 / 15:00 PDT，Sync-Strategy §3.1）。
+  - 🔴 **同步层补强制 `userId` 过滤**（`lib/canvas/credentials.ts` 的 `loadDecryptedCredential` / `loadCredentialMeta`、`lib/sync/runs.ts` 的 `findRunningRun` / `findLastRunStartedAt`、`lib/sync/canvas-sync.ts` 的课程查询）：**service role 绕过 RLS**，原先这些查询全靠 RLS 隐式隔离，在那个客户端下会读到**别人的凭据**、把锁与节流变成**全局的**、同步**所有人的课程**，而且**不报错**。四处全改显式 `user_id` 且参数**强制**（不传编译不过）。
+  - `.env.example`：补 `SUPABASE_SERVICE_ROLE_KEY` / `CRON_SECRET` 及红线说明。
+- **自测**：`tsc` ✅ / `lint` ✅ / `build` ✅（`/api/v1/sync/scheduled` 已进路由表且为动态）/ **冒烟 18/18**：鉴权四类路径（无头 401 / 错 secret 401 / 非 Bearer 401 / 正确 secret 但缺 key → 500 明确码）+ GET≡POST + x-request-id 回传；**第一拍回归全绿**（真实 PAT 建凭据 → 建课 → 关联触发同步 → **tasks 落库 25 条**，证明加了 `user_id` 过滤后同步链路没坏；`trigger=scheduled` 仍 400；节流窗口仍按用户生效 429）；跨用户隔离（B 未连接 404、B 看不到 A 的任务）；**CRON_SECRET 未配置时带不带凭证都 500 拒绝执行**（fail closed 实测）。
+- **⚠️ 诚实边界**：**真 service role 跑完整循环尚未自测** —— `.env.local` 里还没有 `SUPABASE_SERVICE_ROLE_KEY`（须 Steven 从 Dashboard 取）。上面的 18/18 覆盖的是鉴权、fail closed 与第一拍回归；"遍历全部用户逐一同��"这段逻辑**只过了类型与代码审查，没有实测**。
+- **待 Steven（按序）**：① 把 `SUPABASE_SERVICE_ROLE_KEY` 填进 `.env.local`（Project Settings → API Keys → service_role，**绝不加 `NEXT_PUBLIC_`**）→ 我补跑完整链路冒烟；② 生成 `CRON_SECRET` 并在 **Vercel** 配好两个新变量后 **手动 Redeploy**；③ 首次 cron 触发后（10:00 / 22:00 UTC）看 Vercel 日志确认 200 且 `usersSynced > 0`；④ 删 2 个测试 auth 号（`p026b-a-*` / `p026b-b-*`，业务数据已 REST 清理）。
 
 ---
 
