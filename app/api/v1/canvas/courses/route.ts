@@ -34,7 +34,7 @@ export async function GET(request: Request) {
       return jsonError(request, 401, 'unauthenticated', '请先登录')
     }
 
-    const credential = await loadDecryptedCredential(supabase)
+    const credential = await loadDecryptedCredential(supabase, user.id)
     if (!credential) {
       return jsonError(request, 404, 'not_found', '还没有连接 Canvas')
     }

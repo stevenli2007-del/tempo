@@ -65,13 +65,20 @@ export function toCredentialMeta(row: CanvasCredentialRow): CanvasCredentialMeta
   }
 }
 
-/** 取当前用户的凭据元数据；没有则返回 null。RLS 保证只能读到自己的。 */
+/**
+ * 取指定用户的凭据元数据；没有则返回 null。
+ *
+ * `userId` 强制显式（与 `loadDecryptedCredential` 同因）：service role 客户端下
+ * RLS 不生效，靠"只能读到自己的"这种隐式保证会串到别人的行。
+ */
 export async function loadCredentialMeta(
   supabase: ServerSupabase,
+  userId: string,
 ): Promise<CanvasCredentialMeta | null> {
   const { data, error } = await supabase
     .from('canvas_credentials')
     .select(CREDENTIAL_META_COLUMNS)
+    .eq('user_id', userId)
     .maybeSingle()
 
   if (error) {
@@ -85,15 +92,23 @@ export async function loadCredentialMeta(
  *
  * 明文只存在于这个函数调用方的栈上，**不落盘、不进日志、不进响应**。
  *
+ * 🔴 **`userId` 参数是强制的，不是可选**（P0-2-6 第二拍加的）：定时同步（T3）用
+ * **service role** 客户端调它，而 service role **绕过 RLS**。此前这里靠 RLS 隐式
+ * 隔离（"只能读到自己的那一行"），在那个场景下会直接读到**别人的凭据** —— 跨用户串号。
+ * 显式 `eq('user_id', userId)` 让它在两种客户端下都正确，且由类型系统强制：
+ * 不传 userId 编译不过，不存在"忘了传"的可能。
+ *
  * @throws 密文格式损坏 / 密钥不匹配时抛错（消息不含明文，见 `decryptSecret`）。
  *         调用方（同步流程）应捕获并把凭据标记为 `error` 状态。
  */
 export async function loadDecryptedCredential(
   supabase: ServerSupabase,
+  userId: string,
 ): Promise<{ id: string; canvasDomain: string; token: string; expiresAt: string; status: string } | null> {
   const { data, error } = await supabase
     .from('canvas_credentials')
     .select(CREDENTIAL_FULL_COLUMNS)
+    .eq('user_id', userId)
     .maybeSingle()
 
   if (error) {

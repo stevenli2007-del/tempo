@@ -92,12 +92,12 @@ export async function runCanvasSync(
   const { trigger, courseIds, throttleMs = 0 } = options
 
   // ---------- 1) 锁：上一次还没跑完 ----------
-  if (await findRunningRun(supabase)) {
+  if (await findRunningRun(supabase, userId)) {
     return { skipped: 'in_progress', retryAfterSeconds: null }
   }
 
   // ---------- 2) 凭据 ----------
-  const credential = await loadDecryptedCredential(supabase)
+  const credential = await loadDecryptedCredential(supabase, userId)
   if (!credential) {
     return { skipped: 'not_connected', retryAfterSeconds: null }
   }
@@ -107,9 +107,15 @@ export async function runCanvasSync(
   }
 
   // ---------- 3) 目标课程 ----------
+  //
+  // 🔴 `.eq('user_id', userId)` 是 P0-2-6 第二拍补的：定时同步（T3）传进来的是
+  // **service role** 客户端，RLS 不生效。少了这一行，第一个被扫到的用户会把
+  // **所有人的已关联课程**都同步一遍（写进自己的库里还带别人的作业）。
+  // 用户级客户端下这一行是冗余但无害的，等于把隐式保证变成显式。
   let query = supabase
     .from('courses')
     .select('id, course_name, canvas_course_id')
+    .eq('user_id', userId)
     .eq('is_archived', false)
     .not('canvas_course_id', 'is', null)
   if (courseIds && courseIds.length > 0) {
@@ -144,7 +150,7 @@ export async function runCanvasSync(
   //   ② 没有已关联的课 → 用户以为自己刷新太勤，其实是一发请求都不会发。
   // 排在这里，每种返回都指向用户真正能做的那个动作。
   if (throttleMs > 0) {
-    const lastStartedAt = await findLastRunStartedAt(supabase)
+    const lastStartedAt = await findLastRunStartedAt(supabase, userId)
     if (lastStartedAt !== null) {
       const elapsed = Date.now() - Date.parse(lastStartedAt)
       if (Number.isFinite(elapsed) && elapsed < throttleMs) {

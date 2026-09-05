@@ -34,12 +34,20 @@ export type SyncRunFinish = {
  *
  * 只看 `running` 且 `started_at` 在 5 分钟内的行 —— 更老的行说明上次进程
  * 被强制终止（Vercel 超时、部署中断），不该永远把用户锁在外面。
+ *
+ * 🔴 **`userId` 强制显式**（P0-2-6 第二拍）：定时同步（T3）用 service role 客户端
+ * 调它，RLS 不生效。不加 user_id 过滤的话，这把"锁"会变成**全局锁** ——
+ * 任何一个用户在同步，其他所有用户的定时同步全被拦下（且毫无报错，只是静默跳过）。
  */
-export async function findRunningRun(supabase: SupabaseClient): Promise<boolean> {
+export async function findRunningRun(
+  supabase: SupabaseClient,
+  userId: string,
+): Promise<boolean> {
   const since = new Date(Date.now() - STALE_RUNNING_MS).toISOString()
   const { data, error } = await supabase
     .from('sync_runs')
     .select('id')
+    .eq('user_id', userId)
     .eq('status', 'running')
     .gt('started_at', since)
     .limit(1)
@@ -55,11 +63,18 @@ export async function findRunningRun(supabase: SupabaseClient): Promise<boolean>
  *
  * Sync-Strategy §6.4：**节流必须是服务端的**。前端把刷新按钮置灰只是礼貌，
  * 直接打接口的人（以及多标签页）绕得过去，而 Canvas 的限流额度是共享的。
+ *
+ * 🔴 **`userId` 强制显式**（与 `findRunningRun` 同因）：service role 下不加过滤，
+ * A 用户的手动同步会把 B 用户的定时同步节流掉 —— 节流窗口应当是**每人一份**的。
  */
-export async function findLastRunStartedAt(supabase: SupabaseClient): Promise<string | null> {
+export async function findLastRunStartedAt(
+  supabase: SupabaseClient,
+  userId: string,
+): Promise<string | null> {
   const { data, error } = await supabase
     .from('sync_runs')
     .select('started_at')
+    .eq('user_id', userId)
     .order('started_at', { ascending: false })
     .limit(1)
     .maybeSingle()

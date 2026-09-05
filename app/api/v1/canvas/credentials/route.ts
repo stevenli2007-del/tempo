@@ -72,7 +72,7 @@ export async function POST(request: Request) {
       last_error_message: null,
     }
 
-    const existing = await loadCredentialMeta(supabase)
+    const existing = await loadCredentialMeta(supabase, user.id)
     const query = existing
       ? supabase
           .from('canvas_credentials')
@@ -109,7 +109,7 @@ export async function GET(request: Request) {
       return jsonError(request, 401, 'unauthenticated', '请先登录')
     }
 
-    const credential = await loadCredentialMeta(supabase)
+    const credential = await loadCredentialMeta(supabase, user.id)
     if (!credential) {
       // ADR-010 的口径：不存在与越权统一 404。这里没有越权可能（RLS 只放行自己的行）。
       return jsonError(request, 404, 'not_found', '还没有连接 Canvas')
