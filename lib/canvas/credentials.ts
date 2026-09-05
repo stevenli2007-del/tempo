@@ -177,3 +177,32 @@ export async function markCredentialFailed(
     throw error
   }
 }
+
+/**
+ * Token 已过期（按 `expires_at` 判定）→ 置 `status = 'expired'`（P0-2-8，Sync-Strategy §10）。
+ *
+ * 与 `markCredentialFailed` 的区别：
+ * - `error` 是 **Canvas 主动拒绝**（401/403），连接本身坏了，要引导用户重连；
+ * - `expired` 是**时间到了**，连接可能还通，只是 token 失效——同样要重连，
+ *   但语义是"该续期了"而不是"被拒了"。
+ *
+ * 置 `expired` 后，`runCanvasSync` 在 `status !== 'active'` 时直接跳过（不浪费请求去打
+ * 一个注定失败的 token），T1 打开应用 / T3 定时都受益。用户重新连接（P0-2-4 的
+ * 连接表单，先查后写）会把 status 写回 `active` 并立即触发一次同步。
+ *
+ * `credentialId` 是凭据主键，更新只看它——service role 下也不存在跨用户问题
+ * （T3 循环里 `credential` 是按当前 userId 查出来的那一行）。
+ */
+export async function markCredentialExpired(
+  supabase: ServerSupabase,
+  credentialId: string,
+): Promise<void> {
+  const { error } = await supabase
+    .from('canvas_credentials')
+    .update({ status: 'expired' })
+    .eq('id', credentialId)
+
+  if (error) {
+    throw error
+  }
+}

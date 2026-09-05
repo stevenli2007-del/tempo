@@ -1,5 +1,6 @@
 import type { SyncSkipReason } from '@/types/sync'
 
+import { markCredentialExpired } from '@/lib/canvas/credentials'
 import { runCanvasSync } from '@/lib/sync/canvas-sync'
 import type { createServiceRoleClient } from '@/lib/supabase/admin'
 
@@ -56,6 +57,7 @@ function emptySkipCounts(): ScheduledSkipCounts {
   return {
     not_connected: 0,
     credential_inactive: 0,
+    credential_expired: 0,
     in_progress: 0,
     throttled: 0,
     no_courses: 0,
@@ -75,7 +77,7 @@ export async function runScheduledSync(supabase: AdminSupabase): Promise<Schedul
 
   const { data, error } = await supabase
     .from('canvas_credentials')
-    .select('user_id')
+    .select('id, user_id, expires_at')
     .eq('status', 'active')
 
   if (error) {
@@ -84,11 +86,11 @@ export async function runScheduledSync(supabase: AdminSupabase): Promise<Schedul
 
   // 一个用户理论上只有一行凭据（UNIQUE 约束），去重是为了不把约束的可靠性当前提：
   // 万一将来放宽成"一人多凭据"，这里重复跑同一个用户就是给 Canvas 送双倍请求。
-  const userIds = [
-    ...new Set(
-      ((data ?? []) as { user_id: string }[]).map((row) => row.user_id).filter(Boolean),
-    ),
-  ]
+  // 同时把每行的 id / expires_at 带出来，循环里直接判过期，省一次查询。
+  type CredRow = { id: string; user_id: string; expires_at: string | null }
+  const rows = ((data ?? []) as CredRow[]).filter((row) => row.user_id)
+  const userIds = [...new Set(rows.map((row) => row.user_id))]
+  const credById = new Map(rows.map((row) => [row.user_id, row]))
 
   const skipped = emptySkipCounts()
   const failures: string[] = []
@@ -109,6 +111,15 @@ export async function runScheduledSync(supabase: AdminSupabase): Promise<Schedul
     }
 
     try {
+      // 过期检查（P0-2-8，Sync-Strategy §10「已过期 → 跳过定时同步，不浪费请求」）。
+      // 放在锁/凭据/课程之前：一个注定失败的 token 连请求都不该发。
+      const cred = credById.get(userId)
+      if (cred?.expires_at && Date.parse(cred.expires_at) <= Date.now()) {
+        await markCredentialExpired(supabase, cred.id)
+        skipped.credential_expired += 1
+        continue
+      }
+
       const outcome = await runCanvasSync(supabase, userId, { trigger: 'scheduled' })
 
       if ('skipped' in outcome) {

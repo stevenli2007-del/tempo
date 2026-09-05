@@ -29,9 +29,9 @@
 
 ## 当前进度指针
 
-**当前 task**：`P0-2-7` 同步状态 UI ✅ **验收通过（2026-09-05 15:35，Steven 浏览器验收，第 18 张卡）** —— 卡已闭环。执行卡保留在下方「P0-2-7 同步状态 UI」。
+**当前 task**：`P0-2-8` Canvas token 过期提醒 🔵 **代码完成（2026-09-05），待 Steven 验收** —— 执行卡在下方「P0-2-8 Canvas token 过期提醒」。依赖 P0-2-7 验收（已完成）。
 
-> 🔜 **下一张卡 `P0-2-8`**（M2 8/11）：Canvas token **过期提醒**（P0-2-7 已按 Steven 拍板把续期提醒剥离出去）。依赖 P0-2-7 验收（已完成）。**Steven 在新会话开工**。
+> 🔜 **下一张卡 `P0-2-9`**（M2 9/11）：撤销授权入口（一键断开 Canvas 授权 + 删除已存凭据）。依赖 P0-2-2（凭据加密存储已验收）。P0-2-8 验收后开工。
 
 > ✅ **P0-2-7 验收通过（2026-09-05 15:35，Steven，第 18 张卡）**：浏览器验收通过，3 个 `p027-*` 测试 auth 号已由 Steven 删除干净，本卡无遗留。commit `b70ce71`，Vercel 部署 success。**M2 推进到 8/11。**
 
@@ -575,7 +575,7 @@
 | **P0-2-5** | 首次全量同步：Canvas 作业 → `tasks` 表落库（去重 + 更新，不重复插入） | Bud | P0-2-4 | 重复同步不产生重复任务；due date 变更能更新 | ✅ **已验收（2026-09-04 13:44，Steven「效果完美」）· 勿重做** |
 | **P0-2-6** | 刷新机制：**打开应用自动同步（T1，主力）** + 手动刷新按钮（T2）+ 后台定时兜底（T3，频率见 `Sync-Strategy.md`） | Bud | P0-2-5 | 打开应用/聚焦标签页自动同步（60s 节流）；手动刷新可用（30s 节流）；定时兜底按配置执行 | ✅ **两拍全部已验收（2026-09-05，Steven）**：第一拍 T1+T2；第二拍 T3（自测 18/18 + 完整循环 13/13 + 生产端到端 200） |
 | **P0-2-7** | **同步状态 UI**：显示最后同步时间 + **失败可见性**（失败时展示最后成功时间与失败原因，绝不静默展示旧数据） | Bud | P0-2-6 | 断网/token 失效时显示明确错误提示，而非旧数据 | ✅ **2026-09-05 验收通过**（第 18 张卡） |
-| **P0-2-8** | Token 过期提醒：基于**用户实际填写的过期时间**（非写死天数）提前提醒 | Bud | P0-2-2 | 用临近过期的测试 token 验证提醒触发 | ⚪ |
+| **P0-2-8** | Token 过期提醒：基于**用户实际填写的过期时间**（非写死天数）提前提醒 | Bud | P0-2-2 | 用临近过期的测试 token 验证提醒触发 | 🔵 |
 | **P0-2-9** | 撤销授权入口：一键断开 Canvas 授权 + 删除已存凭据 | Bud | P0-2-2 | 断开后凭据从库中清除；同步停止且状态正确显示 | ⚪ |
 | **P0-2-10** | ~~iCal Feed 兜底（条件性）~~ | Bud | — | ⏸ **不执行**：P0-2-1 判定为可用，条件未触发。保留为长期 Plan B（[ADR-002](./Decisions.md#adr-002)） | ⏸ |
 | **P0-2-11** | 总览页合并展示：syllabus 考试日期 + Canvas 作业 due date 合并排序；考试日期以 `exam_dates` 为权威源 | Bud | P0-2-5, P0-1-9 | 两类任务正确合并；**课程页与总览页日期一致**（[ADR-004](./Decisions.md#adr-004)） | ⚪ |
@@ -818,6 +818,78 @@ P0-2-5 的实现是**失败也写 `last_synced_at`**，而 `Database.md` 3.2 对
 - 约束：统一 404（ADR-010，越权与不存在不区分）；tasks 的 RLS 不看 `is_archived`；`.lte()` 对 NULL 不成立（TBD 行要显式 `or(...is.null)`）。
 
 **验收标准（原文）**：断网 / token 失效时显示**明确错误提示**，而非旧数据。
+
+---
+
+## P0-2-8 Canvas token 过期提醒：🔵 代码完成（2026-09-05），待 Steven 验收
+
+### 任务定义（原文）
+
+> **P0-2-8** Token 过期提醒：基于**用户实际填写的过期时间**（非写死天数）提前提醒。验收标准：用临近过期的测试 token 验证提醒触发。
+
+### 规格来源（Sync-Strategy.md §10，已核对）
+
+| 阶段 | 状态 | 系统行为 | 用户看到 |
+|---|---|---|---|
+| 正常 | `active` | 正常同步 | 无提示 |
+| T-14 天 | `active` | 开始提醒（T-14 / T-7 / T-3 / T-1 / 当天） | 应用内横幅，**可关闭** |
+| 已过期 | `expired` | **跳过定时同步**（不浪费请求）；打开应用时提示 | 横幅 + 引导重新生成 |
+| 调用报错 | `error` | 停止同步 | 横幅 + 引导重新生成 |
+| 用户撤销 | `revoked` | 停止一切同步，删除加密凭证 | 确认提示 |
+
+- 提醒基于用户实际填写的 `expires_at`（强制必填，库内必有值）。窗口 T-14/T-7/T-3/T-1/当天按 `expires_at` 倒推。
+- 用户提供新 token → `status='active'` → **立即触发一次同步**（P0-2-4 关联后触发已建好）。
+- **Phase 0 不做邮件提醒**（应用内横幅足够）。
+- P0-2-7 已把续期提醒**剥离**到本卡（当时拍板④：失败分级只管"连接失效"，续期提醒归这里）。
+
+### 领卡最小上下文（读到这里即可开工，别凭记忆写）
+
+- **`canvas_credentials.expires_at`** 是 `timestamptz NOT NULL`（迁移 `20260902003000` :205 + `20260904100000` 加固）。`loadCredentialMeta` 已暴露 `expiresAt: string`（`lib/canvas/credentials.ts`，对外类型 `CanvasCredentialMeta`）。
+- **`CredentialStatus`** 类型与 DB CHECK 已含 `'expired'`（`types/canvas.ts:17`、迁移 `20260902003000:207`）—— 但**目前没有任何代码会把 status 设成 `expired`**。本卡可以补上这个落点。
+- **`runCanvasSync`** 已在 `credential.status !== 'active'` 时返回 `{skipped:'credential_inactive'}` 不发请求（`lib/sync/canvas-sync.ts:105`）—— 所以只要把过期凭据的 status 翻成 `expired`，T1/T3 都会自动跳过。
+- **定时扫描** `runScheduledSync` 逐用户循环 `lib/sync/scheduled.ts:104`，目前只 `select('user_id')` + `status='active'` 过滤；要加 `expires_at` 判断 + `credential_expired` 跳过原因（`types/sync.ts` 的 `SyncSkipReason` 要加一项，并同步 `emptySkipCounts`）。
+- **dashboard** 已 `loadCredentialMeta`（但目前包在 `if (hasCanvasLink)` 里，`dashboard/page.tsx:211`）。过期提醒应在**有凭据但还没关联课**时也显示 → 本卡把凭据查询**移出 `hasCanvasLink` 守卫**（登录用户都查一次，单行查询成本可忽略）。
+- **不轮询、不建端点**（沿用 P0-2-7 决策）：横幅由服务端组件直读 `expires_at` 现算，与 `SyncStatusBar` 同页。
+- 复用 P0-2-7 的「失败横幅 → 链接到第一门失败课程详情页去重连」的 `credential_invalid` 处置路径（expiry 横幅的引导动作复用同一条链接）。
+
+### 待决策（AskUserQuestion，开工前收敛）
+
+1. **横幅可关闭行为**（§10 写"可关闭"）：**per-session 关闭**（客户端 `useState`，刷新后再出现，推荐）vs 不关闭（常驻）。
+2. **T3 是否自动把 status 翻成 `expired`**：推荐**是**——让 DB 成为权威、T1/T3 都不浪费请求去打一个已过期的 token；不翻则 T1 仍会试、被 Canvas 401 后落 `error`（与"已过期"语义混）。
+
+### 交付（预计）
+
+- `lib/sync/expiry.ts`（新）：纯函数 `toCredentialExpiryView(expiresAt, status, now)` → `{level:'ok'|'warning'|'expired', daysLeft, message, action:'reconnect'}`；`now` 由调用方注入（防 hydration mismatch，沿用 `status.ts` 约定）。`status==='error'` 时返回 null（让 P0-2-7 失败横幅独占）。
+- `components/sync/token-expiry-banner.tsx`（新）：服务端/客户端组件，顶部横幅；`warning` 中性卡、`expired` destructive 卡；引导链接到第一门关联课的详情页（无关联课则链到 dashboard 顶部说明）。可关闭用客户端 `useState`。
+- `lib/canvas/credentials.ts`：`markCredentialExpired(id)`（仿 `markCredentialFailed`，置 `status='expired'`）。
+- `lib/sync/scheduled.ts`：循环里读 `expires_at`，过期 → `markCredentialExpired` + `skipped.credential_expired += 1`。
+- `types/sync.ts`：`SyncSkipReason` 加 `'credential_expired'`。
+- `dashboard/page.tsx`：凭据查询移出 `hasCanvasLink` 守卫；算 `expiryView` 接 `<TokenExpiryBanner>`（放在 `SyncStatusBar` 之前）。
+
+### 自测
+
+- 纯函数（仿 P0-2-7）：`node --experimental-strip-types` 直跑 —— daysLeft 边界（T-15 不提示 / T-14 / T-7 / T-3 / T-1 / T-0 / 过期 1 天 / 坏时间串 / `status='error'` 返回 null）。
+- dashboard SSR：warning 横幅文案 / expired 横幅 + 链接 / 正常无横幅 / 无凭据不渲染。
+- 真实 token 实测：把 Steven 真号的 `expires_at` 改成临近日期（或构造测试号）→ 横幅出现；改回 → 消失。
+- tsc / lint / build ✅。
+
+### 诚实边界
+
+横幅**视觉观感**与**可关闭交互**只能 Steven 本地 `npm run dev` 浏览器验收（SSR 载荷级验证我能做，点击/hover 不能）。
+
+### 验收记录（2026-09-05，Bud 代码完成 + 自测通过，待 Steven 浏览器验收）
+
+- **Steven 拍板两项**（AskUserQuestion，全选推荐项）：① 横幅 **per-session 关闭**（刷新后重现）；② T3 发现过期 **自动把 status 翻成 `expired`**（让 DB 成为权威，T1/T3 都不浪费请求去打过期 token）。
+- **交付（7 文件：2 新 + 5 改）**：`lib/sync/expiry.ts`（新纯函数）/ `components/sync/token-expiry-banner.tsx`（新客户端组件，可关闭）/ `lib/canvas/credentials.ts`（`markCredentialExpired`）/ `lib/sync/scheduled.ts`（过期跳过 + `credential_expired` 计数）/ `types/sync.ts`（`SyncSkipReason` 加 `credential_expired`）/ `app/api/v1/sync/now/route.ts`（switch 补 `credential_expired` case 满足穷尽，message 走 `credential_invalid`）/ `app/(routes)/dashboard/page.tsx`（凭据查询移出 `hasCanvasLink` 守卫，算 `expiryView` 接横幅）。
+- **🔴 实现期一处偏离原计划的决策**：dashboard 的凭据查询**从「仅有关联课时查」改为「登录用户一律查一次」** —— 因为过期提醒要在"有凭据但还没关联课"时也显示，原守卫会漏掉这类用户。单行 `eq('user_id')` 查询成本可忽略。
+- **自测 31/31（全绿）**：
+  - 纯函数 **17/17**（`node --experimental-strip-types` 直跑）：30 天外 ok / 15 天 ok（窗口 14）/ T-14 / T-7 / T-3 / T-1 / T-0 / 过期 1 天 / `status='error'`→null（失败横幅独占）/ `status='expired'` 且已过期 / null / 坏时间串。
+  - **dashboard SSR 10/10**（测试账号 + 直接插近过期凭据，meta 查询不解密故无需真实 PAT）：已登录 200 / 近过期 warning 横幅文案 + 重连入口 + 链到 `/courses/` + 未误报同步失败 / 改已过期→`data-expiry-level="expired"` / 改远未来→横幅消失 / `status='error'`→过期横幅不出现；测试号与课程已清理。
+  - **T3 定时过期跳过 4/4**（测试账号过期凭据打 `/api/v1/sync/scheduled`，`Authorization: Bearer ${CRON_SECRET}`）：200 / `usersSkipped.credential_expired >= 1` / 凭据 `status` 实翻 `expired`；测试号已清理。
+  - tsc / eslint / **`next build` ✅**（路由表含 `/dashboard` ƒ + `/api/v1/sync/scheduled`）。
+- **顺手修的一个编译问题**：给 `SyncSkipReason` 加 `credential_expired` 后，`app/api/v1/sync/now/route.ts` 的 `switch (outcome.skipped)` 不再穷尽 → tsc 报 `outcome.summary` 不可达；补了 `case 'credential_expired'`（401 `credential_invalid`）。该 case 在当前 `runCanvasSync` 路径下不可达（非 active 统一返回 `credential_inactive`），仅为类型穷尽 + 未来直连路径复用。
+- **待 Steven**：① 浏览器验收（横幅文案 / 可关闭 / 重连链接 / 过期后样式变红）；② 若想真体验，把真号 `canvas_credentials.expires_at` 改临近日期看横幅，确认后改回。
+- **唯一遗留自查（沿用昨天）**：首次 cron（10:00/22:00 UTC）触发后顺手看 Vercel → Cron Jobs 是否有记录。
 
 ---
 

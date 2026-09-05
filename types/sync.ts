@@ -56,6 +56,8 @@ export type SyncSkipReason =
   | 'not_connected'
   /** 凭据状态不是 active（expired / revoked / error）。 */
   | 'credential_inactive'
+  /** 凭据已过期（expires_at < now，P0-2-8）：跳过定时同步，不浪费请求。 */
+  | 'credential_expired'
   /** 上一次同步还在跑（5 分钟锁）。 */
   | 'in_progress'
   /** 距上次同步太近，被服务端节流拦下。 */

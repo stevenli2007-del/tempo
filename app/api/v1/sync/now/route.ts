@@ -88,6 +88,16 @@ export async function POST(request: Request) {
             'credential_invalid',
             'Canvas 连接已失效或已过期，请重新生成 token',
           )
+        case 'credential_expired':
+          // 目前只在 T3 定时扫描里由 `runScheduledSync` 产生（Sync-Strategy §10：已过期跳过同步）。
+          // `runCanvasSync` 自身对 status !== 'active' 统一返回 `credential_inactive`，
+          // 但 `SyncSkipReason` 含此项，switch 必须穷尽，故保留此分支供未来直连路径复用。
+          return jsonError(
+            request,
+            401,
+            'credential_invalid',
+            'Canvas 访问令牌已过期，请重新生成 token',
+          )
         case 'in_progress':
           return jsonError(request, 409, 'sync_in_progress', '上一次同步还没结束，请稍后再试')
         case 'throttled':

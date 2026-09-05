@@ -7,10 +7,13 @@ import { DemoControls } from '@/components/courses/demo-controls'
 import { CourseCreatePanel } from '@/components/courses/course-create-panel'
 import { SyncControls } from '@/components/sync/sync-controls'
 import { SyncStatusBar } from '@/components/sync/sync-status-bar'
+import { TokenExpiryBanner } from '@/components/sync/token-expiry-banner'
+import { toCredentialExpiryView } from '@/lib/sync/expiry'
 import { TaskList } from '@/components/tasks/task-list'
 import type { TaskListItem } from '@/components/tasks/task-list'
 import { signOut } from '@/lib/auth/actions'
 import { loadCredentialMeta } from '@/lib/canvas/credentials'
+import type { CanvasCredentialMeta } from '@/types/canvas'
 import { COURSE_COLUMNS, toCourse } from '@/lib/courses'
 import type { CourseRow } from '@/lib/courses'
 import { SYLLABUS_COLUMNS, toSyllabus } from '@/lib/syllabi'
@@ -199,27 +202,49 @@ export default async function DashboardPage() {
   )
 
   /**
-   * 同步状态（P0-2-7）需要知道**凭证是否可用**，才能把失败分成「用户能修」与「只能等」。
+   * 凭据状态（P0-2-7 失败分级 + P0-2-8 过期提醒共用）。
    *
-   * 只在有关联课时才查：没连 Canvas 的用户既没有失败可展示，也不该为一次
-   * 注定无用的查询付代价。查失败不当成"没有凭据" —— 那会把失败误判成
-   * 「需要重新连接」，于是给一个连着好 token 的用户派错活；
-   * 三态（可用 / 不可用 / 未知）里取"未知"时按暂时性故障处理，并显式报错。
+   * P0-2-7 原本只在「有关联课」时才查，避免给没连 Canvas 的用户付一次无用查询。
+   * P0-2-8 的过期提醒需要在**有凭据但还没关联课**时也显示 —— 所以改成：登录用户
+   * 一律查一次（单行 `eq('user_id')`，成本可忽略），凭据不存在就是 null。
+   *
+   * 三态：可用 / 不可用 / 未知（查询失败）。查询失败时**不当成"没有凭据"** ——
+   * 那会把失败误判成「需要重新连接」，给连着好 token 的用户派错活；
+   * "未知"按暂时性故障处理，并显式报错（见下方 credentialError 分支）。
    */
+  let credential: CanvasCredentialMeta | null = null
   let credentialUsable: boolean | null = null
   let credentialError: string | null = null
-  if (hasCanvasLink) {
-    try {
-      const credential = await loadCredentialMeta(supabase, user.id)
-      credentialUsable = credential !== null && credential.status === 'active'
-    } catch (cause) {
-      credentialError = cause instanceof Error ? cause.message : String(cause)
-    }
+  // `now` 先算好，下面过期提醒（P0-2-8）要注入，避免与客户端各算一遍导致 hydration mismatch。
+  const now = new Date()
+  try {
+    credential = await loadCredentialMeta(supabase, user.id)
+    credentialUsable = credential !== null && credential.status === 'active'
+  } catch (cause) {
+    credentialError = cause instanceof Error ? cause.message : String(cause)
   }
+
+  /**
+   * 过期提醒（P0-2-8）：服务端现算，不轮询、不建端点（沿用 P0-2-7 决策）。
+   * 凭据不存在 → null（不渲染）；`status === 'error'` 时 `toCredentialExpiryView`
+   * 内部返回 null，让 P0-2-7 的失败横幅独占"连接坏了"的提示。
+   */
+  const expiryView =
+    credential === null
+      ? null
+      : toCredentialExpiryView(credential.expiresAt, credential.status, now)
+
+  /**
+   * 重连入口：链到第一门关联课的详情页（那里有「Canvas 关联」区块，点「更改」→
+   * 内嵌连接表单）。没有关联课则退而求其次链到第一门课详情页（任意课详情页都有连接入口）；
+   * 连课都没有 → null（横幅只提示、不给按钮）。
+   */
+  const firstLinkedCourse = courses.find((course) => course.canvasCourseId !== null)
+  const reconnectCourse = firstLinkedCourse ?? courses[0]
+  const reconnectHref = reconnectCourse ? `/courses/${reconnectCourse.id}` : null
 
   // 任务数据：总览列表 + 卡片近期任务。两者互不依赖，并行发。
   // 课程 id 沿用上面已查到的未归档课程，不再单独查一次。
-  const now = new Date()
   const courseIds = courses.map((course) => course.id)
   const [{ byCourse: upcomingByCourse, error: upcomingError }, overview] = await Promise.all([
     loadUpcomingTasks(supabase, courseIds),
@@ -305,6 +330,8 @@ export default async function DashboardPage() {
             </p>
           </div>
         ) : null}
+
+        <TokenExpiryBanner view={expiryView} reconnectHref={reconnectHref} />
 
         <SyncStatusBar overview={syncOverview} now={now} />
 
