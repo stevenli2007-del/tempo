@@ -5,11 +5,12 @@ import { useRouter } from 'next/navigation'
 import { useState } from 'react'
 
 import { syllabusStatusText } from '@/components/courses/syllabus-status'
+import type { CourseSyncLine } from '@/lib/sync/status'
 import type { Course } from '@/types/course'
 import type { Syllabus } from '@/types/syllabus'
 
 /**
- * 课程卡片（P0-1-7 建，P0-1-8 瘦身，P0-1-9 加近期任务）。
+ * 课程卡片（P0-1-7 建，P0-1-8 瘦身，P0-1-9 加近期任务，P0-2-7 加同步状态行）。
  *
  * P0-1-8 的拍板：**全部操作搬到详情页**（`app/(routes)/courses/[id]`）——
  * 上传 / 解析 / 五板块编辑 / 课程元信息编辑都在那儿，卡片只做摘要 + 入口。
@@ -46,6 +47,13 @@ interface CourseCardProps {
   upcomingTasks: UpcomingTaskView[]
   /** tasks 查询失败时的错误原文。仅在非空时显示「加载失败」分支。 */
   loadError?: string | null
+  /**
+   * Canvas 同步状态行（P0-2-7）。**未关联 Canvas 的课传 null** ——
+   * 那种课不存在"同步"这回事，显示一行同步状态是无意义噪声。
+   *
+   * 文案与时间都由服务端算好再传进来（客户端算时区会 hydration mismatch）。
+   */
+  syncLine?: CourseSyncLine | null
 }
 
 function UpcomingTasks({ tasks }: { tasks: UpcomingTaskView[] }) {
@@ -65,7 +73,13 @@ function UpcomingTasks({ tasks }: { tasks: UpcomingTaskView[] }) {
   )
 }
 
-export function CourseCard({ course, syllabus, upcomingTasks, loadError }: CourseCardProps) {
+export function CourseCard({
+  course,
+  syllabus,
+  upcomingTasks,
+  loadError,
+  syncLine,
+}: CourseCardProps) {
   const router = useRouter()
   const [isConfirmingDelete, setIsConfirmingDelete] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -114,6 +128,19 @@ export function CourseCard({ course, syllabus, upcomingTasks, loadError }: Cours
             {meta || '未填写编码与教师'}
           </p>
           <p className="mt-2 text-xs text-muted-foreground">{syllabusStatusText(syllabus)}</p>
+
+          {/* 同步状态行：失败时是红色并带原因（hover 看原文）。
+              它排在 syllabus 状态之后、任务列表之前 —— 这条信息解释的是
+              "下面这些任务有多可信"，放在任务上面才连得起来。 */}
+          {syncLine ? (
+            <p
+              className={`mt-1 text-xs ${syncLine.tone === 'error' ? 'text-destructive' : 'text-muted-foreground/80'}`}
+              title={syncLine.hint ?? undefined}
+              data-sync-tone={syncLine.tone}
+            >
+              {syncLine.text}
+            </p>
+          ) : null}
 
           {loadError ? (
             <div className="mt-2 space-y-1">

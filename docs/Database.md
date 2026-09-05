@@ -98,6 +98,8 @@ Supabase Auth 的 `auth.users` 管认证，本表放业务扩展字段，`id` �
 | `created_at` / `updated_at` | timestamptz | |
 
 > `last_synced_at` / `sync_status` / `sync_error` 是**为用户可见性服务的**，不是给运维看的。总览页和课程页必须显示"最后同步于 X"，失败时显示原因 —— 这是 PRD F4 的硬性要求，静默展示旧数据是被明令禁止的（静默的旧数据比明确的错误更危险）。
+>
+> 🔴 **`last_synced_at` 只在同步成功时推进**（P0-2-7 修正）。P0-2-5 的实现是失败也写这一列，与本行的定义（"最后一次**成功**同步的时间"）冲突：失败后它指向**失败那一刻**，UI 展示成"最后同步于 1 分钟前"，而屏幕上的其实是几天前的旧数据 —— 正是 Sync-Strategy §9 禁止的那一条。现在的写法：失败只更新 `sync_status` / `sync_error`，`last_synced_at` 保持上一次成功的值（`toSyncStateUpdate({ lastSyncedAt: null })` 即不输出该列）。**代价**：不再记录"最后一次尝试同步的时间"，需要时读 `sync_runs.started_at`。
 
 ### 3.3 `syllabi`（Syllabus 文件与解析记录）
 

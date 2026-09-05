@@ -374,7 +374,15 @@ async function requestWithRetry(
   }
 }
 
-/** 写回一门课的同步状态。失败不抛 —— 记账失败不该把已经同步好的数据说成失败。 */
+/**
+ * 写回一门课的同步状态。失败不抛 —— 记账失败不该把已经同步好的数据说成失败。
+ *
+ * 🔴 **`last_synced_at` 只在成功时推进**（P0-2-7 修正，此前失败也写）。
+ * `last_synced_at` 在 UI 上的含义是"数据停留在什么时候"。失败时把它写成失败那一刻，
+ * 用户看到的就是「最后同步于 1 分钟前」，而屏幕上的其实是三天前的旧数据 ——
+ * 这正是 Sync-Strategy §9 明令禁止的"同步失败后继续展示旧数据且不作任何提示"。
+ * 失败只记 `sync_status` / `sync_error`，时间留给上一次成功的值。
+ */
 async function writeCourseState(
   supabase: SupabaseClient,
   courseId: string,
@@ -384,7 +392,7 @@ async function writeCourseState(
     .from('courses')
     .update(
       toSyncStateUpdate({
-        lastSyncedAt: state.now,
+        lastSyncedAt: state.syncStatus === 'success' ? state.now : null,
         syncStatus: state.syncStatus,
         syncError: state.syncError,
       }),

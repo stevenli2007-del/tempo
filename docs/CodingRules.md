@@ -290,6 +290,17 @@ Steven 说「完成 P0-1-5b 就收手」，Bud 交付 5b 后收到含糊的「Pl
     还没关联 Canvas；P0-2-5 引入中间态才暴露）。
     本项目实现见 `lib/sync/canvas-tasks.ts` 文件头。
 
+15. 🔴 **聚合"最近一次成功"这类指标时，遍历源不能只挑状态好的那部分。**
+    直觉写法是「从成功的实体里取最大值」，但**失败的实体同样带着它上一次成功的信息** ——
+    只有一门课且它刚失败时（2 小时前成功过），按"只看成功课"算会得出 `null`，
+    UI 于是说「还没有成功同步过」，与事实相反。
+    反例（P0-2-7 SSR 冒烟抓到）：`summarizeSyncStatus` 初版只遍历 `success` 的课，
+    「全部失败」场景下"数据停留在 X"直接退化成"从没成功过"。
+    **修法：聚合遍历全集**，状态只用于判定等级，不用于过滤"谁有资格贡献数值"。
+    同类陷阱：求"最近登录时间"时把被封禁的用户排除掉、算"最低价"时把已下架商品排除掉 ——
+    先问一句「我要的到底是'当前状态最好的那个'，还是'历史上最近的那次'」。
+    本项目实现见 `lib/sync/status.ts` 的 `summarizeSyncStatus`。
+
 ### 10.2 坑索引（细节在各自文档）
 
 | 坑 | 一句话 | 权威位置 |
@@ -315,7 +326,9 @@ Steven 说「完成 P0-1-5b 就收手」，Bud 交付 5b 后收到含糊的「Pl
 | `courses.sync_status` 没有 `partial` | CHECK 只放行 never/success/failed。`partial` 是**一批**同步的属性，记在 `sync_runs.status`；逐课只有成功/失败。别为此改表结构（改 CHECK 要 Steven 手动跑 SQL） | `lib/courses.ts` `toSyncStateUpdate()` 注释、`API-Contract.md` §6 |
 | `last_seen_at` 只在变化时刷新 | `tasks` 上有 `trg_tasks_updated_at` 触发器，任何 UPDATE 都刷 `updated_at` —— "每次同步刷 last_seen_at"与"不刷 updated_at"物理上不可兼得，实现选了后者 | `lib/sync/canvas-tasks.ts` 文件头、`Sync-Strategy.md` §7 |
 | 三态语义别用 `undefined` 隐式承载 | `Map.get` 不存在 / `.find` 没找到 / 查询挂了 在 JS 里**长得一样**，用其中任何一种 `undefined` 当"加载失败"信号，第一次出现"该实体不存在"的正常场景就会误报 | 本节 10.1 第 14 条、`components/courses/course-card.tsx` 注释 |
+| 聚合"最近一次成功"要遍历全集 | 只从状态好的实体里取最大值 → 全部失败时退化成"从没成功过"。**失败的实体也带着上次成功的信息** | 本节 10.1 第 15 条、`lib/sync/status.ts` `summarizeSyncStatus` |
+| `last_synced_at` = 最后一次**成功**同步 | 失败不推进该列（P0-2-7 修正）。否则失败后 UI 把失败时刻当"最后同步时间" = 旧数据伪装成新的 | `Database.md` §3.2、`Sync-Strategy.md` §9、`lib/sync/canvas-sync.ts` `writeCourseState()` |
 
 ---
 
-*创建：2026-09-01 ｜ 最近更新：2026-09-04（§10.1 第 14 条：三态语义别用 `undefined` 隐式承载；§10.2 新增一行坑索引）*
+*创建：2026-09-01 ｜ 最近更新：2026-09-05（§10.1 第 15 条：聚合"最近一次成功"要遍历全集；§10.2 新增三行坑索引：`last_synced_at` 语义、聚合遍历、同步状态判定）*

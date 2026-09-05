@@ -29,9 +29,11 @@
 
 ## 当前进度指针
 
-**当前 task**：`P0-2-6` 刷新机制 ✅ **两拍全部验收通过（2026-09-05，Steven）** —— 卡已闭环。执行卡见下方「P0-2-6 第一拍」与「P0-2-6 第二拍」。
+**当前 task**：`P0-2-7` 同步状态 UI 🔵 **代码完成（2026-09-05，自测 89/89）**，待 Steven 浏览器验收。执行卡见下方「P0-2-7 同步状态 UI」。
 
-> 🔜 **下一张卡 `P0-2-7` 同步状态 UI**（M2 7/11）：最后同步时间 + **失败可见性**（失败时展示最后成功时间与失败原因，绝不静默展示旧数据）。依赖 P0-2-6（已完成），**无外部依赖**。开工前只读本文件的 P0-2-7 执行卡 + `TechStack.md` 版本矩阵。
+> 🔜 **下一张卡 `P0-2-8`**（M2 7/11）：Canvas token **过期提醒**（P0-2-7 已按 Steven 拍板把续期提醒剥离出去）。依赖 P0-2-7 验收。
+
+> 🔵 **P0-2-7 已开工并完成代码（2026-09-05）**：dashboard 顶部汇总状态条 + 每门课卡片一行；**不轮询、不建 `GET /sync/status`**（服务端组件直读）；失败**分级**（能修→去重新连接 Canvas 且不给重试按钮；只能等→重试 + 说明自动重试）；token 续期提醒剥离给 P0-2-8。新增 `lib/sync/status.ts`（纯函数视图模型）+ `components/sync/sync-status-bar.tsx` + `sync-retry-button.tsx` + `lib/sync/browser.ts`。🔴 **`last_synced_at` 语义修正**：失败不再覆写该列（此前会把"失败那一刻"当成"最后同步时间"，等于把旧数据伪装成新的），已用真实 PAT 端到端验证。自测：纯函数 45/45 + dashboard SSR 28/28 + 真实 Canvas 端到端 16/16。
 
 > ✅ **第一拍已验收通过（2026-09-05，Steven）**：① `/sync/now` 支持可选 body `{trigger: 'manual' | 'app_open'}`（双档节流 30s/60s，服务端权威；`scheduled`/非法值 → 400）；② `components/sync/sync-controls.tsx`（挂载 + `visibilitychange` 自动同步、手动「同步 Canvas」按钮，无关联课程不渲染不触发）；③ dashboard 接线。自测 tsc/lint/build ✅ + 冒烟 18/18。
 > ✅ **第二拍（T3 平台定时兜底）已验收通过（2026-09-05，Steven 生产验证）**：`GET|POST /api/v1/sync/scheduled`（CRON_SECRET 恒定时间比较 + fail closed）+ `lib/sync/scheduled.ts`（串行逐用户、聚合统计、240s 预算）+ `lib/supabase/admin.ts`（service role 唯一入口）+ `vercel.json` 两条 cron。**同步层四处查询补强制 `userId` 过滤**（service role 绕过 RLS，靠隐式隔离会跨用户串数据）。**✅ 完整循环实测已补（2026-09-05 傍晚，Steven 交付 service role key 后）**：真 service role 跑完整循环 13/13 —— 跨用户隔离探针通过（B 有凭据有课不关联 → 任务保持 0，A 被清空后由定时扫描拉回 25 条）、二跑幂等 created/updated/deleted 全 0、响应不含 UUID/课程名。**生产端到端验收（2026-09-05 傍晚，Steven 配好 Vercel 两变量并 Redeploy 后）**：无凭证 → `401 unauthorized`；正确 secret → **200**（`usersTotal=1`、`usersSynced=1`、`coursesSynced=3`、tasks 全 0 幂等，真实数据无丢失）。**8 个测试 auth 号已由 Steven 删除干净。**
@@ -570,7 +572,7 @@
 | **P0-2-4** | 课程关联 UI：手动将 Canvas 课程与 Tempo Workspace 关联（不做自动匹配） | Bud | P0-2-3 | 可选择并关联；关联后状态可见；可解除关联 | ✅ **已验收通过（2026-09-04 11:36，Steven 浏览器验收）** |
 | **P0-2-5** | 首次全量同步：Canvas 作业 → `tasks` 表落库（去重 + 更新，不重复插入） | Bud | P0-2-4 | 重复同步不产生重复任务；due date 变更能更新 | ✅ **已验收（2026-09-04 13:44，Steven「效果完美」）· 勿重做** |
 | **P0-2-6** | 刷新机制：**打开应用自动同步（T1，主力）** + 手动刷新按钮（T2）+ 后台定时兜底（T3，频率见 `Sync-Strategy.md`） | Bud | P0-2-5 | 打开应用/聚焦标签页自动同步（60s 节流）；手动刷新可用（30s 节流）；定时兜底按配置执行 | ✅ **两拍全部已验收（2026-09-05，Steven）**：第一拍 T1+T2；第二拍 T3（自测 18/18 + 完整循环 13/13 + 生产端到端 200） |
-| **P0-2-7** | **同步状态 UI**：显示最后同步时间 + **失败可见性**（失败时展示最后成功时间与失败原因，绝不静默展示旧数据） | Bud | P0-2-6 | 断网/token 失效时显示明确错误提示，而非旧数据 | ⚪ |
+| **P0-2-7** | **同步状态 UI**：显示最后同步时间 + **失败可见性**（失败时展示最后成功时间与失败原因，绝不静默展示旧数据） | Bud | P0-2-6 | 断网/token 失效时显示明确错误提示，而非旧数据 | 🔵 **代码完成（2026-09-05，自测 89/89），待 Steven 浏览器验收** |
 | **P0-2-8** | Token 过期提醒：基于**用户实际填写的过期时间**（非写死天数）提前提醒 | Bud | P0-2-2 | 用临近过期的测试 token 验证提醒触发 | ⚪ |
 | **P0-2-9** | 撤销授权入口：一键断开 Canvas 授权 + 删除已存凭据 | Bud | P0-2-2 | 断开后凭据从库中清除；同步停止且状态正确显示 | ⚪ |
 | **P0-2-10** | ~~iCal Feed 兜底（条件性）~~ | Bud | — | ⏸ **不执行**：P0-2-1 判定为可用，条件未触发。保留为长期 Plan B（[ADR-002](./Decisions.md#adr-002)） | ⏸ |
@@ -759,26 +761,61 @@
 
 ---
 
-## P0-2-7 同步状态 UI：⚪ 未开工（下一张卡）
+## P0-2-7 同步状态 UI：🔵 代码完成（2026-09-05，自测 89/89，待 Steven 浏览器验收）
 
 **范围**：让同步状态**对用户可见** —— 最后同步时间 + **失败可见性**。核心命题是**绝不静默展示旧数据**：同步失败时，用户看到的东西必须明确告诉他"这是旧的、为什么旧"，而不是假装数据是新的。
 
-**已知事实（领卡前先核对，别凭记忆写）**：
+### ✅ 四项决策已由 Steven 拍板（2026-09-05）
 
-- 数据**已全部落库**，不需要新建表：`courses.last_synced_at` / `sync_status`（CHECK 含 `idle`/`running`/`success`/`failed`，**不含 partial**）/ `sync_error`；`sync_runs`（逐趟记录，含 `partial` 与逐课程 `failures`）；`canvas_credentials.status`（`active` / `error` 等）。
-- `sync_status` 的语义分工（P0-2-5 定）：逐课只有 `success`/`failed`，**`partial` 只存在于响应与 `sync_runs`** —— UI 要展示"整批部分成功"必须读 `sync_runs`，不能只看 `courses.sync_status`。
-- 契约 §6 有 `GET /api/v1/sync/status`（**未实现，归本卡**）：返回 `lastSyncedAt` / 各课程 `syncStatus` / 凭证状态 / 是否需要续期。**但要先想清楚到底要不要建这个端点** —— dashboard 与课程详情页都是服务端组件，可以直读 Supabase；建端点的理由只有「客户端组件需要轮询」（例如同步进行中刷新状态），否则是多余的一层。
+1. **状态放哪** → dashboard 顶部一条汇总 **+ 每门课卡片一行**（一门课失败、其他课成功时必须看得出是哪门）。
+2. **不轮询、不建 `GET /api/v1/sync/status`** —— 一趟同步 6 秒，`router.refresh()` 足够；dashboard 是服务端组件可直读 Supabase，建端点是多余的一层。**契约 §6 该端点标注为「决定不实现」**。
+3. **token 续期提醒不归本卡** → 留给 P0-2-8。
+4. **失败文案分级** → token 失效给「去重新连接 Canvas」（能修，且**不给重试按钮**，重试也不会成功）；网络/Canvas 挂了给重试按钮 + 说明系统会自动重试。
+
+### 交付
+
+| 文件 | 作用 |
+|---|---|
+| `lib/sync/status.ts`（新） | 纯函数视图模型：`toCourseSyncView` / `summarizeSyncStatus` / `toCourseSyncLine` / `formatSyncTime` / `formatFailedCourseNames`。**顶部汇总与卡片行共用同一套判定** |
+| `components/sync/sync-status-bar.tsx`（新） | 顶部状态条，五态：`not_linked`（不渲染）/ `ok`（一行静默确认）/ `stale` / `never` / `failed` |
+| `components/sync/sync-retry-button.tsx`（新） | 状态条里的重试按钮。刻意**不复用 `SyncControls`** —— 后者挂着"挂载即自动同步"的 effect，同页两个实例会同时发两趟同步 |
+| `lib/sync/browser.ts`（新） | `callSyncNow` / `summarize` 从 `sync-controls.tsx` 抽出，两个按钮共用一份响应解析 |
+| `components/courses/course-card.tsx`（改） | 新增 `syncLine` prop（服务端算好文案，避免时区 hydration mismatch）；未关联 Canvas 的课不渲染 |
+| `app/(routes)/dashboard/page.tsx`（改） | 查 `canvas_credentials`（仅有关联课时）→ 算视图 → 渲染状态条 + 传卡片行 |
+| `lib/sync/canvas-sync.ts` + `lib/courses.ts`（改） | 🔴 **`last_synced_at` 改为只在成功时推进**（详见下） |
+
+### 🔴 本卡最实的改动：`last_synced_at` 的语义修正
+
+P0-2-5 的实现是**失败也写 `last_synced_at`**，而 `Database.md` 3.2 对这一列的定义一直是「最后一次**成功**同步的时间」，UI 要展示的也是"数据停留在什么时候"。两者冲突的后果：同步失败后 `last_synced_at` 指向**失败那一刻**，用户看到「最后同步于 1 分钟前」，屏幕上其实是三天前的旧数据 —— 正是 Sync-Strategy §9 明令禁止的那一条。
+
+改法：失败只写 `sync_status` / `sync_error`，**不推进** `last_synced_at`（`toSyncStateUpdate` 的 `lastSyncedAt` 传 null 即不输出该列）。不改表结构、不需要 Steven 跑 SQL。**已用真实 PAT 端到端验证**：成功同步 → 换假 token → 再同步失败 → `last_synced_at` 原封不动。
+
+### 自测 89/89
+
+- **纯函数 45/45**（`node --experimental-strip-types` 直接跑）：相对时间边界（60s/60min/24h/坏时间串/未来时间）、五态汇总优先级（failed > never > stale > ok）、失败分级、脏数据兜底（`sync_status=never` 但残留 `last_synced_at` 时不采信）、文案。
+- **dashboard SSR 28/28**：success / 陈旧>24h / never / failed+无凭证（fixable）/ failed+凭证 active（transient）/ 未关联（不渲染）/ 跨用户隔离 / 未登录。
+- **端到端 16/16（真实 Canvas）**：真实 PAT 关联 CHEM 1A → 同步成功落 25 条作业 → 换假 token → 同步失败 → `last_synced_at` 未变 + 凭证置 error + dashboard 按「能修」渲染（有重新连接入口、无重试按钮）。
+
+### 实现期发现的一个真 bug（已修）
+
+`summarizeSyncStatus` 初版只从**成功的课**里取 `lastSuccessAt`。只有一门课且它刚失败时（2 小时前成功过）→ 得出 `null` → UI 说「这些课还没有成功同步过」，与事实相反。**失败的课同样带着"上一次成功是什么时候"**，那正是"数据停留在 X"要的答案 —— 改为遍历全部课。这是 SSR 冒烟第 4 组抓出来的。
+
+### 与 Sync-Strategy §9 的一处偏离
+
+§9 写「凭证失效 → 全局横幅 + **直达设置页**」。设置页是 P0-3-2 才有，现在重新连接 Canvas 的唯一入口是**课程详情页**的「Canvas 关联」区块（点「更改」→ Canvas 拒 token → 内嵌连接表单）。所以状态条链到第一门失败课程的详情页，文案写明「去重新连接 Canvas」。
+
+### 待 Steven
+
+① 浏览器验收（失败态是红色卡片、正常态是一行灰字、点重试/立即同步有反馈）；② 删 3 个测试 auth 号（`p027-a-*` / `p027-b-*` / `p027e-*`，业务数据已清）。
+
+### 领卡时核对过的事实（保留，别凭记忆写）
+
+- 数据**已全部落库**，不需要新建表：`courses.last_synced_at` / `sync_status`（CHECK 只有 **`never` / `success` / `failed`**，迁移 `20260902003000` :59-60；**没有 `idle` / `running` / `partial`**）/ `sync_error`；`sync_runs`（逐趟记录，含 `partial` 与逐课程 `failures`）；`canvas_credentials.status`（`active` / `expired` / `revoked` / `error`）。
+- `sync_status` 的语义分工（P0-2-5 定）：逐课只有 `success`/`failed`，**`partial` 只存在于响应与 `sync_runs`** —— UI 要展示"整批部分成功"必须按课程状态自己算，不能只看某一列。
 - 现成可复用的位置：`components/sync/sync-controls.tsx`（P0-2-6 建的客户端组件，在 dashboard 标题行，已持有同步中/反馈状态）；课程详情页是 Canvas 关联操作的集中地（P0-2-4）。
 - 约束：统一 404（ADR-010，越权与不存在不区分）；tasks 的 RLS 不看 `is_archived`；`.lte()` 对 NULL 不成立（TBD 行要显式 `or(...is.null)`）。
 
 **验收标准（原文）**：断网 / token 失效时显示**明确错误提示**，而非旧数据。
-
-**待决策（开工时先跟 Steven 确认，不要自己拍板）**：
-
-1. 状态放哪：dashboard 顶部一条状态条，还是每门课一行 / 详情页内？还是都要？
-2. 同步进行中要不要轮询刷新状态（决定要不要建 `/sync/status` 端点）？
-3. token 续期提醒属不属于本卡（撤销授权是 P0-2-9）？
-4. 失败文案分级：`credential_invalid`（token 失效，用户能修）vs 网络/Canvas 挂了（用户只能等）—— 两者的行动建议不同。
 
 ---
 
@@ -866,3 +903,4 @@ P0-0 基础设施
 | 2026-09-04 | **P0-2-5 首次全量同步 代码完成（🔵 待 Steven 验收，自测 80/80）**：`POST /api/v1/sync/now` + `lib/sync/canvas-sync.ts`（编排）+ `lib/sync/canvas-tasks.ts`（落库）+ `lib/sync/runs.ts`（sync_runs 映射）+ `lib/canvas/assignments.ts`（作业端点）+ `canvasGet` 加 `Link` 翻页能力 + `POST canvas-link` 成功后按课程触发同步。**Steven 拍板三件事**：① 无 due date 的作业照样同步落库为 TBD（实测 CHEM 1A 25 条里 9 条无日期：考勤打卡 + 4 个考试）；② 关联成功后立刻触发一次该课程同步；③ 跳过 `upcoming_events` 主扫描（它只返回未来事件，会系统性丢掉逾期未完成的作业，且不带 `updated_at` 做不了变更判定，逐课详情仍非拉不可）。**自测 80/80**（本地 52 + 多课程 28，全跑真实 PAT/真实课程）：逐条比对 Canvas 标题与 due date 全一致；重复同步 created/updated/deleted 全 0；人为改坏标题+日期+标记 done → 同步后前两者改回、**status=done 保留**；幽灵作业软删除且可恢复；假 token → 课程 failed + 凭证置 error + 再调用 401；一门课失败 → 整批 `partial` 且其他课仍 success；空课程（Math 53 LEC 0 条）是 success 不是失败。**实现期发现的一个设计问题**：节流最初排在凭据检查之前，导致 token 失效时用户看到的是"同步太频繁，27 秒后重试"（错误引导）—— 已改为锁 → 凭据 → 课程 → **节流** 的最后一位。**明确未做**：手动刷新按钮 / 打开应用自动同步 / 定时兜底（P0-2-6，编排已支持 `trigger` 与节流常量）、同步状态 UI（P0-2-7）、总览页合并两类任务（P0-2-11）。**下一张卡 P0-2-6 的头一件事**：定时兜底要遍历全部用户，**需要 service role**（现在只有 user-scoped client） |
 | 2026-09-05 | **P0-2-6 第一拍（T1+T2）代码完成（🔵 待 Steven 验收，自测 18/18）**：① `/sync/now` 新增可选 body `{trigger: 'manual'|'app_open'}`，双档节流 30s/60s 服务端权威映射，`scheduled`/非法值 400，裸 POST 回退 manual（兼容 P0-2-5）；② 新建 `components/sync/sync-controls.tsx`：挂载 + `visibilitychange` 自动同步（客户端 60s 闸门）+ 手动「同步 Canvas」按钮，`hasCanvasLink` 双重门（未关联不渲染不触发）；③ dashboard 标题行接线。**文档修正**：~~migration 补档~~ **核实推翻** —— `sync_runs`/`courses` 同步列/`canvas_credentials` 全部在 `20260902003000_initial_schema.sql`（L55/L58-61/L198/L219），schema 一直版本化，无需补档（旧结论源于 09-04 无 service role 读不到生产 DB 的误判，已在进度指针、P0-2-5 执行卡、Roadmap、MEMORY.md 同源修正）。**T3 第二拍未开工**：等第一拍验收 + service role 决策 |
 | 2026-09-05 | **P0-2-6 两拍全部验收通过 ✅（2026-09-05 傍晚，Steven 生产验收，第 17 张卡）—— M2 推进到 7/11**：**第一拍（T1 打开应用/聚焦自动同步 + T2 手动按钮）** 浏览器验收通过。**第二拍（T3 平台定时兜底）**：自测 18/18 + **完整循环 13/13** + **生产端到端验证**（无凭证 → `401 unauthorized`；正确 secret → 200 `usersTotal=1`/`usersSynced=1`/`coursesSynced=3`、tasks 全 0 幂等无丢数据）。**本卡最大风险不在"加个 key"而在用户隔离**：同步层四处查询（`loadDecryptedCredential` / `loadCredentialMeta` / `findRunningRun` / `findLastRunStartedAt` / 课程查询）原先全靠 RLS 隐式隔离，service role 绕过 RLS 后会读别人凭据、锁与节流变全局、同步所有人课程**且不报错** → 已补**强制 `userId` 参数**（不传编译不过），跨用户隔离专项探针实测通过。**文档冲突收口**：Vercel Cron 只发 GET，契约原写 POST、Sync-Strategy §3.2 又写 GET → 双方法等价。**8 个测试 auth 号已由 Steven 删除干净**。commit `79db2e1`（代码）/ `c48c7fe` `1b5289b`（文档）。**下一张卡 P0-2-7 同步状态 UI**（依赖已满足，无外部依赖），Steven 在新会话开工；本文件已预置 P0-2-7 执行卡（含 4 个待决策项，开工前须跟 Steven 确认，不要自己拍板） |
+| 2026-09-05 | **P0-2-7 同步状态 UI 代码完成（🔵 待 Steven 浏览器验收，自测 89/89）**：**Steven 先拍板四件事** —— ① 顶部汇总 + 每课一行；② 不轮询、**不建 `GET /sync/status`**（契约 §6 该端点标注为"决定不实现"）；③ token 续期提醒**剥离给 P0-2-8**；④ 失败文案分级。**交付**：`lib/sync/status.ts`（纯函数视图模型，顶部与卡片共用同一套判定）+ `components/sync/sync-status-bar.tsx`（五态：not_linked/ok/stale/never/failed）+ `sync-retry-button.tsx` + `lib/sync/browser.ts`（`callSyncNow` 从 sync-controls 抽出共用）+ dashboard 接线 + 卡片 `syncLine`。分级规则：**凭证不可用 → 「去重新连接 Canvas」且不给重试按钮**（重试也不会成功）；**凭证可用却失败 → 重试 + 说明自动重试**。🔴 **`last_synced_at` 语义修正**：P0-2-5 的实现是失败也写该列，与 `Database.md` 3.2「最后一次成功同步的时间」冲突 —— 失败后用户看到"最后同步于 1 分钟前"而屏幕上是三天前的数据，正是 §9 禁止的那条；已改为**失败不推进该列**（不改表结构），真实 PAT 端到端验证通过。**自测**：纯函数 45/45（`node --experimental-strip-types` 直跑）+ dashboard SSR 28/28 + 真实 Canvas 端到端 16/16。**实现期抓到一个真 bug**：`summarizeSyncStatus` 初版只从成功的课取 `lastSuccessAt`，只有一门课且它刚失败时会得出"还没成功同步过"（与事实相反），改为遍历全部课。**与 §9 的偏离**：「直达设置页」改为链到课程详情页（设置页属 P0-3-2）。**待 Steven**：浏览器验收 + 删 3 个 `p027-*` 测试 auth 号 |

@@ -688,8 +688,15 @@ syllabus 数据、根本没有同步这回事。硬编码 `staleWarning: false` 
 ### `GET /api/v1/sync/status`
 返回当前用户的同步总览：`lastSyncedAt` / 各课程 `syncStatus` / 凭证状态 / 是否需要续期。供总览页顶部状态条使用。
 
-> ⏸ **P0-2-5 未实现**（归 P0-2-7）。它要的数据已全部落库：`courses.last_synced_at` / `sync_status` / `sync_error`
-> + `sync_runs`（含 `partial` 与逐课程 failures）。
+> ⛔ **决定不实现（Steven 2026-09-05 拍板，P0-2-7）**。
+>
+> 理由：唯一可能的调用方是总览页的状态条，而 dashboard 与课程详情页**都是服务端组件**，
+> 可以直接读 Supabase（`lib/sync/status.ts` 的纯函数就是干这个的）。建端点的**唯一**正当理由是
+> 「客户端组件需要轮询」，例如同步进行中实时刷新进度 —— 而实测一趟同步只有 6 秒，
+> 现有的「同步中…」按钮态 + `router.refresh()` 已经够用，不值得为它多一层 API。
+>
+> 数据仍然全部落库（`courses.last_synced_at` / `sync_status` / `sync_error` + `sync_runs`），
+> 将来真需要轮询时按本节的形状实现即可。
 
 ---
 
@@ -789,3 +796,4 @@ syllabus 数据、根本没有同步这回事。硬编码 `staleWarning: false` 
 | 2026-09-04 | **§6 `POST /api/v1/sync/now` 实现落地**（P0-2-5）：响应体按实现补齐 `startedAt` / `finishedAt`；新增完整错误码表（401 `unauthenticated` / 404 `not_found` 未连接 Canvas / 401 `credential_invalid` 凭据非 active / 409 `sync_in_progress` / 429 `rate_limited` + `details.retryAfter` / 无课可同步 → 200 全零）。**检查顺序明确为 锁 → 凭据 → 课程 → 节流**（节流排最后：一个请求都不会发时回 429 是错误引导）。**整批 `partial` 与逐课 `success`/`failed` 的分工写清**（`courses.sync_status` 的 CHECK 不含 partial，partial 只存在于响应与 `sync_runs`）。**写入字段封闭集合明确排除 `status`**。删除语义补齐：软删除 + 可恢复 + **拉取不完整时不做任何删除**。**无 due date 的作业同步为 TBD**（Steven 拍板），已知副作用（Canvas 考试条目与 syllabus 派生任务同名并列）归 P0-2-11。**`POST canvas-link` 成功后按课程触发一次同步**（P0-2-4 留的口子）：失败不影响关联响应、不走节流、结果不进响应体。`GET /api/v1/sync/status` 与 `POST /sync/scheduled` 标注未实现（分属 P0-2-7 / P0-2-6），并写清后者卡在「需要 service role」 | P0-2-5 |
 | 2026-09-05 | **§6 `GET|POST /api/v1/sync/scheduled` 实现落地**（P0-2-6 第二拍，T3 平台定时兜底）：**双方法都支持** —— 契约原文写的 POST 是错的（Vercel Cron 只发 GET），Sync-Strategy §3.2 的 T4 示例写的又是 GET，两份文档打架，此处收口为两个方法行为一致。鉴权用 **sha256 + `timingSafeEqual` 恒定时间比较**（`===` 的逐字节耗时可被侧信道利用）；**fail closed**：`CRON_SECRET` 未配置 → 500 `cron_not_configured`（不管带什么凭证都拒绝执行）、`SUPABASE_SERVICE_ROLE_KEY` 未配置 → 500 `service_role_key_missing`，"忘了配环境变量"绝不退化成公开端点。响应为聚合计数（`usersTotal`/`usersSynced`/`usersFailed`/`usersSkipped` 按原因分列/`usersDeferred` + 课程与任务计数 + 只含消息的 `failures`），**不含任何用户的具体数据**（`user_id` 只进服务端日志）。执行语义：串行逐用户、单用户异常不影响他人、不做节流（靠 5 分钟锁防重跑）、整批 240 秒预算（Vercel 上限 300s）。**🔴 同时给同步层补上强制 `userId` 参数**：本端点用 service role **绕过 RLS**，`loadDecryptedCredential` / `loadCredentialMeta` / `findRunningRun` / `findLastRunStartedAt` 原先全靠 RLS 隐式隔离（查询里没有 `user_id` 条件），在那个客户端下会直接读到**别人的凭据**、把锁与节流变成**全局的**、以及同步**所有人的课程**；四处全部改为显式 `user_id` 过滤且参数**强制**（不传编译不过） | P0-2-6 |
 | 2026-09-05 | **§6 `/sync/now` 新增可选 `trigger` 请求体**（P0-2-6 第一拍）：`manual`（默认，30s 节流）/ `app_open`（60s 节流），双档映射服务端权威；两种 trigger 共用同一节流窗口（按 `sync_runs.started_at`，不区分来源）；省略 body / 非法 JSON / 缺字段回退 `manual`（兼容 P0-2-5 裸 POST）；`scheduled` 及非法值 → `400 validation_failed`（定时入口只属于 `/sync/scheduled` + CRON_SECRET）。错误码表 429 行同步改为「按 trigger 的窗口」。配套前端 `components/sync/sync-controls.tsx`（T1 打开/聚焦自动同步 + T2 手动按钮），无 Canvas 关联课程的用户不渲染按钮也不自动同步 | P0-2-6 |
+| 2026-09-05 | **§6 `GET /api/v1/sync/status` 标注为「决定不实现」**（P0-2-7，Steven 拍板）：唯一可能的调用方是总览页状态条，而 dashboard 与课程详情页都是**服务端组件**，可直读 Supabase（`lib/sync/status.ts` 的纯函数）；建端点的唯一正当理由是客户端轮询，而实测一趟同步 6 秒，现有「同步中…」+ `router.refresh()` 已够用。数据仍全部落库，将来需要轮询时按本节形状实现即可。**§5 `meta` 里 `staleWarning` / `lastSuccessfulSyncAt` 仍未返回**（同步状态改由 dashboard 服务端渲染，不走 tasks API），归 P0-2-11 | P0-2-7 |

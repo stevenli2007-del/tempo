@@ -181,16 +181,26 @@ export function parseUpdateCourseInput(body: unknown): ValidationResult<UpdateCo
  * 所以整体状态记在 `sync_runs.status`（它的 CHECK 含 `partial`），
  * 逐课状态记在 `courses.sync_status`，两者合起来正好是 Sync-Strategy §9 要展示的东西，
  * 且**不需要改表结构**（改 CHECK 约束要 Steven 手动跑 SQL，能不欠就不欠）。
+ *
+ * ### 🔴 `lastSyncedAt` 的语义：**最后一次成功**同步的时间
+ *
+ * 传 `null` = 本次不推进这个时间（**失败时用**）。
+ *
+ * 本卡（P0-2-7）之前的实现是"失败也写 `last_synced_at`"，后果是：同步失败后
+ * `last_synced_at` 指向**失败那一刻**，而 UI 要展示的是"数据停留在什么时候" ——
+ * 拿失败时间充当"最后同步时间"，等于把一堆旧数据伪装成刚同步过的样子，
+ * 正是 Sync-Strategy §9 明令禁止的「同步失败后继续展示旧数据且不作任何提示」。
+ * Database.md 3.2 对这一列的原文定义也一直是"最后一次成功同步的时间"。
  */
 export function toSyncStateUpdate(state: {
-  lastSyncedAt: string
+  /** 传 null = 不推进该列（失败路径）。 */
+  lastSyncedAt: string | null
   syncStatus: 'success' | 'failed'
   syncError: string | null
-}): {
-  last_synced_at: string
-  sync_status: string
-  sync_error: string | null
-} {
+}): { last_synced_at?: string; sync_status: string; sync_error: string | null } {
+  if (state.lastSyncedAt === null) {
+    return { sync_status: state.syncStatus, sync_error: state.syncError }
+  }
   return {
     last_synced_at: state.lastSyncedAt,
     sync_status: state.syncStatus,

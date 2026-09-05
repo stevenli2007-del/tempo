@@ -6,15 +6,22 @@ import type { UpcomingTaskView } from '@/components/courses/course-card'
 import { DemoControls } from '@/components/courses/demo-controls'
 import { CourseCreatePanel } from '@/components/courses/course-create-panel'
 import { SyncControls } from '@/components/sync/sync-controls'
+import { SyncStatusBar } from '@/components/sync/sync-status-bar'
 import { TaskList } from '@/components/tasks/task-list'
 import type { TaskListItem } from '@/components/tasks/task-list'
 import { signOut } from '@/lib/auth/actions'
+import { loadCredentialMeta } from '@/lib/canvas/credentials'
 import { COURSE_COLUMNS, toCourse } from '@/lib/courses'
 import type { CourseRow } from '@/lib/courses'
 import { SYLLABUS_COLUMNS, toSyllabus } from '@/lib/syllabi'
 import type { SyllabusRow } from '@/lib/syllabi'
 import { loadTasks, loadUpcomingTasks } from '@/lib/tasks'
 import { createClient } from '@/lib/supabase/server'
+import {
+  summarizeSyncStatus,
+  toCourseSyncLine,
+  toCourseSyncView,
+} from '@/lib/sync/status'
 import type { Course } from '@/types/course'
 import type { Syllabus } from '@/types/syllabus'
 import type { Task, UpcomingTask } from '@/types/task'
@@ -191,6 +198,25 @@ export default async function DashboardPage() {
     courses.map((course) => course.id),
   )
 
+  /**
+   * 同步状态（P0-2-7）需要知道**凭证是否可用**，才能把失败分成「用户能修」与「只能等」。
+   *
+   * 只在有关联课时才查：没连 Canvas 的用户既没有失败可展示，也不该为一次
+   * 注定无用的查询付代价。查失败不当成"没有凭据" —— 那会把失败误判成
+   * 「需要重新连接」，于是给一个连着好 token 的用户派错活；
+   * 三态（可用 / 不可用 / 未知）里取"未知"时按暂时性故障处理，并显式报错。
+   */
+  let credentialUsable: boolean | null = null
+  let credentialError: string | null = null
+  if (hasCanvasLink) {
+    try {
+      const credential = await loadCredentialMeta(supabase, user.id)
+      credentialUsable = credential !== null && credential.status === 'active'
+    } catch (cause) {
+      credentialError = cause instanceof Error ? cause.message : String(cause)
+    }
+  }
+
   // 任务数据：总览列表 + 卡片近期任务。两者互不依赖，并行发。
   // 课程 id 沿用上面已查到的未归档课程，不再单独查一次。
   const now = new Date()
@@ -205,6 +231,15 @@ export default async function DashboardPage() {
     }),
   ])
   const tasksError = upcomingError ?? overview.error
+
+  // 同步状态视图：只算**已关联 Canvas** 的课（未关联的课没有"同步"这回事）。
+  const syncViews = courses
+    .filter((course) => course.canvasCourseId !== null)
+    .map((course) => toCourseSyncView(course, { credentialUsable: credentialUsable === true }))
+  const syncOverview = summarizeSyncStatus(syncViews, now)
+  const syncLines = new Map(
+    syncViews.map((view) => [view.courseId, toCourseSyncLine(view, now)] as const),
+  )
 
   return (
     <main className="min-h-screen bg-background text-foreground">
@@ -262,6 +297,17 @@ export default async function DashboardPage() {
           </div>
         ) : null}
 
+        {credentialError ? (
+          <div role="alert" className="rounded-lg border border-destructive/40 bg-card p-4">
+            <p className="text-sm font-medium text-destructive">Canvas 连接状态加载失败</p>
+            <p className="mt-1 text-sm text-muted-foreground">
+              同步状态可能不准（失败原因会按「暂时性故障」处理）。{credentialError}
+            </p>
+          </div>
+        ) : null}
+
+        <SyncStatusBar overview={syncOverview} now={now} />
+
         {!error && courses.length > 0 ? (
           <section className="space-y-3">
             <div className="flex items-baseline justify-between gap-4">
@@ -298,6 +344,8 @@ export default async function DashboardPage() {
                   // 真正的加载失败由 `loadError`（来自 tasksError）显式控制。
                   upcomingTasks={toUpcomingViews(upcomingByCourse.get(course.id), now)}
                   loadError={tasksError}
+                  // 未关联的课查不到 view → undefined → 卡片不渲染同步行。
+                  syncLine={syncLines.get(course.id) ?? null}
                 />
               ))}
             </div>
