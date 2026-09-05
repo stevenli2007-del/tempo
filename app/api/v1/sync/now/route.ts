@@ -1,6 +1,32 @@
-import { MANUAL_THROTTLE_MS, runCanvasSync } from '@/lib/sync/canvas-sync'
+import { APP_OPEN_THROTTLE_MS, MANUAL_THROTTLE_MS, runCanvasSync } from '@/lib/sync/canvas-sync'
 import { getCurrentUser, internalError, jsonError, jsonOk } from '@/lib/api/response'
-import type { SyncSummary } from '@/types/sync'
+import type { SyncSummary, SyncTrigger } from '@/types/sync'
+
+/** 客户端允许声明的触发来源。`scheduled` 只属于 `/sync/scheduled` + CRON_SECRET，这里传了就是 400。 */
+const CLIENT_TRIGGERS = ['manual', 'app_open'] as const
+
+/**
+ * 解析可选的请求体 `{ "trigger": "manual" | "app_open" }`。
+ *
+ * - 空体 / 非 JSON / 无 trigger 字段 → 按 `manual` 处理（兼容 P0-2-5 时期的裸 POST）。
+ * - 非法值（含 `scheduled`）→ 400 `validation_failed`。
+ */
+function parseTrigger(body: unknown): { trigger: SyncTrigger } | { error: string } {
+  if (body === null || body === undefined) {
+    return { trigger: 'manual' }
+  }
+  if (typeof body !== 'object' || Array.isArray(body)) {
+    return { error: '请求体必须是 JSON 对象' }
+  }
+  const trigger = (body as { trigger?: unknown }).trigger
+  if (trigger === undefined) {
+    return { trigger: 'manual' }
+  }
+  if (typeof trigger !== 'string' || !(CLIENT_TRIGGERS as readonly string[]).includes(trigger)) {
+    return { error: "trigger 只能是 'manual' 或 'app_open'" }
+  }
+  return { trigger: trigger as SyncTrigger }
+}
 
 /**
  * `POST /api/v1/sync/now` —— 立即同步一次（API-Contract.md 第 6 节）。
@@ -8,6 +34,12 @@ import type { SyncSummary } from '@/types/sync'
  * 遍历「已关联 Canvas 且未归档」的课程，串行拉取作业并对齐到 `tasks`。
  * 编排细节（串行 / 重试 / 熔断 / 状态落库）全在 `lib/sync/canvas-sync.ts`，
  * 这个路由只做三件事：鉴权 → 调编排 → 把编排结果翻译成 HTTP 语义。
+ *
+ * **触发来源与节流**（P0-2-6 起支持，Sync-Strategy §3 的 T1/T2）：
+ * - `manual`（缺省，手动按钮）：30s 节流
+ * - `app_open`（打开应用 / 重新聚焦自动触发）：60s 节流
+ * - 两档共用同一个节流窗口（`findLastRunStartedAt` 不区分 trigger）——
+ *   手动同步刚跑完，紧接着的自动同步会被拦下，这正是节流的本意。
  *
  * ### 为什么"没跑起来"和"跑失败了"是两种不同的返回
  * | 情形 | HTTP | 理由 |
@@ -23,7 +55,7 @@ import type { SyncSummary } from '@/types/sync'
  * 一个请求都不会发的时候（没连接 / token 失效 / 没关联课），回"同步太频繁"是错误引导。
  * 排在这个位置，每种返回都指向用户真正能做的那个动作。
  *
- * ⚠️ 节流只在本端点生效：关联成功后按课程触发的那次同步走编排函数本身，**不做节流** ——
+ * ⚠️ 节流只对本端点生效：关联成功后按课程触发的那次同步走编排函数本身，**不做节流** ——
  * 用户刚点完关联就被"同步太频繁"拦下是最差的一种体验，而它的成本只有一个请求。
  */
 
@@ -34,9 +66,15 @@ export async function POST(request: Request) {
       return jsonError(request, 401, 'unauthenticated', '请先登录')
     }
 
+    const rawBody: unknown = await request.json().catch(() => null)
+    const parsed = parseTrigger(rawBody)
+    if ('error' in parsed) {
+      return jsonError(request, 400, 'validation_failed', parsed.error)
+    }
+
     const outcome = await runCanvasSync(supabase, user.id, {
-      trigger: 'manual',
-      throttleMs: MANUAL_THROTTLE_MS,
+      trigger: parsed.trigger,
+      throttleMs: parsed.trigger === 'app_open' ? APP_OPEN_THROTTLE_MS : MANUAL_THROTTLE_MS,
     })
 
     if ('skipped' in outcome) {

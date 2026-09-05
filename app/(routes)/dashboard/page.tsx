@@ -5,6 +5,7 @@ import { CourseCard } from '@/components/courses/course-card'
 import type { UpcomingTaskView } from '@/components/courses/course-card'
 import { DemoControls } from '@/components/courses/demo-controls'
 import { CourseCreatePanel } from '@/components/courses/course-create-panel'
+import { SyncControls } from '@/components/sync/sync-controls'
 import { TaskList } from '@/components/tasks/task-list'
 import type { TaskListItem } from '@/components/tasks/task-list'
 import { signOut } from '@/lib/auth/actions'
@@ -179,6 +180,11 @@ export default async function DashboardPage() {
   const email = user.email ?? '（未设置邮箱）'
   /** 是否已有示例课程（决定展示「先看看效果」入口还是「清空示例数据」）。 */
   const hasDemo = courses.some((course) => course.isDemo)
+  /**
+   * 是否至少关联了一门 Canvas 课程 —— 同步控件（T1 自动同步 / T2 手动按钮）的开关。
+   * 没关联过的用户同步注定空跑，不渲染按钮也不发自动请求（P0-2-6）。
+   */
+  const hasCanvasLink = courses.some((course) => course.canvasCourseId !== null)
 
   const { byCourse: syllabiByCourse, error: syllabusError } = await loadLatestSyllabi(
     supabase,
@@ -225,7 +231,10 @@ export default async function DashboardPage() {
               先建课程，再上传 syllabus —— Tempo 会帮你把里面的考试、评分和日程抽出来。
             </p>
           </div>
-          <CourseCreatePanel />
+          <div className="flex items-center gap-2">
+            <SyncControls hasCanvasLink={hasCanvasLink} />
+            <CourseCreatePanel />
+          </div>
         </div>
 
         {error ? (
