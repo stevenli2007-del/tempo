@@ -29,10 +29,12 @@
 
 ## 当前进度指针
 
-**当前 task**：`P0-2-6` 刷新机制 **第一拍（T1 打开应用自动同步 + T2 手动同步按钮）—— 🔵 代码完成 / 自测通过（2026-09-05），待 Steven 验收**。执行卡见 [P0-2-6](#-p0-2-6--刷新机制第一拍t1-打开应用自动同步--t2-手动同步按钮代码完成-2026-09-05-待-steven-验收)。
+**当前 task**：`P0-2-6` 刷新机制 ✅ **两拍全部验收通过（2026-09-05，Steven）** —— 卡已闭环。执行卡见下方「P0-2-6 第一拍」与「P0-2-6 第二拍」。
 
-> ✅ **第一拍已验收通过（2026-09-05，Steven）**：① `/sync/now` 支持可选 body `{trigger: 'manual' | 'app_open'}`（双档节流 30s/60s，服务端权威；`scheduled`/非法值 → 400）；② `components/sync/sync-controls.tsx`（挂载 + `visibilitychange` 自动同步、手动「同步 Canvas」按钮，无关联课程不渲染不触发）；③ dashboard 接线。自测 tsc/lint/build ✅ + 冒烟 18/18。执行卡见 [P0-2-6 第一拍](#-p0-2-6--刷新机制第一拍t1-打开应用自动同步--t2-手动同步按钮代码完成-2026-09-05-待-steven-验收)。
-> 🔜 **第二拍（T3 平台定时兜底）代码完成 / 自测 18/18 + 完整循环 13/13（2026-09-05），待 Steven 验收**：`GET|POST /api/v1/sync/scheduled`（CRON_SECRET 恒定时间比较 + fail closed）+ `lib/sync/scheduled.ts`（串行逐用户、聚合统计、240s 预算）+ `lib/supabase/admin.ts`（service role 唯一入口）+ `vercel.json` 两条 cron。**同步层四处查询补强制 `userId` 过滤**（service role 绕过 RLS，靠隐式隔离会跨用户串数据）。**✅ 完整循环实测已补（2026-09-05 傍晚，Steven 交付 service role key 后）**：真 service role 跑完整循环 13/13 —— 跨用户隔离探针通过（B 有凭据有课不关联 → 任务保持 0，A 被清空后由定时扫描拉回 25 条）、二跑幂等 created/updated/deleted 全 0、响应不含 UUID/课程名、生产端点未配 CRON_SECRET 时 500 拒绝执行。
+> 🔜 **下一张卡 `P0-2-7` 同步状态 UI**（M2 7/11）：最后同步时间 + **失败可见性**（失败时展示最后成功时间与失败原因，绝不静默展示旧数据）。依赖 P0-2-6（已完成），**无外部依赖**。开工前只读本文件的 P0-2-7 执行卡 + `TechStack.md` 版本矩阵。
+
+> ✅ **第一拍已验收通过（2026-09-05，Steven）**：① `/sync/now` 支持可选 body `{trigger: 'manual' | 'app_open'}`（双档节流 30s/60s，服务端权威；`scheduled`/非法值 → 400）；② `components/sync/sync-controls.tsx`（挂载 + `visibilitychange` 自动同步、手动「同步 Canvas」按钮，无关联课程不渲染不触发）；③ dashboard 接线。自测 tsc/lint/build ✅ + 冒烟 18/18。
+> ✅ **第二拍（T3 平台定时兜底）已验收通过（2026-09-05，Steven 生产验证）**：`GET|POST /api/v1/sync/scheduled`（CRON_SECRET 恒定时间比较 + fail closed）+ `lib/sync/scheduled.ts`（串行逐用户、聚合统计、240s 预算）+ `lib/supabase/admin.ts`（service role 唯一入口）+ `vercel.json` 两条 cron。**同步层四处查询补强制 `userId` 过滤**（service role 绕过 RLS，靠隐式隔离会跨用户串数据）。**✅ 完整循环实测已补（2026-09-05 傍晚，Steven 交付 service role key 后）**：真 service role 跑完整循环 13/13 —— 跨用户隔离探针通过（B 有凭据有课不关联 → 任务保持 0，A 被清空后由定时扫描拉回 25 条）、二跑幂等 created/updated/deleted 全 0、响应不含 UUID/课程名。**生产端到端验收（2026-09-05 傍晚，Steven 配好 Vercel 两变量并 Redeploy 后）**：无凭证 → `401 unauthorized`；正确 secret → **200**（`usersTotal=1`、`usersSynced=1`、`coursesSynced=3`、tasks 全 0 幂等，真实数据无丢失）。**8 个测试 auth 号已由 Steven 删除干净。**
 > ~~migration 补档~~ **2026-09-05 核实推翻**：`sync_runs` / `courses` 同步列 / `canvas_credentials` 全部在 `20260902003000_initial_schema.sql` 里，schema 一直是版本化的（此前结论源于 09-04 诊断时无 service role 读不到生产 DB 的误判）。
 
 > ✅ **P0-2-5 已验收通过（2026-09-04 13:44，Steven 生产验收）**：`POST /api/v1/sync/now`（契约 §6）+ `lib/sync/canvas-sync.ts`（编排：串行 / 重试 / 熔断 / 状态落库）+ `lib/sync/canvas-tasks.ts`（落库：去重 / 增量更新 / 软删除 + 恢复）+ `lib/sync/runs.ts`（`sync_runs` 映射）+ `lib/canvas/assignments.ts`（作业端点与映射）+ `canvasGet` 加 `Link` 翻页能力；`POST canvas-link` 成功后**接上了按课程触发同步**（P0-2-4 刻意留的口子）。
@@ -567,7 +569,7 @@
 | **P0-2-3** | Canvas API 客户端：拉取课程列表 + 作业列表（含 due date），含限流与错误处理 | Bud | P0-2-2 | 能正确拉取真实数据；API 报错有明确处理不崩溃 | ✅ **已验收（2026-09-04）** |
 | **P0-2-4** | 课程关联 UI：手动将 Canvas 课程与 Tempo Workspace 关联（不做自动匹配） | Bud | P0-2-3 | 可选择并关联；关联后状态可见；可解除关联 | ✅ **已验收通过（2026-09-04 11:36，Steven 浏览器验收）** |
 | **P0-2-5** | 首次全量同步：Canvas 作业 → `tasks` 表落库（去重 + 更新，不重复插入） | Bud | P0-2-4 | 重复同步不产生重复任务；due date 变更能更新 | ✅ **已验收（2026-09-04 13:44，Steven「效果完美」）· 勿重做** |
-| **P0-2-6** | 刷新机制：**打开应用自动同步（T1，主力）** + 手动刷新按钮（T2）+ 后台定时兜底（T3，频率见 `Sync-Strategy.md`） | Bud | P0-2-5 | 打开应用/聚焦标签页自动同步（60s 节流）；手动刷新可用（30s 节流）；定时兜底按配置执行 | 🔵 **第一拍（T1+T2）✅ 已验收（2026-09-05，Steven）**；第二拍（T3）代码完成/自测 18/18，待 Steven 验收 |
+| **P0-2-6** | 刷新机制：**打开应用自动同步（T1，主力）** + 手动刷新按钮（T2）+ 后台定时兜底（T3，频率见 `Sync-Strategy.md`） | Bud | P0-2-5 | 打开应用/聚焦标签页自动同步（60s 节流）；手动刷新可用（30s 节流）；定时兜底按配置执行 | ✅ **两拍全部已验收（2026-09-05，Steven）**：第一拍 T1+T2；第二拍 T3（自测 18/18 + 完整循环 13/13 + 生产端到端 200） |
 | **P0-2-7** | **同步状态 UI**：显示最后同步时间 + **失败可见性**（失败时展示最后成功时间与失败原因，绝不静默展示旧数据） | Bud | P0-2-6 | 断网/token 失效时显示明确错误提示，而非旧数据 | ⚪ |
 | **P0-2-8** | Token 过期提醒：基于**用户实际填写的过期时间**（非写死天数）提前提醒 | Bud | P0-2-2 | 用临近过期的测试 token 验证提醒触发 | ⚪ |
 | **P0-2-9** | 撤销授权入口：一键断开 Canvas 授权 + 删除已存凭据 | Bud | P0-2-2 | 断开后凭据从库中清除；同步停止且状态正确显示 | ⚪ |
@@ -723,7 +725,7 @@
 
 ---
 
-## P0-2-6 刷新机制第一拍（T1 打开应用自动同步 + T2 手动同步按钮）：代码完成 2026-09-05，待 Steven 验收
+## P0-2-6 刷新机制第一拍（T1 打开应用自动同步 + T2 手动同步按钮）：✅ 已验收 2026-09-05
 
 **范围**：Sync-Strategy §3 四档触发中的 **T1（主力）+ T2**；T3 定时兜底 = 第二拍，等第一拍验收后再开工。
 
@@ -739,7 +741,7 @@
 
 ---
 
-## P0-2-6 第二拍 T3 平台定时兜底：代码完成 2026-09-05，待 Steven 验收
+## P0-2-6 第二拍 T3 平台定时兜底：✅ 已验收 2026-09-05
 
 **范围**：Sync-Strategy §3 的 T3 —— 每天两次定点扫描全部用户，捕捉"用户没打开期间的变化"，顺带保活 Supabase（免费层一周无活动自动暂停）。
 
@@ -752,7 +754,31 @@
   - `.env.example`：补 `SUPABASE_SERVICE_ROLE_KEY` / `CRON_SECRET` 及红线说明。
 - **自测**：`tsc` ✅ / `lint` ✅ / `build` ✅（`/api/v1/sync/scheduled` 已进路由表且为动态）/ **冒烟 18/18**：鉴权四类路径（无头 401 / 错 secret 401 / 非 Bearer 401 / 正确 secret 但缺 key → 500 明确码）+ GET≡POST + x-request-id 回传；**第一拍回归全绿**（真实 PAT 建凭据 → 建课 → 关联触发同步 → **tasks 落库 25 条**，证明加了 `user_id` 过滤后同步链路没坏；`trigger=scheduled` 仍 400；节流窗口仍按用户生效 429）；跨用户隔离（B 未连接 404、B 看不到 A 的任务）；**CRON_SECRET 未配置时带不带凭证都 500 拒绝执行**（fail closed 实测）。
 - **✅ 完整循环实测（2026-09-05 傍晚补，13/13 全过）**：Steven 交付 service role key 后，真 service role 跑了一遍完整循环。**跨用户隔离探针**：A（关联 Canvas 课）清空任务后由定时扫描拉回 25 条；B（有凭据有课但**不关联**）任务保持 **0** —— 若课程查询漏了 `user_id` 过滤，A 的作业会出现在 B 头上且**不报错**。另验：响应体不含任何 UUID 与课程名、`usersTotal=3`（含 Steven 真号）且 B 正确落入 `no_courses` skip、**二跑幂等**（created/updated/deleted 全 0，含真号三门课不刷 `updated_at`）、生产端点未配 CRON_SECRET 时 500 `cron_not_configured` 拒绝执行。
-- **待 Steven（按序）**：① ~~配 service role key~~ ✅ 已配（2026-09-05 傍晚，完整循环 13/13 已跑）；② `CRON_SECRET`（已写入 `.env.local`）+ `SUPABASE_SERVICE_ROLE_KEY` 两个变量配到 **Vercel**（Production）并 **手动 Redeploy**，curl 带正确 secret 打生产端点应 200；③ 首次 cron 触发后（10:00 / 22:00 UTC）看 Vercel 日志确认 200 且 `usersSynced > 0`；④ 删测试 auth 号（`p026-*` 4 个 + `p026b-*` 2 个 + `p026c-*` 2 个，均 @example.com，业务数据已 REST 清理）。
+- **待 Steven（按序）**：① ~~配 service role key~~ ✅ 已配（2026-09-05 傍晚，完整循环 13/13 已跑）；② ~~Vercel 两变量 + Redeploy~~ ✅ 已完成；③ ~~生产 curl 验证~~ ✅ 无凭证 401 / 正确 secret 200（`usersSynced=1`、tasks 全 0）；④ ~~删测试 auth 号~~ ✅ Steven 已删除干净。
+- ✅ **2026-09-05 收工：P0-2-6 两拍全部验收通过，卡已闭环。**
+
+---
+
+## P0-2-7 同步状态 UI：⚪ 未开工（下一张卡）
+
+**范围**：让同步状态**对用户可见** —— 最后同步时间 + **失败可见性**。核心命题是**绝不静默展示旧数据**：同步失败时，用户看到的东西必须明确告诉他"这是旧的、为什么旧"，而不是假装数据是新的。
+
+**已知事实（领卡前先核对，别凭记忆写）**：
+
+- 数据**已全部落库**，不需要新建表：`courses.last_synced_at` / `sync_status`（CHECK 含 `idle`/`running`/`success`/`failed`，**不含 partial**）/ `sync_error`；`sync_runs`（逐趟记录，含 `partial` 与逐课程 `failures`）；`canvas_credentials.status`（`active` / `error` 等）。
+- `sync_status` 的语义分工（P0-2-5 定）：逐课只有 `success`/`failed`，**`partial` 只存在于响应与 `sync_runs`** —— UI 要展示"整批部分成功"必须读 `sync_runs`，不能只看 `courses.sync_status`。
+- 契约 §6 有 `GET /api/v1/sync/status`（**未实现，归本卡**）：返回 `lastSyncedAt` / 各课程 `syncStatus` / 凭证状态 / 是否需要续期。**但要先想清楚到底要不要建这个端点** —— dashboard 与课程详情页都是服务端组件，可以直读 Supabase；建端点的理由只有「客户端组件需要轮询」（例如同步进行中刷新状态），否则是多余的一层。
+- 现成可复用的位置：`components/sync/sync-controls.tsx`（P0-2-6 建的客户端组件，在 dashboard 标题行，已持有同步中/反馈状态）；课程详情页是 Canvas 关联操作的集中地（P0-2-4）。
+- 约束：统一 404（ADR-010，越权与不存在不区分）；tasks 的 RLS 不看 `is_archived`；`.lte()` 对 NULL 不成立（TBD 行要显式 `or(...is.null)`）。
+
+**验收标准（原文）**：断网 / token 失效时显示**明确错误提示**，而非旧数据。
+
+**待决策（开工时先跟 Steven 确认，不要自己拍板）**：
+
+1. 状态放哪：dashboard 顶部一条状态条，还是每门课一行 / 详情页内？还是都要？
+2. 同步进行中要不要轮询刷新状态（决定要不要建 `/sync/status` 端点）？
+3. token 续期提醒属不属于本卡（撤销授权是 P0-2-9）？
+4. 失败文案分级：`credential_invalid`（token 失效，用户能修）vs 网络/Canvas 挂了（用户只能等）—— 两者的行动建议不同。
 
 ---
 
@@ -839,3 +865,4 @@ P0-0 基础设施
 | 2026-09-04 | **P0-2-2 交接点② ✅ 收口（2026-09-04，Steven Dashboard 实测）**：迁移 `20260904100000_canvas_credentials_constraints.sql` **早就执行过**，并非"从未跑"—— Steven 在 Supabase Dashboard SQL Editor 重新跑遇 `42P07: relation "canvas_credentials_user_id_key" already exists`，用 `information_schema.columns` + `table_constraints` 验证：① `expires_at.is_nullable = NO`（NOT NULL 已生效）、② `canvas_credentials_user_id_key` 约束存在（UNIQUE 已生效）。两条约束**全部就位**，本卡脚本无须再跑。同步更新 P0-2-2 执行卡「待 Steven」清单（4 条全部 ✅）+ 进度指针 block（交接点标注从"待 Steven"改为"✅ 全部收口"）+ 571 行脚本描述去除【Steven 手动】标注 |
 | 2026-09-04 | **P0-2-5 首次全量同步 代码完成（🔵 待 Steven 验收，自测 80/80）**：`POST /api/v1/sync/now` + `lib/sync/canvas-sync.ts`（编排）+ `lib/sync/canvas-tasks.ts`（落库）+ `lib/sync/runs.ts`（sync_runs 映射）+ `lib/canvas/assignments.ts`（作业端点）+ `canvasGet` 加 `Link` 翻页能力 + `POST canvas-link` 成功后按课程触发同步。**Steven 拍板三件事**：① 无 due date 的作业照样同步落库为 TBD（实测 CHEM 1A 25 条里 9 条无日期：考勤打卡 + 4 个考试）；② 关联成功后立刻触发一次该课程同步；③ 跳过 `upcoming_events` 主扫描（它只返回未来事件，会系统性丢掉逾期未完成的作业，且不带 `updated_at` 做不了变更判定，逐课详情仍非拉不可）。**自测 80/80**（本地 52 + 多课程 28，全跑真实 PAT/真实课程）：逐条比对 Canvas 标题与 due date 全一致；重复同步 created/updated/deleted 全 0；人为改坏标题+日期+标记 done → 同步后前两者改回、**status=done 保留**；幽灵作业软删除且可恢复；假 token → 课程 failed + 凭证置 error + 再调用 401；一门课失败 → 整批 `partial` 且其他课仍 success；空课程（Math 53 LEC 0 条）是 success 不是失败。**实现期发现的一个设计问题**：节流最初排在凭据检查之前，导致 token 失效时用户看到的是"同步太频繁，27 秒后重试"（错误引导）—— 已改为锁 → 凭据 → 课程 → **节流** 的最后一位。**明确未做**：手动刷新按钮 / 打开应用自动同步 / 定时兜底（P0-2-6，编排已支持 `trigger` 与节流常量）、同步状态 UI（P0-2-7）、总览页合并两类任务（P0-2-11）。**下一张卡 P0-2-6 的头一件事**：定时兜底要遍历全部用户，**需要 service role**（现在只有 user-scoped client） |
 | 2026-09-05 | **P0-2-6 第一拍（T1+T2）代码完成（🔵 待 Steven 验收，自测 18/18）**：① `/sync/now` 新增可选 body `{trigger: 'manual'|'app_open'}`，双档节流 30s/60s 服务端权威映射，`scheduled`/非法值 400，裸 POST 回退 manual（兼容 P0-2-5）；② 新建 `components/sync/sync-controls.tsx`：挂载 + `visibilitychange` 自动同步（客户端 60s 闸门）+ 手动「同步 Canvas」按钮，`hasCanvasLink` 双重门（未关联不渲染不触发）；③ dashboard 标题行接线。**文档修正**：~~migration 补档~~ **核实推翻** —— `sync_runs`/`courses` 同步列/`canvas_credentials` 全部在 `20260902003000_initial_schema.sql`（L55/L58-61/L198/L219），schema 一直版本化，无需补档（旧结论源于 09-04 无 service role 读不到生产 DB 的误判，已在进度指针、P0-2-5 执行卡、Roadmap、MEMORY.md 同源修正）。**T3 第二拍未开工**：等第一拍验收 + service role 决策 |
+| 2026-09-05 | **P0-2-6 两拍全部验收通过 ✅（2026-09-05 傍晚，Steven 生产验收，第 17 张卡）—— M2 推进到 7/11**：**第一拍（T1 打开应用/聚焦自动同步 + T2 手动按钮）** 浏览器验收通过。**第二拍（T3 平台定时兜底）**：自测 18/18 + **完整循环 13/13** + **生产端到端验证**（无凭证 → `401 unauthorized`；正确 secret → 200 `usersTotal=1`/`usersSynced=1`/`coursesSynced=3`、tasks 全 0 幂等无丢数据）。**本卡最大风险不在"加个 key"而在用户隔离**：同步层四处查询（`loadDecryptedCredential` / `loadCredentialMeta` / `findRunningRun` / `findLastRunStartedAt` / 课程查询）原先全靠 RLS 隐式隔离，service role 绕过 RLS 后会读别人凭据、锁与节流变全局、同步所有人课程**且不报错** → 已补**强制 `userId` 参数**（不传编译不过），跨用户隔离专项探针实测通过。**文档冲突收口**：Vercel Cron 只发 GET，契约原写 POST、Sync-Strategy §3.2 又写 GET → 双方法等价。**8 个测试 auth 号已由 Steven 删除干净**。commit `79db2e1`（代码）/ `c48c7fe` `1b5289b`（文档）。**下一张卡 P0-2-7 同步状态 UI**（依赖已满足，无外部依赖），Steven 在新会话开工；本文件已预置 P0-2-7 执行卡（含 4 个待决策项，开工前须跟 Steven 确认，不要自己拍板） |
