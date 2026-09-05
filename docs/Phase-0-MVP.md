@@ -29,9 +29,10 @@
 
 ## 当前进度指针
 
-**当前 task**：`P0-2-5` 首次全量同步（Canvas 作业 → `tasks` 落库）—— ✅ **已验收（2026-09-04 13:44，Steven「效果完美」）· 勿重做**。执行卡见 [P0-2-5](#-p0-2-5--首次全量同步canvas-作业--tasks-落库-代码完成-2026-09-04-待-steven-验收)。
+**当前 task**：`P0-2-6` 刷新机制 **第一拍（T1 打开应用自动同步 + T2 手动同步按钮）—— 🔵 代码完成 / 自测通过（2026-09-05），待 Steven 验收**。执行卡见 [P0-2-6](#-p0-2-6--刷新机制第一拍t1-打开应用自动同步--t2-手动同步按钮代码完成-2026-09-05-待-steven-验收)。
 
-> 🔜 **下一张卡**：`P0-2-6` 刷新机制 —— **下个窗口继续**（Steven 2026-09-04 收工指示）。头两件事：① 手动「同步」按钮（本次暴露痛点：没有按钮只能靠「解除→重绑」触发同步）；② 打开应用自动同步。另含两个待办：`/sync/scheduled` 定时兜底需 service role key（`.env.local` 无，须先配）+ migration 补档（`sync_runs` / `courses` 同步列 / `canvas_credentials` 均不在 migration 文件里，schema 未版本化）。
+> 🔜 **第一拍交付内容**：① `POST /api/v1/sync/now` 支持可选 body `{trigger: 'manual' | 'app_open'}`（双档节流 30s/60s，服务端权威；`scheduled`/非法值 → 400）；② `components/sync/sync-controls.tsx`（挂载 + `visibilitychange` 自动同步、手动「同步 Canvas」按钮，无关联课程不渲染不触发）；③ dashboard 接线。自测 tsc/lint/build ✅ + 冒烟 18/18。
+> 🔜 **第二拍（T3 定时兜底）等 Steven 验收第一拍后再开工**：`/sync/scheduled` 遍历全部有效凭据用户需 **service role**（`.env.local` 无，须先配）+ `vercel.json` cron。~~migration 补档~~ **2026-09-05 核实推翻**：`sync_runs` / `courses` 同步列 / `canvas_credentials` 全部在 `20260902003000_initial_schema.sql` 里，schema 一直是版本化的（此前结论源于 09-04 诊断时无 service role 读不到生产 DB 的误判）。
 
 > ✅ **P0-2-5 已验收通过（2026-09-04 13:44，Steven 生产验收）**：`POST /api/v1/sync/now`（契约 §6）+ `lib/sync/canvas-sync.ts`（编排：串行 / 重试 / 熔断 / 状态落库）+ `lib/sync/canvas-tasks.ts`（落库：去重 / 增量更新 / 软删除 + 恢复）+ `lib/sync/runs.ts`（`sync_runs` 映射）+ `lib/canvas/assignments.ts`（作业端点与映射）+ `canvasGet` 加 `Link` 翻页能力；`POST canvas-link` 成功后**接上了按课程触发同步**（P0-2-4 刻意留的口子）。
 > - **验收方式**：Steven 在 Chem 1A 详情页「解除关联 → 重新关联」，后端立刻按课触发同步 → 作业落库 → 总览卡片出现（CHEM 1A 5 条近 7 天任务）。**坐实了根因**：Chem 1A 是在旧版（canvas-link 未接同步的 P0-2-4）关联的，那次关联不触发同步，之后重登/刷新也从不触发（自动同步是 P0-2-6 的事）→ tasks 表一直空 → 卡片「近期没有待办」。**Math 53 LEC/DIS 都是 0 条作业，「近期没有待办」是正确状态。**
@@ -565,7 +566,7 @@
 | **P0-2-3** | Canvas API 客户端：拉取课程列表 + 作业列表（含 due date），含限流与错误处理 | Bud | P0-2-2 | 能正确拉取真实数据；API 报错有明确处理不崩溃 | ✅ **已验收（2026-09-04）** |
 | **P0-2-4** | 课程关联 UI：手动将 Canvas 课程与 Tempo Workspace 关联（不做自动匹配） | Bud | P0-2-3 | 可选择并关联；关联后状态可见；可解除关联 | ✅ **已验收通过（2026-09-04 11:36，Steven 浏览器验收）** |
 | **P0-2-5** | 首次全量同步：Canvas 作业 → `tasks` 表落库（去重 + 更新，不重复插入） | Bud | P0-2-4 | 重复同步不产生重复任务；due date 变更能更新 | ✅ **已验收（2026-09-04 13:44，Steven「效果完美」）· 勿重做** |
-| **P0-2-6** | 刷新机制：手动刷新按钮 + 后台定时轮询（**前期频率放宽**，数值见 `Sync-Strategy.md`） | Bud | P0-2-5 | 手动刷新可用；定时轮询按配置执行 | 🔵 **下一张（2026-09-04 拍板，下窗口继续）** |
+| **P0-2-6** | 刷新机制：**打开应用自动同步（T1，主力）** + 手动刷新按钮（T2）+ 后台定时兜底（T3，频率见 `Sync-Strategy.md`） | Bud | P0-2-5 | 打开应用/聚焦标签页自动同步（60s 节流）；手动刷新可用（30s 节流）；定时兜底按配置执行 | 🔵 **第一拍（T1+T2）代码完成/自测通过（2026-09-05），待 Steven 验收**；第二拍 T3 未开工 |
 | **P0-2-7** | **同步状态 UI**：显示最后同步时间 + **失败可见性**（失败时展示最后成功时间与失败原因，绝不静默展示旧数据） | Bud | P0-2-6 | 断网/token 失效时显示明确错误提示，而非旧数据 | ⚪ |
 | **P0-2-8** | Token 过期提醒：基于**用户实际填写的过期时间**（非写死天数）提前提醒 | Bud | P0-2-2 | 用临近过期的测试 token 验证提醒触发 | ⚪ |
 | **P0-2-9** | 撤销授权入口：一键断开 Canvas 授权 + 删除已存凭据 | Bud | P0-2-2 | 断开后凭据从库中清除；同步停止且状态正确显示 | ⚪ |
@@ -715,9 +716,24 @@
 - **🔜 下一张卡 P0-2-6（刷新机制）开工提示**：
   - 编排函数 `runCanvasSync()` 已经支持 `trigger`（`app_open` / `manual` / `scheduled`）与两个节流常量 `MANUAL_THROTTLE_MS`（30s）/ `APP_OPEN_THROTTLE_MS`（60s），**接触发入口即可**，不用改编排。
   - 定时兜底走 `POST /api/v1/sync/scheduled`（契约 §6）：需 `CRON_SECRET` + **恒定时间比较**；批量遍历全部有效凭据用户 —— 这一步**需要 service role**（现在只有 user-scoped client），是 P0-2-6 要解决的头一件事。
-  - ⚠️ **migration 补档（P0-2-6 一并处理）**：`sync_runs` / `courses.sync_status`/`last_synced_at`/`sync_error`/`canvas_course_id` / `canvas_credentials` 全都不在 `supabase/migrations/` 里 —— 是靠 P0-2-2 的手动 SQL 建进 prod 的，schema **未版本化**。补一份收口 migration（用 `CREATE TABLE IF NOT EXISTS` / `ALTER TABLE ... ADD COLUMN IF NOT EXISTS` 幂等写法，prod 已建过也能安全重跑）。
+  - ~~⚠️ **migration 补档（P0-2-6 一并处理）**：`sync_runs` / `courses.sync_status`/`last_synced_at`/`sync_error`/`canvas_course_id` / `canvas_credentials` 全都不在 `supabase/migrations/` 里 —— 是靠 P0-2-2 的手动 SQL 建进 prod 的，schema **未版本化**。~~ **2026-09-05 核实推翻**：逐行查 `20260902003000_initial_schema.sql`，上述表与列**全部在其中**（`canvas_course_id` L55、同步三列 L58-61、`canvas_credentials` L198、`sync_runs` L219）。本条结论源于 09-04 诊断时无 service role 读不到生产 DB 的误判，**无需补档**。
   - 状态展示要的数据已经齐了：`courses.last_synced_at` / `sync_status` / `sync_error` + `sync_runs`（含 `partial` 与逐课程 failures）。
   - 已知留白：`last_seen_at` 只在发生变化时刷新（详见 `lib/sync/canvas-tasks.ts` 文件头），P0-2-7 若想展示"这条任务最后一次在 Canvas 上被看到的时间"，需要改这个取舍（代价是每次同步都刷 `updated_at`）。
+
+---
+
+## P0-2-6 刷新机制第一拍（T1 打开应用自动同步 + T2 手动同步按钮）：代码完成 2026-09-05，待 Steven 验收
+
+**范围**：Sync-Strategy §3 四档触发中的 **T1（主力）+ T2**；T3 定时兜底 = 第二拍，等第一拍验收后再开工。
+
+- **改动清单**：
+  - `app/api/v1/sync/now/route.ts`：新增可选 JSON body `{trigger}`，`parseTrigger()` 校验（省略/非法 JSON/缺字段 → 回退 `manual`，兼容 P0-2-5 裸 POST）；双档节流映射 `app_open → APP_OPEN_THROTTLE_MS(60s)` / `manual → MANUAL_THROTTLE_MS(30s)`；`scheduled` 及非法值 → `400 validation_failed`（定时入口只属于 `/sync/scheduled` + CRON_SECRET）。
+  - `components/sync/sync-controls.tsx`（新建）：T1 = 挂载（`setTimeout(0)` 规避 `react-hooks/set-state-in-effect`）+ `visibilitychange` 重新聚焦触发 `app_open`，客户端 60s 本地闸门（`lastAutoSyncAtRef`，礼貌性，服务端才是权威）；T2 = 「同步 Canvas」outline sm 按钮（syncing 中置灰）。`hasCanvasLink` 双重门：无关联课程不渲染按钮也不自动同步。app_open 的 409/429 静默（正常路径），`credential_invalid` 等可操作错误照常提示；manual 显示全部反馈；成功 `router.refresh()`。
+  - `app/(routes)/dashboard/page.tsx`：`hasCanvasLink = courses.some(c => c.canvasCourseId !== null)`，按钮接在标题行 CourseCreatePanel 左侧。
+- **自测**：`tsc` ✅ / `lint` ✅ / `build` ✅（`/api/v1/sync/now` 在路由表）/ **冒烟 18/18**（双用户：B 未连接控制组 401/404/400 路径 ×8 + dashboard 无按钮；A 真实 PAT 全链路：凭据 201 无 token 回显、建课、关联 200 + tasks 落库、**双档节流实测 `app_open` retryAfter=57s > `manual`=26s**（60s vs 30s 窗口差）、dashboard 有按钮）。
+- **⚠️ 诚实边界**：以上为 API/SSR 级验证；按钮点击、聚焦标签页触发自动同步的体感需 **Steven 本地 `npm run dev` 浏览器验收**。
+- **待 Steven**：① 浏览器验收第一拍；② 删 4 个测试 auth 账号（`p026-a-1788637754178` / `p026-b-1788637748968` / `p026-a-1788637835557` / `p026-b-1788637831861`，均 `@example.com`；前两个有遗留 course+credential 业务数据，随 auth 用户级联删除）。
+- **第二拍（T3）开工前置**：service role key（`.env.local` 无）+ `CRON_SECRET` + `vercel.json` cron 配置 —— **等 Steven 验收第一拍后再动**。
 
 ---
 
@@ -803,3 +819,4 @@ P0-0 基础设施
 | 2026-09-04 | **P0-2-4 验收通过 ✅（2026-09-04 11:36，Steven 浏览器验收，第 14 张卡）**：生产环境粘入 PAT → 13 门课全部抓出、教学课 / 其他分组符合预期、关联与解除关联交互全部正常。5 个测试 auth 账号（`p024-a-*` / `p024-b-*` / `p024r-real-*` / `p024g-group-*` / `p024u-*`）已由 Steven 删除。**M2 动态感知前 4 张卡（P0-2-1 / 2-2 / 2-3 / 2-4）全部收口**。进度指针推进至 **P0-2-5**（首次全量同步：Canvas 作业 → `tasks` 落库），Steven 将在新对话框开工；开工提示见 P0-2-4 执行卡末尾（遍历已关联未归档课 / `canvasGet` 需先加 `Link` 头能力 / 同步必须串行 / 重试与状态落库归本卡 / 接上关联成功后的触发同步） |
 | 2026-09-04 | **P0-2-2 交接点② ✅ 收口（2026-09-04，Steven Dashboard 实测）**：迁移 `20260904100000_canvas_credentials_constraints.sql` **早就执行过**，并非"从未跑"—— Steven 在 Supabase Dashboard SQL Editor 重新跑遇 `42P07: relation "canvas_credentials_user_id_key" already exists`，用 `information_schema.columns` + `table_constraints` 验证：① `expires_at.is_nullable = NO`（NOT NULL 已生效）、② `canvas_credentials_user_id_key` 约束存在（UNIQUE 已生效）。两条约束**全部就位**，本卡脚本无须再跑。同步更新 P0-2-2 执行卡「待 Steven」清单（4 条全部 ✅）+ 进度指针 block（交接点标注从"待 Steven"改为"✅ 全部收口"）+ 571 行脚本描述去除【Steven 手动】标注 |
 | 2026-09-04 | **P0-2-5 首次全量同步 代码完成（🔵 待 Steven 验收，自测 80/80）**：`POST /api/v1/sync/now` + `lib/sync/canvas-sync.ts`（编排）+ `lib/sync/canvas-tasks.ts`（落库）+ `lib/sync/runs.ts`（sync_runs 映射）+ `lib/canvas/assignments.ts`（作业端点）+ `canvasGet` 加 `Link` 翻页能力 + `POST canvas-link` 成功后按课程触发同步。**Steven 拍板三件事**：① 无 due date 的作业照样同步落库为 TBD（实测 CHEM 1A 25 条里 9 条无日期：考勤打卡 + 4 个考试）；② 关联成功后立刻触发一次该课程同步；③ 跳过 `upcoming_events` 主扫描（它只返回未来事件，会系统性丢掉逾期未完成的作业，且不带 `updated_at` 做不了变更判定，逐课详情仍非拉不可）。**自测 80/80**（本地 52 + 多课程 28，全跑真实 PAT/真实课程）：逐条比对 Canvas 标题与 due date 全一致；重复同步 created/updated/deleted 全 0；人为改坏标题+日期+标记 done → 同步后前两者改回、**status=done 保留**；幽灵作业软删除且可恢复；假 token → 课程 failed + 凭证置 error + 再调用 401；一门课失败 → 整批 `partial` 且其他课仍 success；空课程（Math 53 LEC 0 条）是 success 不是失败。**实现期发现的一个设计问题**：节流最初排在凭据检查之前，导致 token 失效时用户看到的是"同步太频繁，27 秒后重试"（错误引导）—— 已改为锁 → 凭据 → 课程 → **节流** 的最后一位。**明确未做**：手动刷新按钮 / 打开应用自动同步 / 定时兜底（P0-2-6，编排已支持 `trigger` 与节流常量）、同步状态 UI（P0-2-7）、总览页合并两类任务（P0-2-11）。**下一张卡 P0-2-6 的头一件事**：定时兜底要遍历全部用户，**需要 service role**（现在只有 user-scoped client） |
+| 2026-09-05 | **P0-2-6 第一拍（T1+T2）代码完成（🔵 待 Steven 验收，自测 18/18）**：① `/sync/now` 新增可选 body `{trigger: 'manual'|'app_open'}`，双档节流 30s/60s 服务端权威映射，`scheduled`/非法值 400，裸 POST 回退 manual（兼容 P0-2-5）；② 新建 `components/sync/sync-controls.tsx`：挂载 + `visibilitychange` 自动同步（客户端 60s 闸门）+ 手动「同步 Canvas」按钮，`hasCanvasLink` 双重门（未关联不渲染不触发）；③ dashboard 标题行接线。**文档修正**：~~migration 补档~~ **核实推翻** —— `sync_runs`/`courses` 同步列/`canvas_credentials` 全部在 `20260902003000_initial_schema.sql`（L55/L58-61/L198/L219），schema 一直版本化，无需补档（旧结论源于 09-04 无 service role 读不到生产 DB 的误判，已在进度指针、P0-2-5 执行卡、Roadmap、MEMORY.md 同源修正）。**T3 第二拍未开工**：等第一拍验收 + service role 决策 |

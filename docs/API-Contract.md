@@ -569,8 +569,24 @@ syllabus 数据、根本没有同步这回事。硬编码 `staleWarning: false` 
   `last_synced_at` / `sync_status` / `sync_error` **不动** —— 那是真实的同步历史，不该被抹掉。
   等 P0-2-5 落了 canvas 任务、P0-2-7 做同步状态 UI 时再定"已解除关联"怎么显示。
 
-### `POST /api/v1/sync/now`（✅ P0-2-5 已实现）
+### `POST /api/v1/sync/now`（✅ P0-2-5 已实现，P0-2-6 第一拍扩展 trigger 入参）
 手动/打开时触发同步。遍历**已关联 Canvas 且未归档**的课程，**串行**拉取 `GET /api/v1/courses/:id/assignments`，对齐到 `tasks`。服务端按 `Sync-Strategy.md` 节流（手动 30s / 自动 60s），超限返回 `429` + `retryAfter`。
+
+**请求体（可选，P0-2-6 起）**：
+
+```jsonc
+// request（可选；省略 body / 非法 JSON / 不带 trigger 字段 → 一律按 manual 处理，兼容 P0-2-5 时期的裸 POST）
+{ "trigger": "manual" }   // 或 "app_open"
+```
+
+| `trigger` | 节流窗口 | 调用方 |
+|---|---|---|
+| `manual`（默认） | 30s | 手动「同步 Canvas」按钮 |
+| `app_open` | 60s | 打开应用 / 标签页重新聚焦时（客户端静默触发） |
+
+- 两种 trigger **共用同一个节流窗口**（按最近一次 `sync_runs.started_at` 判断，不区分来源）—— 刚手动同步完，立即聚焦标签页不会再触发自动同步。
+- `scheduled` 与任何其他值 → `400 validation_failed`：`/sync/scheduled` 是独立端点（需 `CRON_SECRET`），客户端无权声称自己是定时任务。
+- 客户端的 60s 本地闸门（`AUTO_SYNC_MIN_INTERVAL_MS`）只是礼貌；**服务端节流是权威**（Sync-Strategy §6.4），防直连接口 / 多标签页。
 
 ```jsonc
 // response 200
@@ -591,7 +607,7 @@ syllabus 数据、根本没有同步这回事。硬编码 `staleWarning: false` 
 | 未连接 Canvas（无凭据） | 404 | `not_found` | 与 `GET /canvas/credentials` 同口径（ADR-010：不存在与越权统一 404） |
 | 凭据状态非 active（expired/revoked/error） | 401 | `credential_invalid` | 一个请求都不发，前端引导重新生成 token |
 | 上一次同步还在跑（5 分钟锁内） | 409 | `sync_in_progress` | 不排队，直接拒绝 |
-| 距上次同步 < 30s | 429 | `rate_limited` | `details.retryAfter`（秒）。**服务端独立校验**，不靠前端置灰 |
+| 距上次同步 < 节流窗口（manual 30s / app_open 60s，共用窗口） | 429 | `rate_limited` | `details.retryAfter`（秒）。**服务端独立校验**，不靠前端置灰 |
 | 没有已关联的课程 | 200 | — | 返回全零 summary（不是错误；此时一发请求都不会发，也不触发节流） |
 
 > **检查顺序 = 锁 → 凭据是否存在 → 凭据是否可用 → 有没有课 → 节流。**
@@ -724,3 +740,4 @@ syllabus 数据、根本没有同步这回事。硬编码 `staleWarning: false` 
 | 2026-09-03 | **§8 Demo 端点按 P0-1-10 实现落地**：`POST /api/v1/demo/seed`（建 `is_demo=true` 课程 + 复用 `persistParsedSections` 落五板块 + `syncExamToTask` 派生考试任务，运行时零 LLM；重复 → `409 already_linked`；失败回滚课程）+ `DELETE /api/v1/demo`（级联清子数据 + 复位 `demo_seeded_at`，幂等 `200 {deleted:0}`）。预置数据 = Steven 真实 syllabus（CHEM 1A Fall 2026），`courseOutline`/`officeHours` 按拍板留空，演示课程不建 syllabi 行。现状即实现现状 | P0-1-10 |
 | 2026-09-04 | **§6 `POST`/`DELETE /api/v1/courses/:id/canvas-link` 实现落地**（P0-2-4）：① **`Course` 新增 `canvasCourseId`**（未关联为 `null`；`canvasLinked` 由它派生）—— 关联 UI 要显示"关联的是哪门课"，只有布尔值说不出来；② **409 拆成三种情形**：本课已关联另一个 Canvas 课 / 该 Canvas 课已挂到另一门 Tempo 课 / 重复提交同一 ID（**最后一种按 200 幂等处理，不报错** —— 契约原文"重复关联 → 409"的收敛，理由见 §6）；③ 两个端点都幂等，归档课程一律 404；④ 明确**不触发同步**（同步编排是 P0-2-5，现在空跑等于给假成功信号）；⑤ 明确**不校验 ID 在 Canvas 上是否存在**（省一次上游请求与限流额度，UI 只能从列表选）；⑥ 解除关联只清 `canvas_course_id`，`last_synced_at` / `sync_status` / `sync_error` 不动（真实同步历史，且此刻还没有任何 canvas 任务）。**✅ 2026-09-04 11:36 Steven 浏览器验收通过**，契约 §6 现状即实现现状 | P0-2-4 |
 | 2026-09-04 | **§6 `POST /api/v1/sync/now` 实现落地**（P0-2-5）：响应体按实现补齐 `startedAt` / `finishedAt`；新增完整错误码表（401 `unauthenticated` / 404 `not_found` 未连接 Canvas / 401 `credential_invalid` 凭据非 active / 409 `sync_in_progress` / 429 `rate_limited` + `details.retryAfter` / 无课可同步 → 200 全零）。**检查顺序明确为 锁 → 凭据 → 课程 → 节流**（节流排最后：一个请求都不会发时回 429 是错误引导）。**整批 `partial` 与逐课 `success`/`failed` 的分工写清**（`courses.sync_status` 的 CHECK 不含 partial，partial 只存在于响应与 `sync_runs`）。**写入字段封闭集合明确排除 `status`**。删除语义补齐：软删除 + 可恢复 + **拉取不完整时不做任何删除**。**无 due date 的作业同步为 TBD**（Steven 拍板），已知副作用（Canvas 考试条目与 syllabus 派生任务同名并列）归 P0-2-11。**`POST canvas-link` 成功后按课程触发一次同步**（P0-2-4 留的口子）：失败不影响关联响应、不走节流、结果不进响应体。`GET /api/v1/sync/status` 与 `POST /sync/scheduled` 标注未实现（分属 P0-2-7 / P0-2-6），并写清后者卡在「需要 service role」 | P0-2-5 |
+| 2026-09-05 | **§6 `/sync/now` 新增可选 `trigger` 请求体**（P0-2-6 第一拍）：`manual`（默认，30s 节流）/ `app_open`（60s 节流），双档映射服务端权威；两种 trigger 共用同一节流窗口（按 `sync_runs.started_at`，不区分来源）；省略 body / 非法 JSON / 缺字段回退 `manual`（兼容 P0-2-5 裸 POST）；`scheduled` 及非法值 → `400 validation_failed`（定时入口只属于 `/sync/scheduled` + CRON_SECRET）。错误码表 429 行同步改为「按 trigger 的窗口」。配套前端 `components/sync/sync-controls.tsx`（T1 打开/聚焦自动同步 + T2 手动按钮），无 Canvas 关联课程的用户不渲染按钮也不自动同步 | P0-2-6 |
