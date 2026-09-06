@@ -11,8 +11,10 @@
  * 1. **提醒基于用户实际填的 `expires_at`**，不写死天数。窗口 T-14 / T-7 / T-3 / T-1 / 当天。
  * 2. **一个请求都不该为过期 token 发**（已过期 → 跳过同步）。那是 T3 / T1 的职责，
  *    本文件只负责"算给人看"，不负责发请求。
- * 3. **`status === 'error'**（token 被 Canvas 拒绝）由 P0-2-7 的失败横幅独占 ——
+ * 3. **`status === 'error'`**（token 被 Canvas 拒绝）由 P0-2-7 的失败横幅独占 ——
  *    这里返回 null，避免同一个"连接坏了"的问题出现两份不同文案（一个说失效、一个说过期）。
+ *    **`status === 'revoked'`**（P0-2-9 用户主动撤销）同样返回 null —— 连接是用户自己
+ *    断的，不该再催他重连。
  *
  * ⚠️ 只做纯计算，`now` 由调用方传入（服务端算好），不在内部 `new Date()`。
  */
@@ -57,8 +59,17 @@ export function toCredentialExpiryView(
   status: string,
   now: Date,
 ): CredentialExpiryView | null {
-  // 同步已失败（token 被 Canvas 拒绝）→ 那是 P0-2-7 失败横幅的活，不重复提示。
-  if (status === 'error') {
+  // 两种"不该由本横幅提示"的状态：
+  //
+  // - `error`（token 被 Canvas 拒绝）→ 那是 P0-2-7 失败横幅的活，不重复提示
+  //   （同一个"连接坏了"的问题不该出现两份不同文案）。
+  // - `revoked`（用户主动撤销授权，P0-2-9）→ 连接是用户自己断的。此时凭据行仍在、
+  //   `expires_at` 也还在，若不拦住就会显示"令牌将在 X 天后过期，记得去 bCourses
+  //   重新生成" —— 刚主动断开却又被催着重连，自相矛盾。
+  //
+  // 于是只有 `active` 与 `expired` 会走到下面的过期计算，
+  // 其中 `expired`（时间到了）正是 P0-2-8 要提醒的核心场景。
+  if (status === 'error' || status === 'revoked') {
     return null
   }
 

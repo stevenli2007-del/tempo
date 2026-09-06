@@ -29,9 +29,11 @@
 
 ## 当前进度指针
 
-**当前 task**：`P0-2-8` Canvas token 过期提醒 ✅ **验收通过（2026-09-05 晚，Steven 浏览器验收）** —— 卡已闭环，执行卡保留在下方「P0-2-8 Canvas token 过期提醒」。
+**当前 task**：`P0-2-9` 撤销授权入口 🔵 **开工中（2026-09-05 晚）** —— 执行卡见下方「P0-2-9 撤销授权入口」。依赖 P0-2-2（凭据加密存储，已验收）。
 
-> 🔜 **下一张卡 `P0-2-9`**（M2 9/11）：撤销授权入口（一键断开 Canvas 授权 + 删除已存凭据）。依赖 P0-2-2（凭据加密存储已验收）。P0-2-8 验收后开工。
+> ✅ **P0-2-8 Canvas token 过期提醒 已于 2026-09-05 晚验收通过**（Steven 浏览器验收，第 19 张卡），卡已闭环，执行卡保留在下方。
+
+> 🔜 **M2 剩余**：P0-2-9（本卡）→ P0-2-11 总览页合并。P0-2-10（iCal 兜底）按 P0-2-1 结论不执行。
 
 > ✅ **P0-2-7 验收通过（2026-09-05 15:35，Steven，第 18 张卡）**：浏览器验收通过，3 个 `p027-*` 测试 auth 号已由 Steven 删除干净，本卡无遗留。commit `b70ce71`，Vercel 部署 success。**M2 推进到 8/11。**
 
@@ -576,7 +578,7 @@
 | **P0-2-6** | 刷新机制：**打开应用自动同步（T1，主力）** + 手动刷新按钮（T2）+ 后台定时兜底（T3，频率见 `Sync-Strategy.md`） | Bud | P0-2-5 | 打开应用/聚焦标签页自动同步（60s 节流）；手动刷新可用（30s 节流）；定时兜底按配置执行 | ✅ **两拍全部已验收（2026-09-05，Steven）**：第一拍 T1+T2；第二拍 T3（自测 18/18 + 完整循环 13/13 + 生产端到端 200） |
 | **P0-2-7** | **同步状态 UI**：显示最后同步时间 + **失败可见性**（失败时展示最后成功时间与失败原因，绝不静默展示旧数据） | Bud | P0-2-6 | 断网/token 失效时显示明确错误提示，而非旧数据 | ✅ **2026-09-05 验收通过**（第 18 张卡） |
 | **P0-2-8** | Token 过期提醒：基于**用户实际填写的过期时间**（非写死天数）提前提醒 | Bud | P0-2-2 | 用临近过期的测试 token 验证提醒触发 | ✅ **2026-09-05 晚 验收通过**（Steven 浏览器） |
-| **P0-2-9** | 撤销授权入口：一键断开 Canvas 授权 + 删除已存凭据 | Bud | P0-2-2 | 断开后凭据从库中清除；同步停止且状态正确显示 | ⚪ |
+| **P0-2-9** | 撤销授权入口：一键断开 Canvas 授权 + 删除已存凭据 | Bud | P0-2-2 | 断开后凭据从库中清除；同步停止且状态正确显示 | 🔵 |
 | **P0-2-10** | ~~iCal Feed 兜底（条件性）~~ | Bud | — | ⏸ **不执行**：P0-2-1 判定为可用，条件未触发。保留为长期 Plan B（[ADR-002](./Decisions.md#adr-002)） | ⏸ |
 | **P0-2-11** | 总览页合并展示：syllabus 考试日期 + Canvas 作业 due date 合并排序；考试日期以 `exam_dates` 为权威源 | Bud | P0-2-5, P0-1-9 | 两类任务正确合并；**课程页与总览页日期一致**（[ADR-004](./Decisions.md#adr-004)） | ⚪ |
 
@@ -890,6 +892,82 @@ P0-2-5 的实现是**失败也写 `last_synced_at`**，而 `Database.md` 3.2 对
 - **顺手修的一个编译问题**：给 `SyncSkipReason` 加 `credential_expired` 后，`app/api/v1/sync/now/route.ts` 的 `switch (outcome.skipped)` 不再穷尽 → tsc 报 `outcome.summary` 不可达；补了 `case 'credential_expired'`（401 `credential_invalid`）。该 case 在当前 `runCanvasSync` 路径下不可达（非 active 统一返回 `credential_inactive`），仅为类型穷尽 + 未来直连路径复用。
 - **待 Steven**：① 浏览器验收（横幅文案 / 可关闭 / 重连链接 / 过期后样式变红）；② 若想真体验，把真号 `canvas_credentials.expires_at` 改临近日期看横幅，确认后改回。
 - **唯一遗留自查（沿用昨天）**：首次 cron（10:00/22:00 UTC）触发后顺手看 Vercel → Cron Jobs 是否有记录。
+
+---
+
+## P0-2-9 撤销授权入口：🔵 开工中（2026-09-05 晚）
+
+### 任务定义（原文）
+
+> **P0-2-9** 撤销授权入口：一键断开 Canvas 授权 + 删除已存凭据。验收标准：断开后凭据从库中清除；同步停止且状态正确显示。
+
+### 规格来源（已核对）
+
+**API-Contract.md:509**：
+
+> ### `DELETE /api/v1/canvas/credentials` — 撤销授权
+> 删除加密凭证 + 将 `status` 置为 `revoked` + 停止同步。**已同步的 `tasks` 保留**（用户的学习记录不该因为断开连接而消失），但同步状态显示为"未连接"。
+
+**Sync-Strategy.md §10 生命周期表**：
+
+| 阶段 | 状态 | 系统行为 | 用户看到 |
+|---|---|---|---|
+| 用户撤销 | `revoked` | 停止一切同步，删除加密凭证 | **确认提示** |
+
+### 领卡最小上下文（读到这里即可开工，别凭记忆写）
+
+- **表结构已就绪，不需要 Steven 跑 SQL**：`status` 的 CHECK 已含 `'revoked'`（迁移 `20260902003000:207`），`revoked_at` 列已存在（:211）。`CredentialStatus` 类型同样已含（ `types/canvas.ts:17`）。
+- 🔴 **`secret_encrypted` 是 `text NOT NULL`（迁移 :201）** —— 撤销**不能把密文置 null，也不能置空串**。原因见下一条。
+- 🔴 **密文必须被"有效格式的占位密文"覆盖，不能清空**：`runCanvasSync` 的顺序是 `loadDecryptedCredential()`（内部**先 `decryptSecret()` 再返回 status**）→ 判空 → **才**判 `status !== 'active'`（`lib/sync/canvas-sync.ts:100-107`）。置空串会让 `decryptSecret('')` **抛错**，同步从"优雅跳过 `credential_inactive`"退化成"整趟崩溃"。正确做法：`secret_encrypted = encryptSecret(<占位串>)`，让解密成功、随后被 status 检查拦下。
+- **T3 定时同步不用改**：`runScheduledSync` 只扫 `.eq('status','active')`（`lib/sync/scheduled.ts:81`），revoked 凭据根本不进循环，**不会**被误翻成 `expired`。
+- **撤销后同步自动停止**，不用动编排：`credential.status !== 'active'` → `{skipped:'credential_inactive'}`。
+- **入口位置**：课程详情页 `app/(routes)/courses/[id]/page.tsx:98-101` 的「Canvas 关联」区块 → 组件 `components/courses/canvas-link.tsx`。该组件已有**三态**（`collapsed`/`picking`/`connecting`）与**二次确认范式**（`isConfirmingUnlink` + destructive 按钮 + 取消），本卡复用同一套交互，不另造。
+- `CanvasLink` 目前只收 `courseId` / `canvasCourseId`，**不知道凭据是否存在** → 需要新增 prop（如 `hasCredential`），由课程详情页服务端查一次 `loadCredentialMeta` 传入。
+- 🔴 **必须修的 P0-2-8 遗留口子**：`toCredentialExpiryView` 只在 `status === 'error'` 时返回 null（`lib/sync/expiry.ts:61`）。撤销后凭据行仍在（`status='revoked'`），dashboard（`dashboard/page.tsx:232`）会照旧算出「Canvas 访问令牌将在 X 天后过期，记得在 bCourses 重新生成」—— 用户刚主动断开却被催着重连。**本卡把 `revoked` 一并返回 null。**（`expired` 要保留提醒，那是 P0-2-8 的核心。）
+- ADR-010：不存在与越权统一 404。本卡的"已撤销 / 从没连过"都走 404 `not_found`。
+
+### 决策（Steven 2026-09-05 拍板，AskUserQuestion 全选推荐项）
+
+1. **入口放课程详情页「Canvas 关联」区块** —— 与「关联 / 更改 / 解除关联」同一处；设置页属 P0-3-2，而 P0-3-2 反向依赖本卡，故不能在设置页里做。P0-3-2 建成后可整体搬过去。
+2. **撤销保留各门课的 `canvas_course_id`** —— 只断凭据、不动课程关联。重粘 token 后立刻恢复同步，不用逐门重关联。与契约「tasks 保留」同一精神：撤销不该销毁用户已建立的结构。
+3. **要二次确认**，复用「解除关联」的确认框样式，文案写清后果（停止同步 / 已导入任务保留 / 可重新连接）。
+
+### 交付（预计）
+
+- `app/api/v1/canvas/credentials/route.ts`：新增 `DELETE`。未登录 401；无凭据或**已撤销** → 404 `not_found`（ADR-010 + 幂等）；否则覆盖占位密文 + `status='revoked'` + `revoked_at=now()` + 清 `last_error_*`，返回 200 + `toCredentialMeta`（密文永不外泄）。
+- `components/courses/canvas-link.tsx`：新增「撤销 Canvas 授权」入口 + 二次确认（复用 `isConfirmingUnlink` 范式）；撤销成功后 `router.refresh()`。
+- `app/(routes)/courses/[id]/page.tsx`：服务端查凭据 → 传 `hasCredential` 给 `CanvasLink`。
+- `lib/sync/expiry.ts`：`toCredentialExpiryView` 增 `status === 'revoked'` → null（修 P0-2-8 口子）。
+
+### 自测
+
+- 端点：未登录 401 / 无凭据 404 / 有凭据 200 且 `status='revoked'` + `revoked_at` 非空 / **重复撤销 404**（幂等）/ **tasks 与 `canvas_course_id` 均未变** / 他人凭据不可撤销（service role 场景下仍按 `user_id` 过滤）。
+- 撤销后再触发同步 → `credential_inactive`，**不抛错**（验证占位密文方案成立）。
+- dashboard：撤销后**不再显示过期横幅**（近过期凭据 + revoked）。
+- 纯函数：`toCredentialExpiryView` 的 `revoked` → null（沿用 `node --experimental-strip-types` 直跑）。
+- tsc / lint / build ✅。
+
+### 诚实边界
+
+按钮点击、确认框观感、撤销后各页面状态联动，需 Steven 本地 `npm run dev` 浏览器验收（SSR 载荷级与端点级我能验证，点击不能）。
+
+### 验收记录（2026-09-05 晚，Bud 代码完成 + 自测 44/44，待 Steven 浏览器验收）
+
+- **Steven 拍板三项**（AskUserQuestion，全选推荐项）：① 入口放**课程详情页「Canvas 关联」区块**（设置页属 P0-3-2，而 P0-3-2 反向依赖本卡）；② 撤销**保留**各门课的 `canvas_course_id`（只断凭据，重连后立刻恢复同步）；③ **要二次确认**，复用「解除关联」的确认框。
+- **交付（4 文件）**：
+  - `app/api/v1/canvas/credentials/route.ts`：新增 `DELETE`。未登录 401；无凭据或**已撤销** → 404 `not_found`（ADR-010 + 幂等）；否则覆盖占位密文 + `status='revoked'` + `revoked_at=now()` + 清 `last_error_*`，返回 200 + `toCredentialMeta`。
+  - `components/courses/canvas-link.tsx`：新增 `hasCredential` prop + 「撤销 Canvas 授权」入口 + 二次确认（复用 `isConfirmingUnlink` 范式，两个确认框互斥）；`handleRevoke` 把 **404 当成功处理**（想达到的状态本来就成立，刷新即可），只对其余错误码报错。
+  - `app/(routes)/courses/[id]/page.tsx`：服务端查凭据传 `hasCredential`；**已撤销算「没有」**（入口该消失）；查询失败静默按"没有凭据"处理（撤销入口是次要功能，不该盖住整门课的内容，显式报错由 dashboard 负责）。
+  - `lib/sync/expiry.ts`：`toCredentialExpiryView` 增 `status === 'revoked'` → null。
+- 🔴 **本卡最实的改动：「删除加密凭证」的技术落地 = 用占位密文覆盖**。`secret_encrypted` 是 `NOT NULL`，置空会违反约束；更关键的是 `runCanvasSync` 的顺序是 `loadDecryptedCredential()`（内部**先解密再返回 status**）→ 判空 → **才**判 `status !== 'active'`，置空串会让 `decryptSecret('')` 抛错，同步从"优雅跳过"退化成"整趟崩溃"。所以写入 `encryptSecret('revoked')` —— 格式合法、解密成功、随后被 status 检查拦下。原 token 被覆盖不可恢复，这才是"删除"的落地含义。
+- 🔴 **实现期抓到的 P0-2-8 遗留口子**：`toCredentialExpiryView` 原本只在 `status === 'error'` 时返回 null，而撤销后凭据行仍在（`status='revoked'`）→ dashboard 会照旧算出「令牌将在 X 天后过期，记得去 bCourses 重新生成」，**用户刚主动断开却被催着重连**。已把 `revoked` 一并返回 null。
+- **顺带确认的两件事**（都不用改代码）：① 撤销后同步**自动停止**，因为 `runCanvasSync` 对 `status !== 'active'` 统一返回 `credential_inactive`；② **T3 定时同步不会把 revoked 误翻成 expired** —— `runScheduledSync` 只扫 `.eq('status','active')`，revoked 根本不进循环。
+- **自测 44/44（全绿）**：
+  - **纯函数 14/14**（`node --experimental-strip-types` 直跑）：revoked 在 5 天后 / 当天 / 已过期 / 30 天后四种情形**全部返回 null**；回归 active 的 T-15 / T-14 / T-1 / T-0、expired 仍出横幅、error 仍为 null、脏数据（null / 坏时间串）兜底。
+  - **端到端 30/30**（`next build` + `next start` + 双测试号，真实 PAT）：鉴权与无凭据 404 / 建立凭据 201 且不回显 token / **撤销 200 + DB 实翻 `revoked` + `revoked_at` 非空 + 密文确被覆盖** / **重复撤销 404 且 `revoked_at` 未被刷新**（幂等）/ **已同步 tasks 与 `canvas_course_id` 均未变**（数据保留）/ **撤销后打同步 → 401 `credential_invalid` 而非 500**（占位密文方案成立，最关键一条）/ 跨用户隔离（A 撤销后 B 仍 active）/ 课程详情页入口显隐（A 已撤销不含、B 有凭据含、B 访问 A 的课 404）/ **dashboard 对照组：active+近过期有横幅、revoked+近过期无横幅**。
+  - tsc / eslint / `next build` ✅。两个 `p029-*` 测试 auth 号已用 service role 删除；临时脚本 `.tmp-p029-*` 已删。
+- **待 Steven**：① 浏览器验收（课程详情页撤销入口 + 确认框 + 撤销后入口消失）；② 若想真体验，用真号撤销后重新连一次，确认同步恢复（关联保留，不用重新关联课程）。
+- **唯一遗留自查（沿用）**：首次 cron（10:00/22:00 UTC）触发后顺手看 Vercel → Cron Jobs 是否有记录。
 
 ---
 

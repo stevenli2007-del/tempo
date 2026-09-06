@@ -12,8 +12,15 @@ import type { CanvasCourse } from '@/types/canvas'
  *
  * 三态：
  * - `collapsed`：默认视图。已关联显示关联到哪门课 + 更改 / 解除；未关联显示关联入口。
+ *   底部另有「撤销 Canvas 授权」（P0-2-9，账号级操作，仅在已保存凭据时出现）。
  * - `picking`：从 Canvas 课程列表里选一门（`GET /api/v1/canvas/courses`）。
  * - `connecting`：还没连 Canvas 或 token 失效 → 内嵌连接表单。
+ *
+ * ### 关于「撤销授权」与「解除关联」是两件事
+ * 解除关联 = 这一门课不再跟着某门 Canvas 课（`DELETE /courses/:id/canvas-link`）。
+ * 撤销授权 = 整个 Canvas 连接断开（`DELETE /canvas/credentials`），删掉保存的 token，
+ * **所有**课程停止同步。后者是账号级的，放在这里只是因为用户找 Canvas 操作时
+ * 只会来这个区块（设置页属 P0-3-2，尚未建）。撤销后课程关联与已导入作业都保留。
  *
  * ### 为什么"关联"按钮不默认就把课程列表拉回来
  * 拉列表要打一次 Canvas（走限流额度）。用户可能只是打开详情页看看，
@@ -29,19 +36,30 @@ import type { CanvasCourse } from '@/types/canvas'
 export function CanvasLink({
   courseId,
   canvasCourseId,
+  hasCredential,
 }: {
   courseId: string
   /** 已关联的 Canvas 课程 ID；null = 未关联。 */
   canvasCourseId: string | null
+  /**
+   * 用户是否已保存 Canvas 凭据（P0-2-9）。
+   *
+   * 撤销授权是**账号级**操作（断的是整个 Canvas 连接，不是这一门课），
+   * 但入口按 Steven 2026-09-05 的拍板放在本组件里 —— 用户找 Canvas 相关操作时
+   * 只会来这个区块。因此它必须知道"当前到底连没连"，没有凭据时整个入口不渲染。
+   * 由课程详情页服务端查一次传入，组件不自己发请求。
+   */
+  hasCredential: boolean
 }) {
   const router = useRouter()
   const [mode, setMode] = useState<'collapsed' | 'picking' | 'connecting'>('collapsed')
   const [courses, setCourses] = useState<CanvasCourse[] | null>(null)
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  /** 正在提交关联/解除的按钮（用 externalId 或 'unlink' 标记），用于禁用防重复点。 */
+  /** 正在提交关联/解除/撤销的按钮（用 externalId 或 'unlink' / 'revoke' 标记），用于禁用防重复点。 */
   const [pending, setPending] = useState<string | null>(null)
   const [isConfirmingUnlink, setIsConfirmingUnlink] = useState(false)
+  const [isConfirmingRevoke, setIsConfirmingRevoke] = useState(false)
 
   /** 已关联那门课的展示信息。列表还没拉过时只知道 ID。 */
   const linked = courses?.find((course) => course.externalId === canvasCourseId) ?? null
@@ -134,6 +152,50 @@ export function CanvasLink({
       }
 
       setIsConfirmingUnlink(false)
+      setMode('collapsed')
+      router.refresh()
+    } catch {
+      setError('网络错误，请稍后重试')
+    } finally {
+      setPending(null)
+    }
+  }
+
+  /**
+   * 撤销 Canvas 授权（P0-2-9）。
+   *
+   * 与「解除关联」的区别：解除只动**这一门课**（`canvas_course_id = null`），
+   * 撤销动的是**整个连接** —— 删除已保存的 token，所有课程停止同步。
+   * 已导入的作业（`tasks`）与各门课的关联关系**都保留**，重新连接后即可继续同步。
+   *
+   * 404 = 没有凭据，或已经撤销过了（端点幂等）。这不算失败 ——
+   * 想达到的状态（没有有效凭据）本来就成立，刷新一下让服务端重算 `hasCredential` 即可。
+   */
+  async function handleRevoke() {
+    setError(null)
+    setPending('revoke')
+    try {
+      const response = await fetch('/api/v1/canvas/credentials', {
+        method: 'DELETE',
+      })
+
+      if (!response.ok) {
+        if (response.status === 404) {
+          setIsConfirmingRevoke(false)
+          router.refresh()
+          return
+        }
+
+        const body: unknown = await response.json().catch(() => null)
+        const message =
+          typeof body === 'object' && body !== null && 'error' in body
+            ? (body as { error?: { message?: unknown } }).error?.message
+            : undefined
+        setError(typeof message === 'string' ? message : `撤销授权失败（HTTP ${response.status}）`)
+        return
+      }
+
+      setIsConfirmingRevoke(false)
       setMode('collapsed')
       router.refresh()
     } catch {
@@ -298,6 +360,61 @@ export function CanvasLink({
               取消
             </button>
           </div>
+        </div>
+      ) : null}
+
+      {/* ---------- 撤销授权：账号级操作（P0-2-9） ---------- */}
+      {hasCredential ? (
+        <div className="border-t border-border pt-3">
+          <div className="flex items-start justify-between gap-4">
+            <div className="min-w-0">
+              <p className="text-xs font-medium text-foreground">撤销 Canvas 授权</p>
+              <p className="mt-0.5 text-xs text-muted-foreground">
+                删除已保存的访问令牌并停止所有课程的同步。这是账号级操作，不只影响这门课。
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => {
+                setError(null)
+                // 两个确认框互斥：同时展开会让用户分不清现在点下去是解除还是撤销。
+                setIsConfirmingUnlink(false)
+                setIsConfirmingRevoke(true)
+              }}
+              className="h-8 shrink-0 rounded-md px-3 text-sm text-muted-foreground hover:text-destructive"
+            >
+              撤销授权
+            </button>
+          </div>
+
+          {isConfirmingRevoke ? (
+            <div className="mt-2 rounded-lg border border-border bg-muted/40 p-3">
+              <p className="text-sm text-foreground">
+                撤销 Tempo 对 bCourses 的访问授权？Tempo 会删除已保存的访问令牌，所有课程停止同步。
+              </p>
+              <p className="mt-1 text-xs text-muted-foreground">
+                已导入的作业和各门课的关联都会保留 —— 重新连接后即可继续同步，不用重新关联课程。
+              </p>
+              <div className="mt-2 flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => void handleRevoke()}
+                  disabled={pending !== null}
+                  className="h-8 rounded-md bg-destructive px-3 text-xs font-medium text-destructive-foreground disabled:opacity-50"
+                >
+                  {pending === 'revoke' ? '撤销中…' : '确认撤销'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setIsConfirmingRevoke(false)}
+                  disabled={pending !== null}
+                  className="h-8 rounded-md px-3 text-xs text-muted-foreground"
+                >
+                  取消
+                </button>
+              </div>
+            </div>
+          ) : null}
         </div>
       ) : null}
 

@@ -506,8 +506,21 @@ syllabus 数据、根本没有同步这回事。硬编码 `staleWarning: false` 
 ### `GET /api/v1/canvas/credentials`
 只返回元数据：`status` / `expiresAt` / `lastUsedAt` / `lastErrorAt` / `lastErrorMessage` / `canvasDomain`。**不含任何密钥字段。**
 
-### `DELETE /api/v1/canvas/credentials` — 撤销授权
-删除加密凭证 + 将 `status` 置为 `revoked` + 停止同步。**已同步的 `tasks` 保留**（用户的学习记录不该因为断开连接而消失），但同步状态显示为"未连接"。
+### `DELETE /api/v1/canvas/credentials` — 撤销授权（✅ P0-2-9 已实现）
+删除加密凭证 + 将 `status` 置为 `revoked` + 停止同步。**已同步的 `tasks` 保留**（用户的学习记录不该因为断开连接而消失），**各门课的 `canvas_course_id` 关联同样保留**（只断凭据；重新连接后立刻恢复同步，不必逐门课重新关联）。同步状态显示为"未连接"。
+
+| 情形 | HTTP | 错误码 | 说明 |
+|---|---|---|---|
+| 未登录 | 401 | `unauthenticated` | |
+| 没有凭据 **或已经撤销过** | 404 | `not_found` | ADR-010：不存在与越权统一口径。**重复撤销是幂等的**，`revoked_at` 不刷新 |
+
+> 🔴 **实现注意（P0-2-9 踩到，别改回去）**：`secret_encrypted` 是 `NOT NULL`，
+> 且 `runCanvasSync` 的顺序是 `loadDecryptedCredential()`（内部**先 `decryptSecret()`
+> 再返回 status**）→ 判空 → **才**判 `status !== 'active'`。所以"删除加密凭证" =
+> **用占位密文覆盖**（`encryptSecret('revoked')`），**不能置空也不能置空串** ——
+> 空串会让 `decryptSecret('')` 抛错，同步从"优雅跳过 `credential_inactive`"
+> 退化成"整趟 500"。占位密文格式合法、解密成功，随后被 status 检查拦下，
+> 一个请求都不会发给 Canvas；原 token 被覆盖后不可恢复。
 
 ### `GET /api/v1/canvas/courses`
 服务端代理拉取用户的 Canvas 课程列表，供关联 UI 使用。**忠实返回全部 active enrollment 课程（含 term），代理层不做学期/教学课程筛选** —— 是否过滤掉 "Default Term"/"Projects" 里的入学流程类模块（GBO / PartySafe 等）是 P0-2-4 关联 UI 的产品决策。

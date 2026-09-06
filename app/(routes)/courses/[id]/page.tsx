@@ -6,6 +6,7 @@ import { CourseActions } from '@/components/courses/course-actions'
 import { SyllabusUpload } from '@/components/courses/syllabus-upload'
 import { SectionEditor } from '@/components/sections/section-editor'
 import { UUID_PATTERN } from '@/lib/api/params'
+import { loadCredentialMeta } from '@/lib/canvas/credentials'
 import { loadCourseDetail } from '@/lib/course-detail'
 import { createClient } from '@/lib/supabase/server'
 
@@ -72,6 +73,23 @@ export default async function CourseDetailPage({ params }: PageProps) {
     notFound()
   }
 
+  /**
+   * 撤销授权入口（P0-2-9）需要知道用户是否已保存 Canvas 凭据。
+   *
+   * **已撤销的凭据算「没有」**：撤销后那一行仍在库里（`status='revoked'`，重连时复用同一行），
+   * 但入口应当消失 —— 都断开了还摆一个「撤销授权」按钮是自相矛盾的。
+   *
+   * 查询失败按「没有凭据」处理并**静默**：撤销入口是这个页面的**次要**功能，
+   * 不该因为一次附属查询失败就盖住整门课的内容；凭据查询的显式报错由 dashboard 负责（P0-2-7）。
+   */
+  let hasCredential = false
+  try {
+    const credential = await loadCredentialMeta(supabase, user.id)
+    hasCredential = credential !== null && credential.status !== 'revoked'
+  } catch {
+    hasCredential = false
+  }
+
   const meta = [detail.courseCode, detail.instructorName].filter(Boolean).join(' · ')
 
   return (
@@ -97,7 +115,11 @@ export default async function CourseDetailPage({ params }: PageProps) {
 
         <section className="rounded-xl border border-border bg-card p-5 shadow-sm">
           <h2 className="mb-3 text-sm font-medium text-foreground">Canvas 关联</h2>
-          <CanvasLink courseId={detail.id} canvasCourseId={detail.canvasCourseId} />
+          <CanvasLink
+            courseId={detail.id}
+            canvasCourseId={detail.canvasCourseId}
+            hasCredential={hasCredential}
+          />
         </section>
 
         <section className="rounded-xl border border-border bg-card p-5 shadow-sm">
