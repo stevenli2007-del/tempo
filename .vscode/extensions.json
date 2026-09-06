@@ -1,0 +1,25 @@
+{
+  // 提交进仓库的「推荐扩展」清单。
+  // 换机器 / 重装 VS Code 后打开本项目，编辑器会提示一键安装。
+  //
+  // 选择标准（2026-09-05 定）：只服务于「Steven 读代码、敢动手、能自查报错」，
+  // 不服务于「AI 生成代码」——生成由 WorkBuddy 在对话里完成，IDE 内不养第二个 agent。
+  "recommendations": [
+    // 改崩了能回退到任意历史快照，不依赖 git commit。
+    // 这是 Steven 敢随手改一行看效果的前提。
+    "xyz.local-history",
+
+    // Next 16 + Supabase 泛型的 TS 报错变人话。
+    "yoavbls.pretty-ts-errors",
+
+    // 报错直接显示在行尾，不用 hover、不用翻问题面板。
+    "usernamehw.errorlens",
+
+    // 让代码里的说明性注释与「// ?」提问标记高亮区分于普通代码。
+    "aaron-bond.better-comments",
+
+    // hover 一个 className 能看到它实际是什么样式——
+    // 是「浏览器里看到的」与「文件里写的」之间唯一的桥。
+    "bradlc.vscode-tailwindcss"
+  ]
+}
