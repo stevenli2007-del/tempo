@@ -408,7 +408,16 @@
 > 另两个（`POST` 手动任务、`DELETE`）按 P0-1-9「仅 syllabus 数据」的范围**不做**。
 
 ### `GET /api/v1/tasks?range=7d&limit=50&offset=0`
-总览页数据源，**合并 syllabus 考试与 Canvas 作业**（Phase 0 目前只有 syllabus 考试），按 `dueDate` 升序，`dueDate` 为 `null` 的排最后。
+总览页数据源，**合并 syllabus 考试与 Canvas 作业**（✅ P0-2-11 已核对：两类在同一列表），按 `dueDate` 升序，`dueDate` 为 `null` 的排最后。
+
+两类来源在 `tasks` 表里的形状（两个写入方各自按 `source` 收口，互不干扰 —— 合并展示的最大风险是"一方把另一方的行当缺席删掉"，改任何一条查询都要重新确认这点）：
+
+| 来源 | 写入方 | `source` | `taskType` | `isDerived` | 删除语义 |
+|---|---|---|---|---|---|
+| syllabus 考试派生（`exam_dates` 是权威源，ADR-004） | `lib/sync/exam-tasks.ts` | `syllabus` | `exam` | `true` | 考试行被删 → **物理删除**（它是缓存不是用户数据） |
+| Canvas 作业同步 | `lib/sync/canvas-tasks.ts` | `canvas` | `assignment` | `false` | 外部源删了 → **软删除**（老师误删后恢复很常见） |
+
+两者**都不写 `status`**（用户勾的"已完成"不被任何同步打回 pending，`Database.md` 4.1）。
 
 ```jsonc
 {
@@ -444,11 +453,16 @@
 > ⚠️ **`dueDate` 为 `null` 的行必须保留**：`.lte('due_date', until)` 在 SQL 里对 NULL 求值
 > 结果是 NULL（不成立），会让 TBD 任务整批消失。实现用 `or(due_date.lte.X, due_date.is.null)`。
 
-**`meta` 暂不含 `staleWarning` / `lastSuccessfulSyncAt`**（原契约示例里有这两个字段）：
-它们描述的是 **Canvas 同步状态**（`Sync-Strategy.md` 的陈旧告警），而 Phase 0 的 P0-1-9 只有
-syllabus 数据、根本没有同步这回事。硬编码 `staleWarning: false` 等于告诉用户"数据很新鲜"——
-那是静默的错误数据，比缺字段危险得多（与 P0-1-7 对 `upcomingTasks` 的同一判断）。
-留到 **P0-2-7**（同步状态）与 **P0-2-11**（合并 Canvas 数据）再补。
+**`meta` 不含 `staleWarning` / `lastSuccessfulSyncAt`**（原契约示例里有这两个字段）—— ✅ **P0-2-11 收口：确定不加。**
+
+它们描述的是 **Canvas 同步状态**（`Sync-Strategy.md` 的陈旧告警）。P0-1-9 时期不加的理由是
+「只有 syllabus 数据，根本没有同步这回事，硬编码 `false` 等于告诉用户"数据很新鲜"」——
+那是静默的错误数据，比缺字段危险得多。P0-2-7 已用**另一条路径**解决了这个需求：dashboard
+顶部的 `SyncStatusBar` 由服务端组件直读 `courses` 的 `last_synced_at` / `sync_status` 渲染，
+**不轮询、不建 `GET /sync/status` 端点**（该端点已标注"决定不实现"）。
+
+所以这两个字段永久不进 `tasks` 的 `meta`：同步状态是**课程级**的（每门课各有一份），
+塞进任务列表的 meta 意味着"一批任务共用一个布尔值"，粒度不对，且与状态条重复。
 
 **可见性**：只返回**未归档**课程的任务 —— 归档课程的任务从总览页隐藏（§2 DELETE 的级联语义）。
 `tasks` 表没有 `user_id`，RLS 经 `courses.user_id` 判定（迁移 `20260902100000`），

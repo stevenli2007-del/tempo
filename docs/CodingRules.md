@@ -346,7 +346,10 @@ Steven 说「完成 P0-1-5b 就收手」，Bud 交付 5b 后收到含糊的「Pl
 | 撤销后过期提醒必须消失 | `toCredentialExpiryView` 对 `revoked` 也要返回 null，否则凭据行仍在 → 用户刚主动断开，dashboard 却催他"记得去 bCourses 重新生成 token" | `lib/sync/expiry.ts` 注释、`Phase-0-MVP.md` P0-2-9 执行卡 |
 | 端点成功响应的包装不统一 | `jsonOk` 直接返回数据、不包装：单资源端点（`POST /courses`、`POST\|DELETE /canvas/credentials`）返回**扁平对象**，列表端点（`GET /canvas/courses`、`GET /tasks`）返回 `{data, meta}`。写断言前先 grep `jsonOk` 调用，别默认 `body.data.x` | `lib/api/response.ts` |
 | 状态类视图要覆盖**全部**状态枚举 | 新增状态时（`revoked`），所有消费该字段的纯函数/UI 都要回头过一遍 —— 只判了 `error` 漏了 `revoked`，是"状态机扩展"最常见的一类回归 | 本节 10.1 第 16 条、`lib/sync/expiry.ts` |
+| 写端到端脚本先核对请求字段名 | `canvasDomain`（不是 `domain`）／ `externalCourseId`（不是 `canvasCourseId`）／ Canvas 课程对象的 id 是 `externalId`（不是 `id`）。传 `undefined` 时字符串 `"undefined"` **能过** `[A-Za-z0-9_-]` 校验并"关联成功"，只在同步时报「Canvas 上找不到该资源」，极易误判成上游的锅 | 本节（无其他归属）、`types/canvas.ts`、`API-Contract.md` §6 |
+| 关联成功会**自动触发一次同步** | 脚本里接着再打手动同步必撞 30s 节流（429）。要么等过窗口，要么直接复用关联那次的结果 | `API-Contract.md` §6 `POST canvas-link`、`Phase-0-MVP.md` P0-2-5 执行卡 |
+| 两个写入方共用一张表时，按 `source` 收口 | 总览页只有 `tasks` 一张表，考试派生与 Canvas 同步各写各的 `source`。**任何一条查询/更新/删除漏了 `.eq('source', …)`，就会把对方的行当"缺席"删掉** —— 这是合并展示里最贵的一类事故 | `lib/sync/canvas-tasks.ts` / `exam-tasks.ts` 文件头、`Phase-0-MVP.md` P0-2-11 执行卡 |
 
 ---
 
-*创建：2026-09-01 ｜ 最近更新：2026-09-05（§10.1 第 16 条：状态枚举扩展要回头过一遍消费方；§10.2 新增五行坑索引：占位密文覆盖、撤销后过期提醒、响应包装不统一、状态枚举回归、加上方的 `last_synced_at`）*
+*创建：2026-09-01 ｜ 最近更新：2026-09-05（§10.1 第 16 条：状态枚举扩展要回头过一遍消费方；§10.2 新增三行坑索引：端到端脚本字段名、关联自动触发同步撞节流、两个写入方按 source 收口）*
