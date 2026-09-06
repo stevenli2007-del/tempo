@@ -301,6 +301,20 @@ Steven 说「完成 P0-1-5b 就收手」，Bud 交付 5b 后收到含糊的「Pl
     先问一句「我要的到底是'当前状态最好的那个'，还是'历史上最近的那次'」。
     本项目实现见 `lib/sync/status.ts` 的 `summarizeSyncStatus`。
 
+16. 🔴 **给状态枚举新增一个取值时，要回头把所有消费该字段的地方过一遍。**
+    状态机扩展的回归几乎从不发生在"新增的那处代码"里，而发生在**老代码没覆盖新取值** ——
+    老代码写的时候那个值还不存在，逻辑上完全正确，只是世界变了。
+    反例（P0-2-9 领卡时抓到）：`toCredentialExpiryView`（P0-2-8 写的）只在
+    `status === 'error'` 时返回 null，因为写它的时候只有 `active`/`expired`/`error` 三种。
+    P0-2-9 引入 `revoked` 后，撤销过的凭据仍会算出「令牌将在 X 天后过期，记得去
+    bCourses 重新生成」—— 用户刚主动断开，却被催着重连。
+    **检查方法**：改完枚举，全局搜该字段名，逐个问「新取值进来会走到哪个分支，这个行为对不对」。
+    特别留意"返回 null / 跳过"这类**否定式分支** —— 它们是"不提示"，漏了不报错、只静默出错。
+    反之同理：P0-2-9 靠这条反过来确认了两处不用改 —— `runCanvasSync` 用
+    `status !== 'active'` 兜底（revoke 自动停同步）、T3 只扫 `.eq('status','active')`
+    （revoke 不会被误翻 expired）。**否定式与白名单式判定对新增取值天然安全。**
+    本项目实现见 `lib/sync/expiry.ts`。
+
 ### 10.2 坑索引（细节在各自文档）
 
 | 坑 | 一句话 | 权威位置 |
@@ -328,7 +342,11 @@ Steven 说「完成 P0-1-5b 就收手」，Bud 交付 5b 后收到含糊的「Pl
 | 三态语义别用 `undefined` 隐式承载 | `Map.get` 不存在 / `.find` 没找到 / 查询挂了 在 JS 里**长得一样**，用其中任何一种 `undefined` 当"加载失败"信号，第一次出现"该实体不存在"的正常场景就会误报 | 本节 10.1 第 14 条、`components/courses/course-card.tsx` 注释 |
 | 聚合"最近一次成功"要遍历全集 | 只从状态好的实体里取最大值 → 全部失败时退化成"从没成功过"。**失败的实体也带着上次成功的信息** | 本节 10.1 第 15 条、`lib/sync/status.ts` `summarizeSyncStatus` |
 | `last_synced_at` = 最后一次**成功**同步 | 失败不推进该列（P0-2-7 修正）。否则失败后 UI 把失败时刻当"最后同步时间" = 旧数据伪装成新的 | `Database.md` §3.2、`Sync-Strategy.md` §9、`lib/sync/canvas-sync.ts` `writeCourseState()` |
+| 撤销凭据 = 占位密文覆盖，不是置空 | `secret_encrypted` 是 NOT NULL，且 `runCanvasSync` 顺序是**先解密再判 status**（`canvas-sync.ts:100-107`）→ 置空/空串会让解密抛错，同步从"优雅跳过"退化成整趟 500。正确写法 `encryptSecret('revoked')`：格式合法→解密成功→随后被 status 拦下 | `API-Contract.md` §6 `DELETE /canvas/credentials`、`lib/canvas/credentials.ts` |
+| 撤销后过期提醒必须消失 | `toCredentialExpiryView` 对 `revoked` 也要返回 null，否则凭据行仍在 → 用户刚主动断开，dashboard 却催他"记得去 bCourses 重新生成 token" | `lib/sync/expiry.ts` 注释、`Phase-0-MVP.md` P0-2-9 执行卡 |
+| 端点成功响应的包装不统一 | `jsonOk` 直接返回数据、不包装：单资源端点（`POST /courses`、`POST\|DELETE /canvas/credentials`）返回**扁平对象**，列表端点（`GET /canvas/courses`、`GET /tasks`）返回 `{data, meta}`。写断言前先 grep `jsonOk` 调用，别默认 `body.data.x` | `lib/api/response.ts` |
+| 状态类视图要覆盖**全部**状态枚举 | 新增状态时（`revoked`），所有消费该字段的纯函数/UI 都要回头过一遍 —— 只判了 `error` 漏了 `revoked`，是"状态机扩展"最常见的一类回归 | 本节 10.1 第 16 条、`lib/sync/expiry.ts` |
 
 ---
 
-*创建：2026-09-01 ｜ 最近更新：2026-09-05（§10.1 第 15 条：聚合"最近一次成功"要遍历全集；§10.2 新增三行坑索引：`last_synced_at` 语义、聚合遍历、同步状态判定）*
+*创建：2026-09-01 ｜ 最近更新：2026-09-05（§10.1 第 16 条：状态枚举扩展要回头过一遍消费方；§10.2 新增五行坑索引：占位密文覆盖、撤销后过期提醒、响应包装不统一、状态枚举回归、加上方的 `last_synced_at`）*
