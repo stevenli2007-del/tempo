@@ -7,6 +7,7 @@ import {
 } from '@/lib/canvas/credentials'
 import { validateCanvasDomain, validateCanvasToken, validateExpiresAt } from '@/lib/canvas/validate'
 import { getCurrentUser, internalError, jsonError, jsonOk } from '@/lib/api/response'
+import { recordUsageEvent } from '@/lib/usage-events'
 
 /**
  * 撤销后写入 `secret_encrypted` 的占位明文（P0-2-9）。
@@ -102,6 +103,14 @@ export async function POST(request: Request) {
     if (!data) {
       // 走到这里说明更新目标行消失了（并发删除）。不猜，交给用户重试。
       return jsonError(request, 409, 'conflict', '凭据状态已变化，请重试')
+    }
+
+    // 埋点：续期（P0-3-1 —— token 续期完成率的分子）。
+    // `existing` 存在 = 这次是**覆盖**已有凭据，即"重新连接"；首次连接不算续期。
+    // 撤销后重连也算（凭据行还在，只是 status='revoked'）—— 对指标而言
+    // 它同样回答"这个摩擦有没有促成一次重新授权"。写失败不影响响应。
+    if (existing) {
+      await recordUsageEvent(supabase, user.id, 'credential_renewed')
     }
 
     // 契约：201，且绝不回显 token。

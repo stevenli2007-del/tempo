@@ -21,6 +21,10 @@ import type { SyllabusRow } from '@/lib/syllabi'
 import { loadTasks, loadUpcomingTasks } from '@/lib/tasks'
 import { createClient } from '@/lib/supabase/server'
 import {
+  recordUsageEvent,
+  recordUsageEventOncePerUtcDay,
+} from '@/lib/usage-events'
+import {
   summarizeSyncStatus,
   toCourseSyncLine,
   toCourseSyncView,
@@ -177,6 +181,11 @@ export default async function DashboardPage() {
     redirect('/login')
   }
 
+  // 埋点：打开总览页（P0-3-1 —— 7 日回访次数的分子）。
+  // 「打开」= 服务端渲染一次页面，包括同步成功后的 router.refresh()：刷一次算一次。
+  // 写失败不影响页面（函数内部只告警），埋点是度量不是功能。
+  await recordUsageEvent(supabase, user.id, 'dashboard_view')
+
   const { data, error } = await supabase
     .from('courses')
     .select(COURSE_COLUMNS)
@@ -233,6 +242,14 @@ export default async function DashboardPage() {
     credential === null
       ? null
       : toCredentialExpiryView(credential.expiresAt, credential.status, now)
+
+  // 埋点：过期横幅**真的展示给了用户**（P0-3-1 —— token 续期完成率的分母）。
+  // 条件是横幅会出现（`level !== 'ok'`），而不是"用户点进了重连页" ——
+  // 我们要量的是"提醒这个摩擦有没有促成续期"，看见提醒就算被触达。
+  // 同一 UTC 日只记一次：分母按人算，同一天记五次只会把表撑大。
+  if (expiryView !== null && expiryView.level !== 'ok') {
+    await recordUsageEventOncePerUtcDay(supabase, user.id, 'expiry_reminder_shown', now)
+  }
 
   /**
    * 重连入口：链到第一门关联课的详情页（那里有「Canvas 关联」区块，点「更改」→
