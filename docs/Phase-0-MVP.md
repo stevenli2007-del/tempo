@@ -29,8 +29,13 @@
 
 ## 当前进度指针
 
-**当前 task**：`P0-3-1` 量化指标埋点 ⚪ **未开工 —— M3（P0-3）第一张卡**。依赖 P0-2-11 ✅（已满足，可直接领卡）。
+**当前 task**：`P0-3-1` 量化指标埋点 🔵 **代码完成（2026-09-07，Bud），待 Steven 跑迁移 + 验收**。依赖 P0-2-11 ✅（已满足）。
 四项指标：编辑修正率 / 7 日回访次数 / 人均关联课程数 / token 续期完成率；**口径须与 `PRD.md` 定义一致**。
+
+> ⚠️ **验收前有一个【Steven 手动】步骤**：新表 `usage_events` 的迁移
+> `supabase/migrations/20260907120000_usage_events.sql` 需在 Supabase Dashboard → SQL Editor 执行。
+> 未执行时 `GET /api/v1/metrics` 返回 **500**（这是刻意设计：宁可报错也不返回假 0），
+> 埋点写入则被静默吞掉（只 console.warn，不影响页面）。执行后该端点即返回 200 + 四项指标。
 
 > 🔵 **领卡前先做两件事（2026-09-06 定）**：
 > ① `grep -rn "// ?" --include=*.ts --include=*.tsx` 扫 Steven 留下的提问标记，先作答再写卡；
@@ -1078,7 +1083,7 @@ Phase 0 列表只有几十条，每行再加一个 tag 只会更密，信息增�
 
 | 编号 | 任务 | Owner | 依赖 | 验收标准 | 状态 |
 |---|---|---|---|---|---|
-| **P0-3-1** | 量化指标埋点：编辑修正率、7 日回访次数、人均关联课程数、token 续期完成率 | Bud | P0-2-11 | 四项指标可查；数据口径与 `PRD.md` 定义一致 | ⚪ |
+| **P0-3-1** | 量化指标埋点：编辑修正率、7 日回访次数、人均关联课程数、token 续期完成率 | Bud | P0-2-11 | 四项指标可查；数据口径与 `PRD.md` 定义一致 | 🔵 代码完成（待 Steven 跑迁移 + 验收） |
 | **P0-3-2** | 设置与隐私页：存了哪些数据的说明 + 一键删除 Canvas 凭据 + 一键删除账号及全部数据（级联） | Bud | P0-2-9 | 删除后所有相关数据（含 Storage 文件）被清除 | ⚪ |
 | **P0-3-3** | **种子用户招募（5-6 人）**：技术型 2-3 人 + 非技术型 2-3 人，覆盖 ≥2 门不同学科 | **Steven** | P0-3-2 | 名单确定且构成符合要求（构成不对会导致结论不可信） | ⚪ |
 | **P0-3-4** | 种子用户验证跑通：完整旅程 + 两条异常路径（扫描件 / token 失效） | 共担 | P0-3-3 | 每位用户走通主旅程；异常路径均有正确表现 | ⚪ |
@@ -1088,6 +1093,32 @@ Phase 0 列表只有几十条，每行再加一个 tag 只会更密，信息增�
 > 🔵 **M3 起每张卡交付必附「给 Steven 的三行」**（2026-09-05 定）：点名 ≤2 个文件 + 一个反直觉的点 + 可点的验收路径。
 > **格式与四条硬约束见 `CodingRules.md` §6.1（唯一权威定义，此处不复制）。**
 > 开工前另做一件事：`grep -rn "// ?" --include=*.ts --include=*.tsx` 扫 Steven 留下的提问标记，先作答再写卡。
+
+### P0-3 执行卡（AI 开工最小上下文）
+
+> 与 P0-0 / P0-1 / P0-2 一样：领 task 时只读对应执行卡 + `TechStack.md` 第 2 节版本矩阵，不必重读全部文档。
+
+#### 🎫 P0-3-1 · 量化指标埋点（🔵 代码完成 2026-09-07，Bud；待 Steven 跑迁移 + 验收）
+
+- **做什么**：让 PRD 8.1 的四项指标**可查**。领卡先做的判断是「这功能是不是已经能用了」—— **四项里两项早就有了**：编辑修正率读 `parse_corrections`、人均关联课程数读 `courses.canvas_course_id`，都不需要新埋点。真正缺的是**另外两项的数据源**：没人记录"用户打开过总览页"，也没人记录"过期提醒出现过 / 之后真的续期了"。
+- **改哪些文件**：
+  - `supabase/migrations/20260907120000_usage_events.sql`（新增）—— 新表 `usage_events` + 索引 + 两条 RLS 策略。**【Steven 手动】在 Supabase Dashboard → SQL Editor 执行。**
+  - `lib/usage-events.ts`（新增）—— 埋点**写侧**：`recordUsageEvent()` / `recordUsageEventOncePerUtcDay()`。
+  - `lib/metrics.ts`（新增）—— 埋点**读侧**：四个 `compute*` 纯函数（口径）+ `loadMetrics()`（取数 + 映射）。
+  - `app/api/v1/metrics/route.ts`（新增）—— `GET /api/v1/metrics`（CRON_SECRET + service role）。
+  - `lib/api/cron-auth.ts`（新增）—— 从 `/sync/scheduled` 抽出的共用鉴权（**行为不变**，只为不抄第二遍安全逻辑）。
+  - `app/(routes)/dashboard/page.tsx`（改）—— 渲染即写 `dashboard_view`；过期横幅会出现时写 `expiry_reminder_shown`（同一 UTC 日一条）。
+  - `app/api/v1/canvas/credentials/route.ts`（改）—— 覆盖**已有**凭据时写 `credential_renewed`（首次连接不算续期）。
+- **关键约束**：
+  - 🔴 **埋点失败只告警、绝不抛错**（度量不是功能）：表没迁移 / RLS 写不进都不许让总览页白屏、不许让保存 token 失败。
+  - 🔴 **反向：读数失败必须 500，不返回假 0** —— 静默的 0 会被读成"用户一次都没回来"，比报错危险得多（CodingRules 7）。
+  - 🔴 **分母为 0 时 `rate` 是 `null` 不是 0** —— "一门解析过的课都没有" ≠ "有 10 门但一门都没改"。
+  - **只用三类事件**，不为"将来可能想看"的留枚举值（CHECK 约束每加一个值都要改迁移，没人用的取值只会让表变垃圾桶）。
+  - **7 日窗口锚点 = `canvas_credentials.created_at`**（连接那一刻），不是首次打开页面 —— 连都没连过的人不存在"回访"。
+  - `perUser` 只带 uuid，**不含邮箱**。
+- **自测（Bud，2026-09-07）**：**纯函数 19/19**（`node --experimental-strip-types` 直跑四个 `compute*`：分母口径、窗口边界、事件类型过滤、续期必须在提醒之后、空盘 `null`）｜ `tsc` ✅ ｜ `lint` ✅ ｜ `build` ✅（`/api/v1/metrics` 已进路由表）｜ **端点探针**：无凭证 401 / 错凭证 401 / 正确凭证 500（**正是"表未迁移"，证明鉴权已过、查询已真跑**）；`/sync/scheduled` 回归 200（鉴权抽取后行为不变）。
+- **未实现（明确不在本卡）**：指标**界面**（不建后台页面，端点足够）｜ 指标告警/看板 ｜ P0-3-2 的删账号级联（已写进契约 §7 清单，届时照单执行）。
+- **🔜 下一张卡 P0-3-2（设置与隐私页）开工提示**：① `DELETE /api/v1/account` 的级联清单**已含 `usage_events`**（契约 §7），别漏；② 本卡没动设置页，隐私说明文案归 P0-3-2。
 
 ---
 
@@ -1168,3 +1199,4 @@ P0-0 基础设施
 | 2026-09-05 | **P0-2-11 总览页合并 核对完成 🔵（28/28 全绿，待 Steven 拍板一处 + 浏览器验收）**：**领卡先做的判断 —— 这张卡不是从零写功能**。总览页只读 `tasks` 一张表，两类数据早已各写各的行：`exam-tasks.ts` 写 `source='syllabus'/task_type='exam'/is_derived=true`，`canvas-tasks.ts` 写 `source='canvas'/task_type='assignment'/is_derived=false`；生产截图里「Homework 4」与「Unit 3 Exam」已混排。**改代码前先确认的最大风险是「一方把另一方的行当缺席删掉」** —— 核对确认两边查询/更新/软删除都带 `.eq('source', …)` 收口，风险不存在。**端到端 28/28**（测试号 + 真实 PAT + 真实 CHEM 1A 作业 + 手工造的 3 条考试）：① 两类混排 + `dueDate` 升序 + TBD 排最后 + `isDerived` 标记正确；② 逾期未完成保留在 7 天窗口（把考试日期改成过去验证）；③ **课程页日期 == 总览页日期**（ADR-004 验收标准），逐条比对含 TBD→null，改日期后派生同步更新；④ 考试行删除 → 派生 task 物理删除且 Canvas 任务数量不变；⑤ **二次 Canvas 同步后考试任务数量/日期/状态完全不变**（最高风险项）；⑥ 用户勾的 `done` 不被重新保存打回 pending；⑦ 归档课程任务从总览页隐藏。**交付 = 2 处契约收口**：`API-Contract.md` §5 的「Phase 0 目前只有 syllabus 考试」改为两类来源对照表；「`meta` 的 `staleWarning`/`lastSuccessfulSyncAt` 留到 P0-2-7 与 P0-2-11 再补」收口为**确定不加**（P0-2-7 已用 dashboard 顶部 `SyncStatusBar` 服务端直读 `courses` 同步列解决，同步状态是课程级的，塞进任务 meta 粒度不对）。**待 Steven 拍板**：总览页要不要给 Canvas 作业加「作业」来源标签（现状只有考试有标签）。**脚本踩坑**：`POST /canvas/credentials` 的字段是 `canvasDomain` 不是 `domain`；`POST /canvas-link` 是 `externalCourseId`；Canvas 课程对象的 id 字段是 `externalId` 不是 `id`（传成 `undefined` 时字符串 `"undefined"` **能通过** `[A-Za-z0-9_-]` 校验并关联成功，只在同步时报「Canvas 上找不到该资源」，很容易误判成 Canvas 的锅）；**关联成功会自动触发一次同步**，紧接着再打手动同步会撞 30s 节流（429） |
 | 2026-09-05 | **P0-2-11 验收通过 ✅（2026-09-05 深夜，第 21 张卡）—— M2 动态感知收官 11/11**：Steven 拍板「**不加 Canvas 作业来源标签，保持现状**」（理由：标签的价值在于标出少数派，考试是少数派；给多数派加标签等于给每行加噪声 —— 同一规则适用于「逾期标红有价值 / 未完成标红没价值」）。本卡最终形态：**零功能代码**，合并机制早已随 P0-1-9 + P0-2-5 落地，28/28 端到端核对无误，交付是 2 处契约收口。**M2 全线收官**：2-1 / 2-1b / 2-2 / 2-3 / 2-4 / 2-5 / 2-6 / 2-7 / 2-8 / 2-9 / 2-11 全部 ✅（2-10 不执行，不计入分母）。**下一阶段 M3（P0-3 验证与收尾）**。**遗留（不阻塞）**：① P0-2-9 真号恢复闭环未实操；② Cron Jobs 首次触发自查 |
 | 2026-09-06 | **VS Code 从裸装 → Steven 的「阅读/学习台」+ 新增交付格式约定（非 task 卡；commit `f65cc65`，已 push）**：起因是 Steven 提出「代码全是你写的、我看不懂，但想边做边学又不拖慢进度」。**核实两件外部信息**：① Claude 说的「Copilot Student / Pro / Pro+ 新注册自 2026-04-20 起暂停、无恢复时间表」**为真**（官方 changelog 确认，Free 只剩 2000 次补全 + 50 条 chat/月）；② Claude 说的「Tempo 还没推 GitHub」**为假**（`remote origin = stevenli2007-del/tempo` 早已在推）—— GitHub PR 扩展不必装的**结论对但理由错**，真实原因是我们直接 push main、没有 PR 流程。**落地**：装 5 个扩展（Local History / Pretty TypeScript Errors / Error Lens / Better Comments / Tailwind CSS IntelliSense）并写进 `.vscode/extensions.json`；新增 `CodingRules.md` **§6.1「交付必附『给 Steven 的三行』」**（权威定义：格式模板 + 四条硬约束 + `// ?` 提问标记约定 + 改代码时间窗口防撞车）；`Phase-0-MVP.md` 的 M3 表下与进度指针各加指针（**不复制内容**，遵守 §8 单一事实源）。**主动砍掉两项**：CodeTour 导览（绑具体行号，Tempo 每周改几十个文件必然漂，**过期的导览比没有导览更糟** —— 把人指到错误的行还让人信以为真）、在代码里铺解释性注释（会腐烂，只在这张卡点名的 1-2 个文件里写）。**明确不装**：GitLens（单人项目 blame 无用且公认过重）、Copilot Free（补全是给「自己敲代码的人」的，Steven 不敲）、Cline/Roo（IDE 内再养第二个 agent，上下文远不如对话侧）。**真实风险与规避**：扩展不参与 `next build`、总结不碰代码，两者对质量与构建均为零影响；真正的风险是 ① Steven 动手改时与 Bud 撞车 → 规定他只在「交付后 → 验收前」动代码；② 他开始问更多问题 → 头两三张卡慢 5-10% 后回落。**先试两张卡再决定是否延续**，全部可逆 |
+| 2026-09-07 | **P0-3-1 量化指标埋点 代码完成（🔵 待 Steven 跑迁移 + 验收，第 22 张卡）**：领卡先做的判断是「**四项指标里两项早就有了**」—— 编辑修正率读 `parse_corrections`、人均关联课程数读 `courses.canvas_course_id`，再埋一遍只会造出两份口径；真正缺的是"打开过总览页"与"被提醒过 / 之后续期了"这两件事的记录 → **新增 `usage_events` 表只为这两项服务，三类事件、三个写入点**（dashboard 渲染 / 过期横幅出现 / 覆盖已有凭据）。🔴 **两个方向的硬约束**：埋点写入**失败只告警绝不抛错**（度量不是功能，表没迁移也不许白屏），而**读数失败必须 500 不返回假 0**（静默的 0 会被读成"用户一次都没回来"）；**分母为 0 时 `rate` 是 `null` 不是 0**。新增 `lib/metrics.ts`（四个 `compute*` 纯函数 + `loadMetrics`）+ `GET /api/v1/metrics`（CRON_SECRET + service role，不建后台页面）+ `lib/api/cron-auth.ts`（从 `/sync/scheduled` 抽出的共用鉴权，行为不变，`/sync/scheduled` 回归 200 已验证）。自测 **纯函数 19/19** + tsc/lint/build 全绿 + 端点探针（401/401/500-未迁移）。**⚠️ 验收前【Steven 手动】：执行 `supabase/migrations/20260907120000_usage_events.sql`**，执行后端点即返 200 + 四项指标 | P0-3-1、`PRD.md` 8.1 | |

@@ -736,7 +736,7 @@
 删除 Canvas 凭据 + 全部 `source = canvas` 的任务。**保留 syllabus 与手动任务。**
 
 ### `DELETE /api/v1/account`
-删除账号及全部数据，**级联范围**：`profiles` / `courses` 及其全部子表 / `tasks` / `canvas_credentials` / `sync_runs` / `parse_corrections` / Supabase Storage 中的 syllabus 文件 / Supabase Auth 用户。
+删除账号及全部数据，**级联范围**：`profiles` / `courses` 及其全部子表 / `tasks` / `canvas_credentials` / `sync_runs` / `parse_corrections` / **`usage_events`（P0-3-1 新增，勿漏）** / Supabase Storage 中的 syllabus 文件 / Supabase Auth 用户。
 
 > Storage 文件清理**不可遗漏** —— 只删数据库会留下一堆无主文件，这是最常被漏掉的一步。
 
@@ -765,10 +765,53 @@
 
 ---
 
-## 9. 健康检查
+## 9. 健康检查与运营指标
 
 ### `GET /api/v1/health`
 `{ "status": "ok", "version": "…", "commit": "…" }` —— 部署冒烟测试用，无需登录。
+
+### `GET /api/v1/metrics`　**（P0-3-1）**
+
+四项量化指标，供 Gate 0→1 评审直接读数（G0-2 编辑修正率 / G0-3 人均关联课程数 / G0-7 七日回访）。
+
+- **鉴权**：`Authorization: Bearer ${CRON_SECRET}`，与 `/sync/scheduled` 共用 `lib/api/cron-auth.ts`（sha256 + `timingSafeEqual` 恒定时间比较；**未配置 secret → 500 `cron_not_configured`**，不是放行）。
+- **为什么用 service role**：四项都是跨用户指标，而业务表全开 RLS —— 用户级客户端只能看见自己，算出的"人均"永远是 1。这是 `lib/supabase/admin.ts` 的第三个合法使用方。
+- **不建管理后台界面**：Phase 0 只有 5-6 个种子用户，一个受保护的 JSON 端点比一个后台页面省事，也不会把指标暴露给任何登录用户。
+- **缓存**：`force-dynamic`。缓存一次就会拿着昨天的数做今天的判断。
+
+响应 `200`：
+
+```jsonc
+{
+  "generatedAt": "2026-09-07T18:42:30.215Z",
+  "editCorrectionRate": { "parsedCourses": 4, "correctedCourses": 3, "rate": 0.75 },
+  "returnVisits": {
+    "users": 2, "windowDays": 7,
+    "averageVisits": 3.5, "averageActiveDays": 2.5,
+    "perUser": [{ "userId": "…", "windowStart": "…", "windowEnd": "…", "visits": 4, "activeDays": 3 }]
+  },
+  "linkedCourses": {
+    "users": 3, "linkedCourses": 5, "average": 1.667,
+    "perUser": [{ "userId": "…", "linkedCourses": 3 }]
+  },
+  "tokenRenewal": { "remindedUsers": 2, "renewedUsers": 1, "rate": 0.5 }
+}
+```
+
+**四项口径（`PRD.md` 8.1，实现见 `lib/metrics.ts` 的注释）**
+
+| 指标 | 分母 | 分子 | 说明 |
+|---|---|---|---|
+| 编辑修正率 | 解析**成功**过的课程数 | 其中有 `parse_corrections` 的课程数 | 分母取"解析完成"而非"上传过"：失败的解析没有可被修正的结果，计入只会稀释 |
+| 7 日回访次数 | 连过 Canvas 的用户数 | 各人窗口内打开总览页的次数 | 窗口起点 = `canvas_credentials.created_at`（连接那一刻）；另给 `averageActiveDays`（按天去重）做对照口径 |
+| 人均关联课程数 | **全部**用户数（含注册后没建课的） | 未归档且已关联 Canvas 的课程数 | 归档课不计（上学期历史不该抬高"接入门槛"这个信号） |
+| token 续期完成率 | 看到过期横幅的人数 | 其中**提醒之后**重新授权的人数 | 提醒前就换过 token 的不算"提醒促成" |
+
+> **分母为 0 时 `rate` 是 `null` 而不是 `0`** —— "一门解析过的课都没有"与"有 10 门但一门都没改"是两个事实，返回 0 会把前者伪装成后者的最差值。
+
+**错误码**：401 `unauthorized`（缺/错凭证）｜ 500 `cron_not_configured`（服务端未配 secret）｜ 500 `service_role_key_missing`｜ 500 `internal_error`（**读数失败一律报错，不返回假 0** —— 表没迁移就是这个错）。
+
+**隐私边界**：`perUser` 只带 `userId`（uuid）与数字，**不含邮箱**。
 
 ---
 
@@ -795,6 +838,7 @@
 | POST | `/api/v1/sync/now` | 手动同步（串行 / 去重 / 增量） | ✅ P0-2-5 |
 | POST | `/api/v1/sync/scheduled` | 定时同步（CRON_SECRET） | P0-2-6（需 service role） |
 | GET | `/api/v1/sync/status` | 同步状态 | P0-2-7 |
+| GET | `/api/v1/metrics` | 四项量化指标（CRON_SECRET） | ✅ P0-3-1 |
 | GET | `/api/v1/account/data-summary` | 数据清单 | P0-3-2 |
 | DELETE | `/api/v1/account[/data]` | 删除数据 / 账号 | P0-3-2 |
 | POST/DELETE | `/api/v1/demo[/seed]` | Demo Workspace | P0-1-10 |
@@ -823,4 +867,5 @@
 | 2026-09-04 | **§6 `POST /api/v1/sync/now` 实现落地**（P0-2-5）：响应体按实现补齐 `startedAt` / `finishedAt`；新增完整错误码表（401 `unauthenticated` / 404 `not_found` 未连接 Canvas / 401 `credential_invalid` 凭据非 active / 409 `sync_in_progress` / 429 `rate_limited` + `details.retryAfter` / 无课可同步 → 200 全零）。**检查顺序明确为 锁 → 凭据 → 课程 → 节流**（节流排最后：一个请求都不会发时回 429 是错误引导）。**整批 `partial` 与逐课 `success`/`failed` 的分工写清**（`courses.sync_status` 的 CHECK 不含 partial，partial 只存在于响应与 `sync_runs`）。**写入字段封闭集合明确排除 `status`**。删除语义补齐：软删除 + 可恢复 + **拉取不完整时不做任何删除**。**无 due date 的作业同步为 TBD**（Steven 拍板），已知副作用（Canvas 考试条目与 syllabus 派生任务同名并列）归 P0-2-11。**`POST canvas-link` 成功后按课程触发一次同步**（P0-2-4 留的口子）：失败不影响关联响应、不走节流、结果不进响应体。`GET /api/v1/sync/status` 与 `POST /sync/scheduled` 标注未实现（分属 P0-2-7 / P0-2-6），并写清后者卡在「需要 service role」 | P0-2-5 |
 | 2026-09-05 | **§6 `GET|POST /api/v1/sync/scheduled` 实现落地**（P0-2-6 第二拍，T3 平台定时兜底）：**双方法都支持** —— 契约原文写的 POST 是错的（Vercel Cron 只发 GET），Sync-Strategy §3.2 的 T4 示例写的又是 GET，两份文档打架，此处收口为两个方法行为一致。鉴权用 **sha256 + `timingSafeEqual` 恒定时间比较**（`===` 的逐字节耗时可被侧信道利用）；**fail closed**：`CRON_SECRET` 未配置 → 500 `cron_not_configured`（不管带什么凭证都拒绝执行）、`SUPABASE_SERVICE_ROLE_KEY` 未配置 → 500 `service_role_key_missing`，"忘了配环境变量"绝不退化成公开端点。响应为聚合计数（`usersTotal`/`usersSynced`/`usersFailed`/`usersSkipped` 按原因分列/`usersDeferred` + 课程与任务计数 + 只含消息的 `failures`），**不含任何用户的具体数据**（`user_id` 只进服务端日志）。执行语义：串行逐用户、单用户异常不影响他人、不做节流（靠 5 分钟锁防重跑）、整批 240 秒预算（Vercel 上限 300s）。**🔴 同时给同步层补上强制 `userId` 参数**：本端点用 service role **绕过 RLS**，`loadDecryptedCredential` / `loadCredentialMeta` / `findRunningRun` / `findLastRunStartedAt` 原先全靠 RLS 隐式隔离（查询里没有 `user_id` 条件），在那个客户端下会直接读到**别人的凭据**、把锁与节流变成**全局的**、以及同步**所有人的课程**；四处全部改为显式 `user_id` 过滤且参数**强制**（不传编译不过） | P0-2-6 |
 | 2026-09-05 | **§6 `/sync/now` 新增可选 `trigger` 请求体**（P0-2-6 第一拍）：`manual`（默认，30s 节流）/ `app_open`（60s 节流），双档映射服务端权威；两种 trigger 共用同一节流窗口（按 `sync_runs.started_at`，不区分来源）；省略 body / 非法 JSON / 缺字段回退 `manual`（兼容 P0-2-5 裸 POST）；`scheduled` 及非法值 → `400 validation_failed`（定时入口只属于 `/sync/scheduled` + CRON_SECRET）。错误码表 429 行同步改为「按 trigger 的窗口」。配套前端 `components/sync/sync-controls.tsx`（T1 打开/聚焦自动同步 + T2 手动按钮），无 Canvas 关联课程的用户不渲染按钮也不自动同步 | P0-2-6 |
+| 2026-09-07 | **§9 新增 `GET /api/v1/metrics`**（P0-3-1，章节由「健康检查」改名为「健康检查与运营指标」）：返回 PRD 8.1 四项指标（编辑修正率 / 7 日回访 / 人均关联课程数 / token 续期完成率）。鉴权与 `/sync/scheduled` 共用 `lib/api/cron-auth.ts`（该文件的恒定时间比较 + fail closed 逻辑此前只存在于定时同步路由，P0-3-1 抽出共用，行为不变）。**分母为 0 时 `rate` 返回 `null` 而非 0**；读数失败一律 500，不返回假 0；`perUser` 只带 uuid 不含邮箱。**§7 `DELETE /api/v1/account` 级联范围补 `usage_events`**（P0-3-2 勿漏） | P0-3-1、`PRD.md` 8.1 |
 | 2026-09-05 | **§6 `GET /api/v1/sync/status` 标注为「决定不实现」**（P0-2-7，Steven 拍板）：唯一可能的调用方是总览页状态条，而 dashboard 与课程详情页都是**服务端组件**，可直读 Supabase（`lib/sync/status.ts` 的纯函数）；建端点的唯一正当理由是客户端轮询，而实测一趟同步 6 秒，现有「同步中…」+ `router.refresh()` 已够用。数据仍全部落库，将来需要轮询时按本节形状实现即可。**§5 `meta` 里 `staleWarning` / `lastSuccessfulSyncAt` 仍未返回**（同步状态改由 dashboard 服务端渲染，不走 tasks API），归 P0-2-11 | P0-2-7 |

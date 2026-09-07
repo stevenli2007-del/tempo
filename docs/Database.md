@@ -54,6 +54,7 @@
 | `sync_runs` | 同步批次日志（失败可见性的数据基础） | ✅ |
 | `llm_runs` | LLM 调用审计（可插拔 provider 的度量基础） | ✅ |
 | `parse_corrections` | 用户修正记录（存 diff） | ✅ |
+| `usage_events` | 行为事件埋点（7 日回访 / token 续期完成率） | ✅（P0-3-1 新增） |
 | Phase 2+ 预留表 | 规划能力、多数据源 | ❌ 见第 8 节 |
 
 > 相比初版，`sync_runs` / `llm_runs` / `parse_corrections` 是新增的三张表。它们不是"锦上添花"：
@@ -315,6 +316,32 @@ CREATE UNIQUE INDEX tasks_source_unique
 > **为什么必须存 diff 而不是只存最终结果**：只存最终结果，将来你手上是一堆"正确的值"，看不出 AI 到底错在哪、错在哪个字段、错在哪类课程。"优化 prompt"需要的是**错误模式**，不是正确答案。
 > 实现上：在保存编辑的接口里，把变更前后的值对比后写入本表，一条记录对应一个被修改的字段。
 
+### 3.14 `usage_events`（行为事件埋点，P0-3-1 新增）
+
+| 字段名 | 类型 | 说明 |
+|---|---|---|
+| `id` | uuid (PK) | |
+| `user_id` | uuid (FK → profiles.id, **ON DELETE CASCADE**) | 所属用户 |
+| `event_type` | text | `dashboard_view` / `expiry_reminder_shown` / `credential_renewed` |
+| `created_at` | timestamptz | 事件发生时间（默认 `now()`） |
+
+**它只为 PRD 8.1 四项指标里的两项而建。** 另外两项早就有数据了 —— 编辑修正率读 `parse_corrections`、人均关联课程数读 `courses.canvas_course_id`。**为已经能算出来的指标再埋一遍点，只会造出两份口径。**
+
+| 事件 | 写入点 | 服务于 |
+|---|---|---|
+| `dashboard_view` | dashboard 服务端组件每次渲染（`lib/usage-events.ts`） | 7 日回访次数 |
+| `expiry_reminder_shown` | 过期横幅**真的会展示**时（`level !== 'ok'`），同一 UTC 日最多一条 | token 续期完成率的分母 |
+| `credential_renewed` | `POST /api/v1/canvas/credentials` 覆盖**已有**凭据时（首次连接不算续期） | token 续期完成率的分子 |
+
+> **三个刻意取舍**
+> 1. **不预留"将来可能想看"的事件类型。** 加了没人用的枚举值，这张表就会变成垃圾桶 —— 而且 CHECK 约束每加一个值都要改迁移。
+> 2. **埋点失败只告警、绝不抛错**（`lib/usage-events.ts` 吞掉所有异常，见 CodingRules）。度量不是功能，表没迁移 / RLS 写不进都不该让总览页白屏。
+> 3. **反向：读数时必须报错，不能静默给 0。** `GET /api/v1/metrics` 在表缺失时返回 500 —— 静默的 0 会被读成"用户一次都没回来"，那是比报错危险得多的假信号。
+>
+> **写入频率**：`dashboard_view` 按渲染次数写（含同步成功后的 `router.refresh()`，刷一次算一次）；7 日回访的对照口径 `activeDays`（同一天只算一次）由 `lib/metrics.ts` 在读取时去重算出来，不额外存。
+>
+> ⚠️ **P0-3-2 删账号的级联范围要带上本表**（`user_id` 已 `ON DELETE CASCADE`，删 `profiles` 行即清空；此处显式写出，避免 P0-3-2 只照着旧清单删而漏掉它）。
+
 ---
 
 ## 4. 同步语义（Tempo 内核的数据层约定）
@@ -437,12 +464,16 @@ CREATE INDEX idx_outline_items_course_id ON course_outline_items(course_id);
 
 -- 同步日志按用户 + 时间倒序
 CREATE INDEX idx_sync_runs_user_started ON sync_runs(user_id, started_at DESC);
+
+-- 埋点：按「用户 + 事件类型」取时间窗（7 日回访）或取最近一条（提醒每日去重）
+CREATE INDEX idx_usage_events_user_event_time ON usage_events(user_id, event_type, created_at DESC);
 ```
 
 ### 7.2 RLS（概要，细则见 `Security-Privacy.md`）
 
 - 每张业务表 `ENABLE ROW LEVEL SECURITY`。
-- `profiles` / `canvas_credentials` / `sync_runs` / `parse_corrections`：策略基于 `auth.uid() = user_id`。
+- `profiles` / `canvas_credentials` / `sync_runs` / `parse_corrections` / `usage_events`：策略基于 `auth.uid() = user_id`。
+  - `usage_events`（P0-3-1）额外两条：用户只能 **INSERT 自己的行**（埋点走用户级客户端，没有这条写入会静默全失败）、只能 **SELECT 自己的行**；**不开放 UPDATE / DELETE** —— 埋点是事实记录，不可改写。
 - `courses` 及其子表：策略基于**通过 `courses` 反查 `user_id`**（子表没有直接的 `user_id`）。
 - **验收标准**：用两个测试账号交叉验证，A 账号通过任何接口都取不到 B 账号的任何一行数据（P0-0-5）。
 
@@ -523,4 +554,5 @@ syllabus 可能含教师姓名、office hour 地址、评分细则等个人信�
 | 2026-09-01 | 初版：10 张表 | — |
 | 2026-09-01 | 重写：新增 `sync_runs` / `llm_runs` / `parse_corrections`；新增派生规则章节（ADR-004）；新增同步语义章节；`courses` 增同步状态字段；`tasks` 增 `is_derived` / `external_updated_at` / `last_seen_at` / `is_deleted`；`canvas_credentials` 字段改名与状态机；token 有效期修正 | ADR-001（内核）、ADR-003（LLM 可插拔）、ADR-004（派生）、ADR-005（同步）、PRD F3/F4 |
 | 2026-09-02 | 新增 **7.3 Supabase Storage** 小节（桶 `syllabi`、路径约定、`storage.objects` 四条 RLS 策略、不设 MIME 白名单的理由）；澄清 §3.3 `file_url` 存的是**对象路径而非 URL**（私有桶无永久 URL）；记录「上传未完成的悬挂行」这一已知留白及其兜底机制 | P0-1-1、ADR-009（直传）、`Security-Privacy.md` 私有桶约定 |
+| 2026-09-07 | **新增 §3.14 `usage_events`**（P0-3-1）：只为 PRD 8.1 四项指标中的两项（7 日回访 / token 续期完成率）而建 —— 编辑修正率读 `parse_corrections`、人均关联课程数读 `courses.canvas_course_id`，**不重复埋点**。三类事件的写入点、每日去重规则、"埋点失败只告警 / 读数失败必须 500"的反向约定一并写入；§7.1 补索引、§7.2 补 RLS（INSERT 策略不可省，否则埋点静默全失败）；标注 P0-3-2 删账号需级联本表 | P0-3-1、`PRD.md` 8.1 |
 | 2026-09-02 | **P0-1-2 落地后对 §3.3 的补充**：`raw_text` 由 `POST /api/v1/syllabi/:id/extract` 写入，**列表与上传响应一律不读这一列**（可能几 MB，只有 extract 端点读它取前 1000 字符预览）；`extract_method` 的 CHECK 约束取值确认为 `pdf_text` / `docx` / `pptx` / `manual`（**`docx`/`pptx` 没有 `_text` 后缀**，是初版遗留，不为此改生产表）；悬挂行的兜底已实现 —— `createSignedUrl` 对不存在的对象返回 `NoSuchKey`，extract 端点据此置 `failed` + 返回 409 | P0-1-2、`API-Contract.md` §3 |
