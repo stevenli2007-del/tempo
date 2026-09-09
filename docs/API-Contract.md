@@ -727,18 +727,50 @@
 
 ---
 
-## 7. 账号与隐私（PRD F6 / P0-3-2）
+## 7. 账号与隐私（PRD F6 / ✅ P0-3-2）
 
 ### `GET /api/v1/account/data-summary`
-返回"我们存了你什么"的结构化清单：课程数、syllabus 文件数、任务数、Canvas 连接状态、凭据过期时间。用于设置页透明展示。
+
+返回"我们存了你什么"的结构化清单。设置页是服务端渲染，**直接调 `loadDataSummary()`**；端点存在的意义是让这份清单可被脚本 / 验收直接核对，不是给页面自己 fetch 绕一圈。
+
+```jsonc
+{
+  "courses": 12,             // 未归档课程数
+  "archivedCourses": 3,      // 归档课程数（单独列，不混进 courses）
+  "syllabi": 5,              // syllabi 行数
+  "tasks": 34,               // 未软删（is_deleted = false）的任务数
+  "canvas": {
+    "connected": true,       // 有凭据且未撤销
+    "status": "active",      // null = 从未连接过
+    "expiresAt": "2026-11-30T07:59:59.000Z",
+    "linkedCourses": 3       // 已关联 Canvas 的未归档课程数
+  }
+}
+```
+
+> **计数失败抛 500，不退成 0。** "有 12 门课"显示成 0，用户会以为数据已经被清掉了 —— 在这个页面上，假数字比报错伤得多（CodingRules 7）。
 
 ### `DELETE /api/v1/account/data?scope=canvas`
-删除 Canvas 凭据 + 全部 `source = canvas` 的任务。**保留 syllabus 与手动任务。**
+
+删除 Canvas 凭据 + **物理删除**全部 `source = canvas` 的任务。**保留** syllabus、手动任务与各门课的 `canvas_course_id`。
+
+- `scope` 只支持 `canvas`，其余取值 `400 bad_request`。
+- 与 `DELETE /api/v1/canvas/credentials`（P0-2-9 撤销授权）的**唯一区别**：撤销保留已导入的作业，本端点连它们一起删。两个动作都保留用户自己建立的结构。
+- 幂等：没有凭据时 `revoked: false`，重复调用不会报错。
+
+响应 `200`：`{ "revoked": true, "deletedTasks": 12 }`
 
 ### `DELETE /api/v1/account`
-删除账号及全部数据，**级联范围**：`profiles` / `courses` 及其全部子表 / `tasks` / `canvas_credentials` / `sync_runs` / `parse_corrections` / **`usage_events`（P0-3-1 新增，勿漏）** / Supabase Storage 中的 syllabus 文件 / Supabase Auth 用户。
 
-> Storage 文件清理**不可遗漏** —— 只删数据库会留下一堆无主文件，这是最常被漏掉的一步。
+删除账号及全部数据，**级联范围**：`profiles` / `courses` 及其全部子表（`syllabi` / 五板块 / `tasks`）/ `canvas_credentials` / `sync_runs` / `llm_runs` / `parse_corrections` / `usage_events` / Supabase Storage 中的 syllabus 文件 / Supabase Auth 用户。
+
+- **顺序（实现在 `lib/account/delete-account.ts`）**：① 按 `{user_id}` 前缀删 Storage（含孤儿文件）→ ② `auth.admin.deleteUser()`（FK 级联清空全部业务表）→ ③ 兜底显式删 `profiles` 行。
+- **Storage 失败即整趟失败**（500 `delete_failed`）：文件删不掉还继续删账号，等于制造无主文件，且事后查不出文件属于谁。每一步都幂等，可直接重试。
+- `SUPABASE_SERVICE_ROLE_KEY` 未配置 → 500 `service_role_key_missing`（删 Auth 用户只能走 admin API，这是它的第四个合法使用方）。
+
+响应 `200`：`{ "dataDeleted": true, "authUserDeleted": true, "storageFilesDeleted": 2 }`
+
+> Storage 文件清理**不可遗漏** —— 只删数据库会留下一堆无主文件，这是最常被漏掉的一步（Security-Privacy A11）。
 
 ---
 
@@ -839,8 +871,9 @@
 | POST | `/api/v1/sync/scheduled` | 定时同步（CRON_SECRET） | P0-2-6（需 service role） |
 | GET | `/api/v1/sync/status` | 同步状态 | P0-2-7 |
 | GET | `/api/v1/metrics` | 四项量化指标（CRON_SECRET） | ✅ P0-3-1 |
-| GET | `/api/v1/account/data-summary` | 数据清单 | P0-3-2 |
-| DELETE | `/api/v1/account[/data]` | 删除数据 / 账号 | P0-3-2 |
+| GET | `/api/v1/account/data-summary` | 数据清单 | ✅ P0-3-2 |
+| DELETE | `/api/v1/account/data?scope=canvas` | 清 Canvas 数据（凭据 + 导入任务） | ✅ P0-3-2 |
+| DELETE | `/api/v1/account` | 删除账号及全部数据（含 Storage） | ✅ P0-3-2 |
 | POST/DELETE | `/api/v1/demo[/seed]` | Demo Workspace | P0-1-10 |
 
 ---
@@ -868,4 +901,5 @@
 | 2026-09-05 | **§6 `GET|POST /api/v1/sync/scheduled` 实现落地**（P0-2-6 第二拍，T3 平台定时兜底）：**双方法都支持** —— 契约原文写的 POST 是错的（Vercel Cron 只发 GET），Sync-Strategy §3.2 的 T4 示例写的又是 GET，两份文档打架，此处收口为两个方法行为一致。鉴权用 **sha256 + `timingSafeEqual` 恒定时间比较**（`===` 的逐字节耗时可被侧信道利用）；**fail closed**：`CRON_SECRET` 未配置 → 500 `cron_not_configured`（不管带什么凭证都拒绝执行）、`SUPABASE_SERVICE_ROLE_KEY` 未配置 → 500 `service_role_key_missing`，"忘了配环境变量"绝不退化成公开端点。响应为聚合计数（`usersTotal`/`usersSynced`/`usersFailed`/`usersSkipped` 按原因分列/`usersDeferred` + 课程与任务计数 + 只含消息的 `failures`），**不含任何用户的具体数据**（`user_id` 只进服务端日志）。执行语义：串行逐用户、单用户异常不影响他人、不做节流（靠 5 分钟锁防重跑）、整批 240 秒预算（Vercel 上限 300s）。**🔴 同时给同步层补上强制 `userId` 参数**：本端点用 service role **绕过 RLS**，`loadDecryptedCredential` / `loadCredentialMeta` / `findRunningRun` / `findLastRunStartedAt` 原先全靠 RLS 隐式隔离（查询里没有 `user_id` 条件），在那个客户端下会直接读到**别人的凭据**、把锁与节流变成**全局的**、以及同步**所有人的课程**；四处全部改为显式 `user_id` 过滤且参数**强制**（不传编译不过） | P0-2-6 |
 | 2026-09-05 | **§6 `/sync/now` 新增可选 `trigger` 请求体**（P0-2-6 第一拍）：`manual`（默认，30s 节流）/ `app_open`（60s 节流），双档映射服务端权威；两种 trigger 共用同一节流窗口（按 `sync_runs.started_at`，不区分来源）；省略 body / 非法 JSON / 缺字段回退 `manual`（兼容 P0-2-5 裸 POST）；`scheduled` 及非法值 → `400 validation_failed`（定时入口只属于 `/sync/scheduled` + CRON_SECRET）。错误码表 429 行同步改为「按 trigger 的窗口」。配套前端 `components/sync/sync-controls.tsx`（T1 打开/聚焦自动同步 + T2 手动按钮），无 Canvas 关联课程的用户不渲染按钮也不自动同步 | P0-2-6 |
 | 2026-09-07 | **§9 新增 `GET /api/v1/metrics`**（P0-3-1，章节由「健康检查」改名为「健康检查与运营指标」）：返回 PRD 8.1 四项指标（编辑修正率 / 7 日回访 / 人均关联课程数 / token 续期完成率）。鉴权与 `/sync/scheduled` 共用 `lib/api/cron-auth.ts`（该文件的恒定时间比较 + fail closed 逻辑此前只存在于定时同步路由，P0-3-1 抽出共用，行为不变）。**分母为 0 时 `rate` 返回 `null` 而非 0**；读数失败一律 500，不返回假 0；`perUser` 只带 uuid 不含邮箱。**§7 `DELETE /api/v1/account` 级联范围补 `usage_events`**（P0-3-2 勿漏） | P0-3-1、`PRD.md` 8.1 |
+| 2026-09-09 | **§7 三个端点实现落地**（P0-3-2）：① `GET /api/v1/account/data-summary` 补齐响应形状（课程 / 归档课程 / syllabus / 任务 / Canvas 连接态与过期时间 / 已关联课程数），**计数失败抛 500 不退成 0**；② `DELETE /api/v1/account/data?scope=canvas` 按契约落地为「撤销凭据 + **物理删** `source='canvas'` 的任务」，与 P0-2-9 的 `DELETE /canvas/credentials`（撤销但**保留**已导入任务）**刻意并存**——前者回答"我不想留着从 Canvas 拉来的东西"，后者回答"我想断开但别动我的记录"，两者都保留 syllabus 与手动任务；③ `DELETE /api/v1/account` 明确**删除顺序与失败语义**：Storage 前缀（含孤儿文件）→ `auth.admin.deleteUser()`（FK 级联清库）→ 兜底删 `profiles` 行；**Storage 失败即整趟 500 `delete_failed`**（否则等于制造无主文件）；未配 service role key → 500 `service_role_key_missing` | P0-3-2、`Security-Privacy.md` A11/A12 |
 | 2026-09-05 | **§6 `GET /api/v1/sync/status` 标注为「决定不实现」**（P0-2-7，Steven 拍板）：唯一可能的调用方是总览页状态条，而 dashboard 与课程详情页都是**服务端组件**，可直读 Supabase（`lib/sync/status.ts` 的纯函数）；建端点的唯一正当理由是客户端轮询，而实测一趟同步 6 秒，现有「同步中…」+ `router.refresh()` 已够用。数据仍全部落库，将来需要轮询时按本节形状实现即可。**§5 `meta` 里 `staleWarning` / `lastSuccessfulSyncAt` 仍未返回**（同步状态改由 dashboard 服务端渲染，不走 tasks API），归 P0-2-11 | P0-2-7 |

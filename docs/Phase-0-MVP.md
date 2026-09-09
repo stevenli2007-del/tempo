@@ -29,7 +29,8 @@
 
 ## 当前进度指针
 
-**当前 task**：`P0-3-1` 量化指标埋点 🔵 **代码完成（2026-09-07，Bud），待 Steven 跑迁移 + 验收**。依赖 P0-2-11 ✅（已满足）。
+**当前 task**：`P0-3-2` 设置与隐私页 🔵 **代码完成（2026-09-09，Bud），待 Steven 浏览器验收**。依赖 P0-2-9 ✅（已满足）。
+上一张 `P0-3-1` 已于 2026-09-09 验收：Steven 执行迁移后，生产库实测 `GET /api/v1/metrics` 返 200 + 四项指标（冷启动态：两项 `null`、人均 1.0）。
 四项指标：编辑修正率 / 7 日回访次数 / 人均关联课程数 / token 续期完成率；**口径须与 `PRD.md` 定义一致**。
 
 > ⚠️ **验收前有一个【Steven 手动】步骤**：新表 `usage_events` 的迁移
@@ -1083,8 +1084,8 @@ Phase 0 列表只有几十条，每行再加一个 tag 只会更密，信息增�
 
 | 编号 | 任务 | Owner | 依赖 | 验收标准 | 状态 |
 |---|---|---|---|---|---|
-| **P0-3-1** | 量化指标埋点：编辑修正率、7 日回访次数、人均关联课程数、token 续期完成率 | Bud | P0-2-11 | 四项指标可查；数据口径与 `PRD.md` 定义一致 | 🔵 代码完成（待 Steven 跑迁移 + 验收） |
-| **P0-3-2** | 设置与隐私页：存了哪些数据的说明 + 一键删除 Canvas 凭据 + 一键删除账号及全部数据（级联） | Bud | P0-2-9 | 删除后所有相关数据（含 Storage 文件）被清除 | ⚪ |
+| **P0-3-1** | 量化指标埋点：编辑修正率、7 日回访次数、人均关联课程数、token 续期完成率 | Bud | P0-2-11 | 四项指标可查；数据口径与 `PRD.md` 定义一致 | ✅ 已验收 2026-09-09（Steven 跑迁移 + 生产实测四项读数） |
+| **P0-3-2** | 设置与隐私页：存了哪些数据的说明 + 一键删除 Canvas 凭据 + 一键删除账号及全部数据（级联） | Bud | P0-2-9 | 删除后所有相关数据（含 Storage 文件）被清除 | 🔵 代码完成 2026-09-09（自测 23/23，待 Steven 浏览器验收） |
 | **P0-3-3** | **种子用户招募（5-6 人）**：技术型 2-3 人 + 非技术型 2-3 人，覆盖 ≥2 门不同学科 | **Steven** | P0-3-2 | 名单确定且构成符合要求（构成不对会导致结论不可信） | ⚪ |
 | **P0-3-4** | 种子用户验证跑通：完整旅程 + 两条异常路径（扫描件 / token 失效） | 共担 | P0-3-3 | 每位用户走通主旅程；异常路径均有正确表现 | ⚪ |
 | **P0-3-5** | 反馈收集与整理（含定性"是否减少了打开 Canvas 的次数"） | 共担 | P0-3-4 | 反馈整理成结构化结论 | ⚪ |
@@ -1119,6 +1120,30 @@ Phase 0 列表只有几十条，每行再加一个 tag 只会更密，信息增�
 - **自测（Bud，2026-09-07）**：**纯函数 19/19**（`node --experimental-strip-types` 直跑四个 `compute*`：分母口径、窗口边界、事件类型过滤、续期必须在提醒之后、空盘 `null`）｜ `tsc` ✅ ｜ `lint` ✅ ｜ `build` ✅（`/api/v1/metrics` 已进路由表）｜ **端点探针**：无凭证 401 / 错凭证 401 / 正确凭证 500（**正是"表未迁移"，证明鉴权已过、查询已真跑**）；`/sync/scheduled` 回归 200（鉴权抽取后行为不变）。
 - **未实现（明确不在本卡）**：指标**界面**（不建后台页面，端点足够）｜ 指标告警/看板 ｜ P0-3-2 的删账号级联（已写进契约 §7 清单，届时照单执行）。
 - **🔜 下一张卡 P0-3-2（设置与隐私页）开工提示**：① `DELETE /api/v1/account` 的级联清单**已含 `usage_events`**（契约 §7），别漏；② 本卡没动设置页，隐私说明文案归 P0-3-2。
+
+#### 🎫 P0-3-2 · 设置与隐私页（🔵 代码完成 2026-09-09，Bud；待 Steven 浏览器验收）
+
+- **做什么**：PRD F6 的四件事 —— ① 数据清单（我们存了什么）② 隐私说明（简洁版）③ 一键删 Canvas 数据 ④ 一键删账号及全部数据。领卡先问「是不是已经能用了」：删凭据的**端点**早就有了（P0-2-9 的 `DELETE /canvas/credentials`），**缺的是页面和"连账号一起删"这一档**。
+- **改哪些文件**：
+  - `lib/account/data-summary.ts`（新增）—— 数据清单，**设置页与端点共用同一函数**（两处各写一份计数迟早飘成两个数字）。
+  - `lib/account/delete-account.ts`（新增）—— 删除全流程。
+  - `app/api/v1/account/route.ts` / `account/data/route.ts` / `account/data-summary/route.ts`（新增）。
+  - `app/(routes)/settings/page.tsx` + `components/settings/danger-zone.tsx`（新增）。
+  - `lib/canvas/credentials.ts`（改）—— **抽出 `revokeCredential()`**（占位密文覆盖 + `revoked`），P0-2-9 与本卡的 `scope=canvas` 共用；抄第二遍最容易丢的是"为什么不能置空串"。
+  - `app/api/v1/canvas/credentials/route.ts`（改）—— DELETE 改用该函数（行为不变，已回归验证）。
+  - `lib/supabase/proxy.ts`（改）—— `/settings` 进 `PROTECTED_PREFIXES`。
+  - `app/(routes)/dashboard/page.tsx`（改）—— 头部加「设置」入口。
+- **关键约束**：
+  - 🔴 **删除顺序 = Storage → `auth.admin.deleteUser()` → 兜底删 `profiles` 行**。Storage 不在 FK 级联链上，必须先单独删；auth 删除排在数据库删除**之前**，失败模式才干净（失败 = 什么都没删，可直接重试）；兜底那一条保证结论不依赖级联。反过来（先删数据再删 auth）的失败模式是"数据没了、账号还在"，用户再登录看到半截状态且无法自助恢复。
+  - 🔴 **Storage 失败即整趟失败**（500 `delete_failed`）：文件删不掉还继续删账号，等于**制造** A11 要防的无主文件，而且事后连"这些文件属于谁"都查不出来（账号已经没了）。
+  - 🔴 **按 `{user_id}` 前缀删 Storage，不按 `syllabi.file_url` 逐条删** —— 后者删不掉"上传成功但没建行"的孤儿文件（ADR-009 的已知代价）。Storage 的 `list()` 只返回一层且把文件夹也当条目（`id` 为 null），所以要递归。
+  - **两个「删 Canvas」并存是刻意的**（不是重复造端点）：撤销 = 断 token、**保留**已导入任务（P0-2-9 拍板：撤销不该销毁用户已建立的结构）；`scope=canvas` = 连 Canvas 导入的任务一起删（回答"我不想留着从 Canvas 拉来的东西"）。两者都保留 syllabus、手动任务与 `canvas_course_id`。
+  - **计数失败抛 500，不退成 0** —— 这个页面上"有 12 门课"显示成 0，用户会以为数据已经被清掉了。
+  - **删账号要输入邮箱才启用按钮**；前两个动作只要一次二次确认（重新粘贴 token 就能恢复，误操作成本量级不同）。
+  - 隐私说明**明确写出 syllabus 文本会发给 AI 服务商（DeepSeek）且服务器不在美国境内** —— Security-Privacy A12 要的是"明确告知"，顺带把开放问题 O-08 摆到 Steven 眼前。
+- **自测（Bud，2026-09-09）**：**生产库建 `p032-` 临时号**（课程 / syllabus / Storage 文件 ×2 **含一个孤儿** / canvas 任务 / 手动任务 / 凭据 / 埋点各一）→ 构造真实 session cookie 走完整 HTTP：`data-summary` 200 + 四项计数正确 → `scope=canvas` 200（`revoked: true`、`deletedTasks: 1`，且**手动任务与 syllabus 未被动**）→ 非法 scope 400 → 删账号 200（六表全空 + Storage 前缀空 + Auth 用户查不到 + `storageFilesDeleted: 2` 证明孤儿文件被覆盖）。**23/23 通过**，临时号已删净（生产库 `profiles` 剩 1）。端点探针：三个端点无 cookie 均 401；`/settings` 未登录 307 → `/login`；`DELETE /canvas/credentials` 重构后回归 401（路由未破）。`tsc` ✅ ｜ `lint` ✅ ｜ `build` ✅（`/settings` 已进路由表）。
+- **未实现（明确不在本卡）**：数据导出（GDPR 式 export）｜ 邮箱 / 密码修改 ｜ 正式隐私政策页（现在是一页说明，够 Phase 0）。
+- **🔜 Steven 浏览器验收路径**：总览页右上「设置」→ 核对清单数字 → 三个危险操作的确认框与结果（**「删除账号」别在真号上点** —— 要试请用一次性小号）。
 
 ---
 
@@ -1199,4 +1224,6 @@ P0-0 基础设施
 | 2026-09-05 | **P0-2-11 总览页合并 核对完成 🔵（28/28 全绿，待 Steven 拍板一处 + 浏览器验收）**：**领卡先做的判断 —— 这张卡不是从零写功能**。总览页只读 `tasks` 一张表，两类数据早已各写各的行：`exam-tasks.ts` 写 `source='syllabus'/task_type='exam'/is_derived=true`，`canvas-tasks.ts` 写 `source='canvas'/task_type='assignment'/is_derived=false`；生产截图里「Homework 4」与「Unit 3 Exam」已混排。**改代码前先确认的最大风险是「一方把另一方的行当缺席删掉」** —— 核对确认两边查询/更新/软删除都带 `.eq('source', …)` 收口，风险不存在。**端到端 28/28**（测试号 + 真实 PAT + 真实 CHEM 1A 作业 + 手工造的 3 条考试）：① 两类混排 + `dueDate` 升序 + TBD 排最后 + `isDerived` 标记正确；② 逾期未完成保留在 7 天窗口（把考试日期改成过去验证）；③ **课程页日期 == 总览页日期**（ADR-004 验收标准），逐条比对含 TBD→null，改日期后派生同步更新；④ 考试行删除 → 派生 task 物理删除且 Canvas 任务数量不变；⑤ **二次 Canvas 同步后考试任务数量/日期/状态完全不变**（最高风险项）；⑥ 用户勾的 `done` 不被重新保存打回 pending；⑦ 归档课程任务从总览页隐藏。**交付 = 2 处契约收口**：`API-Contract.md` §5 的「Phase 0 目前只有 syllabus 考试」改为两类来源对照表；「`meta` 的 `staleWarning`/`lastSuccessfulSyncAt` 留到 P0-2-7 与 P0-2-11 再补」收口为**确定不加**（P0-2-7 已用 dashboard 顶部 `SyncStatusBar` 服务端直读 `courses` 同步列解决，同步状态是课程级的，塞进任务 meta 粒度不对）。**待 Steven 拍板**：总览页要不要给 Canvas 作业加「作业」来源标签（现状只有考试有标签）。**脚本踩坑**：`POST /canvas/credentials` 的字段是 `canvasDomain` 不是 `domain`；`POST /canvas-link` 是 `externalCourseId`；Canvas 课程对象的 id 字段是 `externalId` 不是 `id`（传成 `undefined` 时字符串 `"undefined"` **能通过** `[A-Za-z0-9_-]` 校验并关联成功，只在同步时报「Canvas 上找不到该资源」，很容易误判成 Canvas 的锅）；**关联成功会自动触发一次同步**，紧接着再打手动同步会撞 30s 节流（429） |
 | 2026-09-05 | **P0-2-11 验收通过 ✅（2026-09-05 深夜，第 21 张卡）—— M2 动态感知收官 11/11**：Steven 拍板「**不加 Canvas 作业来源标签，保持现状**」（理由：标签的价值在于标出少数派，考试是少数派；给多数派加标签等于给每行加噪声 —— 同一规则适用于「逾期标红有价值 / 未完成标红没价值」）。本卡最终形态：**零功能代码**，合并机制早已随 P0-1-9 + P0-2-5 落地，28/28 端到端核对无误，交付是 2 处契约收口。**M2 全线收官**：2-1 / 2-1b / 2-2 / 2-3 / 2-4 / 2-5 / 2-6 / 2-7 / 2-8 / 2-9 / 2-11 全部 ✅（2-10 不执行，不计入分母）。**下一阶段 M3（P0-3 验证与收尾）**。**遗留（不阻塞）**：① P0-2-9 真号恢复闭环未实操；② Cron Jobs 首次触发自查 |
 | 2026-09-06 | **VS Code 从裸装 → Steven 的「阅读/学习台」+ 新增交付格式约定（非 task 卡；commit `f65cc65`，已 push）**：起因是 Steven 提出「代码全是你写的、我看不懂，但想边做边学又不拖慢进度」。**核实两件外部信息**：① Claude 说的「Copilot Student / Pro / Pro+ 新注册自 2026-04-20 起暂停、无恢复时间表」**为真**（官方 changelog 确认，Free 只剩 2000 次补全 + 50 条 chat/月）；② Claude 说的「Tempo 还没推 GitHub」**为假**（`remote origin = stevenli2007-del/tempo` 早已在推）—— GitHub PR 扩展不必装的**结论对但理由错**，真实原因是我们直接 push main、没有 PR 流程。**落地**：装 5 个扩展（Local History / Pretty TypeScript Errors / Error Lens / Better Comments / Tailwind CSS IntelliSense）并写进 `.vscode/extensions.json`；新增 `CodingRules.md` **§6.1「交付必附『给 Steven 的三行』」**（权威定义：格式模板 + 四条硬约束 + `// ?` 提问标记约定 + 改代码时间窗口防撞车）；`Phase-0-MVP.md` 的 M3 表下与进度指针各加指针（**不复制内容**，遵守 §8 单一事实源）。**主动砍掉两项**：CodeTour 导览（绑具体行号，Tempo 每周改几十个文件必然漂，**过期的导览比没有导览更糟** —— 把人指到错误的行还让人信以为真）、在代码里铺解释性注释（会腐烂，只在这张卡点名的 1-2 个文件里写）。**明确不装**：GitLens（单人项目 blame 无用且公认过重）、Copilot Free（补全是给「自己敲代码的人」的，Steven 不敲）、Cline/Roo（IDE 内再养第二个 agent，上下文远不如对话侧）。**真实风险与规避**：扩展不参与 `next build`、总结不碰代码，两者对质量与构建均为零影响；真正的风险是 ① Steven 动手改时与 Bud 撞车 → 规定他只在「交付后 → 验收前」动代码；② 他开始问更多问题 → 头两三张卡慢 5-10% 后回落。**先试两张卡再决定是否延续**，全部可逆 |
-| 2026-09-07 | **P0-3-1 量化指标埋点 代码完成（🔵 待 Steven 跑迁移 + 验收，第 22 张卡）**：领卡先做的判断是「**四项指标里两项早就有了**」—— 编辑修正率读 `parse_corrections`、人均关联课程数读 `courses.canvas_course_id`，再埋一遍只会造出两份口径；真正缺的是"打开过总览页"与"被提醒过 / 之后续期了"这两件事的记录 → **新增 `usage_events` 表只为这两项服务，三类事件、三个写入点**（dashboard 渲染 / 过期横幅出现 / 覆盖已有凭据）。🔴 **两个方向的硬约束**：埋点写入**失败只告警绝不抛错**（度量不是功能，表没迁移也不许白屏），而**读数失败必须 500 不返回假 0**（静默的 0 会被读成"用户一次都没回来"）；**分母为 0 时 `rate` 是 `null` 不是 0**。新增 `lib/metrics.ts`（四个 `compute*` 纯函数 + `loadMetrics`）+ `GET /api/v1/metrics`（CRON_SECRET + service role，不建后台页面）+ `lib/api/cron-auth.ts`（从 `/sync/scheduled` 抽出的共用鉴权，行为不变，`/sync/scheduled` 回归 200 已验证）。自测 **纯函数 19/19** + tsc/lint/build 全绿 + 端点探针（401/401/500-未迁移）。**⚠️ 验收前【Steven 手动】：执行 `supabase/migrations/20260907120000_usage_events.sql`**，执行后端点即返 200 + 四项指标 | P0-3-1、`PRD.md` 8.1 | |
+| 2026-09-07 | **P0-3-1 量化指标埋点 代码完成（🔵 待 Steven 跑迁移 + 验收，第 22 张卡）**：领卡先做的判断是「**四项指标里两项早就有了**」—— 编辑修正率读 `parse_corrections`、人均关联课程数读 `courses.canvas_course_id`，再埋一遍只会造出两份口径；真正缺的是"打开过总览页"与"被提醒过 / 之后续期了"这两件事的记录 → **新增 `usage_events` 表只为这两项服务，三类事件、三个写入点**（dashboard 渲染 / 过期横幅出现 / 覆盖已有凭据）。🔴 **两个方向的硬约束**：埋点写入**失败只告警绝不抛错**（度量不是功能，表没迁移也不许白屏），而**读数失败必须 500 不返回假 0**（静默的 0 会被读成"用户一次都没回来"）；**分母为 0 时 `rate` 是 `null` 不是 0**。新增 `lib/metrics.ts`（四个 `compute*` 纯函数 + `loadMetrics`）+ `GET /api/v1/metrics`（CRON_SECRET + service role，不建后台页面）+ `lib/api/cron-auth.ts`（从 `/sync/scheduled` 抽出的共用鉴权，行为不变，`/sync/scheduled` 回归 200 已验证）。自测 **纯函数 19/19** + tsc/lint/build 全绿 + 端点探针（401/401/500-未迁移）。**⚠️ 验收前【Steven 手动】：执行 `supabase/migrations/20260907120000_usage_events.sql`**，执行后端点即返 200 + 四项指标 | P0-3-1、`PRD.md` 8.1 |
+| 2026-09-09 | **P0-3-1 验收通过 ✅（Steven 跑迁移 + 生产实测读数）**：Steven 在 Supabase SQL Editor 执行 `20260907120000_usage_events.sql`（**他一开始跑到 Vercel Storage 页去找 SQL Editor** —— SQL Editor 在 supabase.com/dashboard 进项目后的左侧栏）。生产实测 `GET /api/v1/metrics` **200 + 四项指标**：编辑修正率 `null`（暂无解析成功课程）· 7 日回访 2 人 0 次（埋点刚上线）· 人均关联课程数 **1.0**（3 门课集中在 1 个号上，另两个号 0 门）· token 续期完成率 `null`。**⚠️ 人均被稀释的问题已实际发生**，Steven 随后手动删掉两个测试号（生产库 `profiles` 只剩 1）。另确认：`rate: null` 是设计行为（分母为 0），不是故障 | P0-3-1 |
+| 2026-09-09 | **P0-3-2 设置与隐私页 代码完成 🔵（自测 23/23，待 Steven 浏览器验收）**：新增 `lib/account/{data-summary,delete-account}.ts` + 三个端点（`GET /account/data-summary` / `DELETE /account/data?scope=canvas` / `DELETE /account`）+ `app/(routes)/settings/page.tsx` + `components/settings/danger-zone.tsx`；`lib/canvas/credentials.ts` 抽出 `revokeCredential()`（P0-2-9 与本卡共用）；`/settings` 进 `PROTECTED_PREFIXES`；dashboard 头部加「设置」入口。🔴 **三条删除纪律**：① 顺序 = Storage（按 `{user_id}` 前缀递归删，含孤儿文件）→ `auth.admin.deleteUser()`（FK 级联清库）→ 兜底删 `profiles`（结论不依赖级联）；② **Storage 失败即整趟 500**，否则等于制造无主文件且事后查不出归属；③ 两个「删 Canvas」刻意并存（撤销保留任务 / `scope=canvas` 连任务一起删）。**自测走真实 HTTP**（构造 session cookie 打本地服务）：生产库 `p032-` 临时号 23/23 全绿，验证"手动任务与 syllabus 未被 scope=canvas 波及"与"孤儿文件被删"，临时号已清理干净。**另**：隐私说明明确写出 syllabus 文本会发给 DeepSeek 且其服务器不在美国境内（A12 + 开放问题 O-08 摆在明面上） | P0-3-2、`Security-Privacy.md` A11/A12 ||
