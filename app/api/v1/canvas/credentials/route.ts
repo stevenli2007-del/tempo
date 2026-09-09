@@ -2,21 +2,13 @@ import { encryptSecret } from '@/lib/canvas/crypto'
 import {
   CREDENTIAL_META_COLUMNS,
   loadCredentialMeta,
+  revokeCredential,
   toCredentialMeta,
   type CanvasCredentialRow,
 } from '@/lib/canvas/credentials'
 import { validateCanvasDomain, validateCanvasToken, validateExpiresAt } from '@/lib/canvas/validate'
 import { getCurrentUser, internalError, jsonError, jsonOk } from '@/lib/api/response'
 import { recordUsageEvent } from '@/lib/usage-events'
-
-/**
- * 撤销后写入 `secret_encrypted` 的占位明文（P0-2-9）。
- *
- * 它会被正常加密成一份格式合法的密文，但解密回来只是这个字符串 ——
- * 不对应任何真人的 token。存在的唯一理由是满足 `NOT NULL`
- * 且让 `decryptSecret()` 不抛错（详见 DELETE 上方的说明）。
- */
-const REVOKED_PLACEHOLDER = 'revoked'
 
 /**
  * Canvas 凭据端点（API-Contract.md 第 6 节，P0-2-2）。
@@ -142,16 +134,9 @@ export async function GET(request: Request) {
 /**
  * 撤销授权（P0-2-9，API-Contract §6 / Sync-Strategy §10「用户撤销」）。
  *
- * ### 🔴 为什么密文是"覆盖"而不是"清空"
- * `secret_encrypted` 是 `text NOT NULL`，置 null 会直接违反约束。更关键的是
- * 置空串也不行：`runCanvasSync` 的顺序是 `loadDecryptedCredential()`（内部
- * **先 `decryptSecret()` 再返回 status**）→ 判空 → **才**判 `status !== 'active'`
- * （`lib/sync/canvas-sync.ts:100-107`）。空串会让 `decryptSecret('')` 抛错，
- * 同步从"优雅跳过（credential_inactive）"退化成"整趟崩溃"。
- *
- * 所以这里写入一个**格式合法、但不对应任何真实 token** 的占位密文：解密照常成功，
- * 随后被 `status !== 'active'` 拦下，一个请求都不会发给 Canvas。
- * 原来的 token 被覆盖掉，不可恢复 —— 这才是"删除加密凭证"的落地含义。
+ * 撤销的机械动作（占位密文覆盖 + `status='revoked'`）在
+ * `lib/canvas/credentials.ts` 的 `revokeCredential()` —— P0-3-2 的
+ * 「清除 Canvas 数据」要用同一套，抄第二遍最容易丢的是"为什么不能置空串"。
  *
  * ### 保留什么（契约原文 + Steven 2026-09-05 拍板）
  * - **已同步的 `tasks` 一股不动**：学习记录不该因为断开连接而消失。
@@ -178,30 +163,13 @@ export async function DELETE(request: Request) {
       return jsonError(request, 404, 'not_found', '还没有连接 Canvas')
     }
 
-    const { data, error } = await supabase
-      .from('canvas_credentials')
-      .update({
-        // 覆盖而非清空，理由见上方"为什么密文是覆盖而不是清空"。
-        secret_encrypted: encryptSecret(REVOKED_PLACEHOLDER),
-        status: 'revoked',
-        revoked_at: new Date().toISOString(),
-        // 上一次失败的原因在"已撤销"这个终态下不再有意义，清掉免得误导。
-        last_error_at: null,
-        last_error_message: null,
-      })
-      .eq('id', credential.id)
-      .select(CREDENTIAL_META_COLUMNS)
-      .maybeSingle()
-
-    if (error) {
-      throw error
-    }
-    if (!data) {
-      // 走到这里说明目标行在查与写之间消失了（并发）。不猜，交给用户重试。
+    try {
+      const row = await revokeCredential(supabase, credential.id)
+      return jsonOk(request, toCredentialMeta(row))
+    } catch {
+      // `revokeCredential` 只在"目标行消失了"时抛错（并发删除）。不猜，交给用户重试。
       return jsonError(request, 409, 'conflict', '凭据状态已变化，请重试')
     }
-
-    return jsonOk(request, toCredentialMeta(data as CanvasCredentialRow))
   } catch (error) {
     return internalError(request, error)
   }

@@ -1,6 +1,6 @@
 import type { createClient } from '@/lib/supabase/server'
 
-import { decryptSecret } from '@/lib/canvas/crypto'
+import { decryptSecret, encryptSecret } from '@/lib/canvas/crypto'
 import type {
   CanvasCredentialMeta,
   CredentialStatus,
@@ -176,6 +176,61 @@ export async function markCredentialFailed(
   if (error) {
     throw error
   }
+}
+
+/**
+ * 撤销后写入 `secret_encrypted` 的占位明文（P0-2-9）。
+ *
+ * 它会被正常加密成一份格式合法的密文，但解密回来只是这个字符串 ——
+ * 不对应任何真人的 token。存在的唯一理由是满足 `NOT NULL`
+ * 且让 `decryptSecret()` 不抛错（详见 `revokeCredential`）。
+ */
+export const REVOKED_PLACEHOLDER = 'revoked'
+
+/**
+ * 撤销凭据：占位密文覆盖 + `status = 'revoked'`（P0-2-9，P0-3-2「清除 Canvas 数据」复用）。
+ *
+ * ### 🔴 为什么密文是"覆盖"而不是"清空"
+ * `secret_encrypted` 是 `text NOT NULL`，置 null 会直接违反约束。更关键的是
+ * 置空串也不行：`runCanvasSync` 的顺序是 `loadDecryptedCredential()`（内部
+ * **先 `decryptSecret()` 再返回 status**）→ 判空 → **才**判 `status !== 'active'`
+ * （`lib/sync/canvas-sync.ts`）。空串会让 `decryptSecret('')` 抛错，
+ * 同步从"优雅跳过（`credential_inactive`）"退化成"整趟崩溃"。
+ *
+ * 所以写入一个**格式合法、但不对应任何真实 token** 的占位密文：解密照常成功，
+ * 随后被 `status !== 'active'` 拦下，一个请求都不会发给 Canvas。
+ * 原来的 token 被覆盖掉，不可恢复 —— 这才是"删除加密凭证"的落地含义。
+ *
+ * 保留什么（契约原文 + Steven 2026-09-05 拍板）由调用方决定：
+ * 已同步的 `tasks` 与各门课的 `canvas_course_id` 都**不动**，重新粘贴 token 后
+ * 立刻恢复同步。要连 Canvas 导入的任务一起删，是 P0-3-2 的 `scope=canvas` 那一条。
+ */
+export async function revokeCredential(
+  supabase: ServerSupabase,
+  credentialId: string,
+): Promise<CanvasCredentialRow> {
+  const { data, error } = await supabase
+    .from('canvas_credentials')
+    .update({
+      secret_encrypted: encryptSecret(REVOKED_PLACEHOLDER),
+      status: 'revoked',
+      revoked_at: new Date().toISOString(),
+      // 上一次失败的原因在"已撤销"这个终态下不再有意义，清掉免得误导。
+      last_error_at: null,
+      last_error_message: null,
+    })
+    .eq('id', credentialId)
+    .select(CREDENTIAL_META_COLUMNS)
+    .maybeSingle()
+
+  if (error) {
+    throw error
+  }
+  if (!data) {
+    // 目标行在查与写之间消失了（并发）。不猜，交给调用方决定重试还是当成功。
+    throw new Error('凭据状态已变化')
+  }
+  return data as CanvasCredentialRow
 }
 
 /**

@@ -1,3 +1,4 @@
+import Link from 'next/link'
 import { redirect } from 'next/navigation'
 
 import { Button } from '@/components/ui/button'
@@ -289,6 +290,9 @@ export default async function DashboardPage() {
         <div className="mx-auto flex max-w-4xl items-center justify-between px-6 py-4">
           <span className="text-sm font-semibold">Tempo</span>
           <div className="flex items-center gap-3">
+            <Link href="/settings" className="text-sm text-muted-foreground hover:text-foreground">
+              设置
+            </Link>
             <span className="text-sm text-muted-foreground">{email}</span>
             {hasDemo ? <DemoControls hasDemo={hasDemo} variant="inline" /> : null}
             <form action={signOut}>
