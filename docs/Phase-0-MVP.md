@@ -1254,7 +1254,9 @@ Phase 0 列表只有几十条，每行再加一个 tag 只会更密，信息增�
   - ✅ 展示层：`task-list.tsx` 合并规则（canvas 已提交→已完成区，但不误标用户手勾）+ 「已提交（Canvas）」「待确认（外部平台提交）」标注；`course-card.tsx` 卡片轻量标注。
   - ✅ 日期修复：`dashboard` 日期标签时区 `UTC` → `America/Los_Angeles`；`isOverdue` 连带修（已提交/外部平台不标红）。
   - ✅ 文档校正：`Database.md §3.9` / `Decisions.md ADR-015` 的映射表原本写着 CHECK 约束里不存在的 `excused`、且漏了 `external_unconfirmed` → 已改为与 `deriveSubmission` 一一对应。
-  - ⏳ 待 Steven：代码 push 上线 → 触发一次同步把老行回填（`hasChanged` 已纳入两列比较，**任意一次同步即回填**，无需特殊"全量重同步"）→ 按 5 条验收路径复核。
+  - ✅ **时间闸门补强（2026-09-13 晚，147aca0）**：初版把**所有** `external_tool` 的 `unsubmitted` 一律降级 `external_unconfirmed`，但那会把**未到期**提醒（如 CHEM 1A「Week 5 Discussion Quiz」due 9/29）一起吞掉。修正：`deriveSubmission` 新增 `now` 参数贯穿 `hasChanged`/`applyCanvasTasks`，负信号**仅当 `dueAt` 已过期**才降级；未到期 / 无 due 的 external_tool 保留 `unsubmitted`（"还没做"此刻可信，提醒是 Tempo 本职）。真函数干跑复核：external_unconfirmed 19→1、unsubmitted 11→29，16 个未来 external_tool 小测恢复为可信提醒。
+  - ✅ **上线 + 回填 + 验证（2026-09-13 晚）**：147aca0 push（`353dcb0..147aca0`）→ Vercel 部署成功 → 触发 `/api/v1/sync/scheduled` 重同步（3 课、14 任务更新、0 失败）→ 生产库只读复核 `submission_state`：`external_unconfirmed` **14→0**、`unsubmitted` **8→22**、`status` 不动（pending:30 / done:16）。无遗留诬告，也无本该「待确认」被误显的；Lab 1: Airbags 在 Chem 1AL（未关联 Tempo），不在生产库内。
+  - ✅ 验收路径（5 条，§下方）代码侧已全部就绪：等 Steven 在 `/dashboard` 按 ①~⑤ 点一遍即可收口。
 - **做什么**：Steven #7 的两件事。
   ① **提交状态**：`assignmentsPath()` 加 `include[]=submission`（**同一个请求，零额外请求数**，不碰三级熔断），新增 `tasks.submission_state` / `submitted_at`，展示层合并三态。
   ② **日期差一天**：`app/(routes)/dashboard/page.tsx:54-59` 硬编码 `timeZone:'UTC'` 渲染日期标签。其上方注释（`:46-52`）的"按 UTC 取日期不会差一天"论证**只对考试派生任务成立**（`exam-tasks.ts:94` 硬编码 `T23:59:59`，恰好落在 UTC 当日）；Canvas 的真实 `due_at` 带时区（`2026-09-09T23:59 PDT` = `2026-09-10T06:59Z`）就**必然差一天**。
@@ -1268,8 +1270,8 @@ Phase 0 列表只有几十条，每行再加一个 tag 只会更密，信息增�
   5. **`isOverdue` 连带修**：改为「过了 due **且** 两个来源都没完成」——**已提交的逾期不该再标红**。
 - **🔴 「待确认」第三态（ADR-013 的直接产物）**：`external_tool` 类（Gradescope 外链）**Canvas 无可信记录**时，**不显示"待完成"**，改显示**「待确认（外部平台提交）」**。
   > 理由：Canvas 不知道 ≠ 用户没交。**显示"待完成"等于诬告用户** —— 这正是 Steven 体感的来源。宁可说"未知"，不要猜错方向。
-  > ⚠️ "无可信记录"包含两种情形：① 完全无提交记录；② **有记录但值不可信**（`unsubmitted`/`missing` —— Canvas 看不见 Gradescope 里的提交，
-  > 只等成绩回传；实测 Lab 1 已交却报 `unsubmitted`）。而 `graded`/`submitted`/`pending_review` 是 LTI 回传的事实，**照常采信**。
+  > ⚠️ "无可信记录"包含两种情形：① 完全无提交记录；② **有 `unsubmitted`/`missing` 内联记录但已过期** —— Canvas 看不见 Gradescope 里的提交，只等成绩回传，实测 Lab 1 已交却报 `unsubmitted`。
+  > 而 ② **仅在 `dueAt` 已过期时成立**：未到期的 `unsubmitted` 仍可信（"还没做"此刻为真，提醒是 Tempo 本职，不能吞）；且无 due 的 external_tool 也按"未到期"处理（无日期无从判逾期）。`graded`/`submitted`/`pending_review` 是 LTI 回传的事实，**照常采信**。
 - **验收路径（5 条，都能点）**：① R4A 的 I.4 → **「已提交（待评分）」**；② I.3 / I.2 → 已完成；③ 手勾的 done → 二次同步后**仍是 done**；④ 考勤打卡类（`not_graded`）→ 仍能手勾、同步不打回；⑤ 已提交但过了 due → **不再标红「已逾期」**。
 - **顺带记一条外部事实**：Gradescope 官方明确 **Gradescope 侧的 due date / 延期不会自动同步到 Canvas**（需手动对齐）。所以 Chem 1A 在 Canvas 上显示的 deadline **可能不是真 deadline** —— 比状态显示错严重得多。本卡至少要做到对这类课标注「以 Gradescope 为准」。
 
