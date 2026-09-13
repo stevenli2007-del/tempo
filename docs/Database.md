@@ -79,6 +79,9 @@ Supabase Auth 的 `auth.users` 管认证，本表放业务扩展字段，`id` �
 | `created_at` / `updated_at` | timestamptz | |
 
 > **为什么需要 `timezone`**：Canvas 的 due date 是带时区的时间戳，而"今天要交什么"是本地日期概念。硬编码服务器时区会在学期中夏令时切换那天出错。Phase 0 用户全在伯克利，默认值够用，但字段要从第一天就有。
+>
+> 🔴 **强制约束（2026-09-13 补，此前实现没遵守）**：**所有日期展示与"今天"的判定必须读 `profiles.timezone`，禁止硬编码 `'UTC'`**。
+> 反例：`app/(routes)/dashboard/page.tsx:54-59` 用固定 `timeZone:'UTC'` 渲染日期标签 —— 那条注释里"按 UTC 取日期不会差一天"的论证**只对考试派生任务成立**（`exam-tasks.ts:94` 硬编码 `T23:59:59`，恰好落在 UTC 当日），对 Canvas 的真实 `due_at`（`2026-09-09T23:59 PDT` = `2026-09-10T06:59Z`）**必然差一天**。而作业几乎都在晚上截止 → **几乎全部显示晚一天**。修复归 P0-3-10。
 
 ### 3.2 `courses`（课程 Workspace）
 
@@ -210,7 +213,9 @@ Supabase Auth 的 `auth.users` 管认证，本表放业务扩展字段，`id` �
 | `task_type` | text | `assignment` / `exam` / `reading` / `other` |
 | `source` | text | `canvas` / `syllabus` / `manual` |
 | `source_id` | text (nullable) | 外部源的唯一标识，**用于去重与增量同步**。语义见下方表格 |
-| `status` | text | `pending` / `done`，默认 `pending` |
+| `status` | text | `pending` / `done`，默认 `pending`。**用户主权字段 —— 同步永不写**（ADR-015） |
+| **`submission_state`** | text (nullable) | **外部源（Canvas）侧的提交真相，同步可写**（P0-3-10 新增）。取值见下表 |
+| **`submitted_at`** | timestamptz (nullable) | 提交时间，仅作"何时交的"这一可信陈述（P0-3-10 新增） |
 | `is_derived` | boolean | 默认 `false`。`true` = 由其他表派生的缓存，用户不可直接编辑内容字段 |
 | `external_updated_at` | timestamptz (nullable) | 该任务在外部源（如 Canvas）的最后更新时间，**用于判断是否需要更新** |
 | `last_seen_at` | timestamptz (nullable) | 最近一次在外部源中仍然存在的时间，**用于识别"外部已删除"** |
@@ -234,6 +239,27 @@ CREATE UNIQUE INDEX tasks_source_unique
 ```
 
 > 没有这个索引，同步重试会产生重复任务 —— 这是"总览页出现三个一模一样的作业"这类 bug 的唯一根因。
+
+**`submission_state` 的语义（P0-3-10 新增，ADR-015）**
+
+```sql
+submission_state text CHECK (submission_state IN
+  ('unsubmitted','submitted','graded','pending_review','missing','excused'))  -- nullable
+```
+
+映射 Canvas `submission.workflow_state`：
+
+| Canvas `submission` | `submission_state` | UI 展示 |
+|---|---|---|
+| `graded` | `graded` | 已完成 |
+| `submitted`（未评分） | `submitted` | **已提交（待评分）** |
+| `unsubmitted` + `missing` | `missing` | **逾期未交**（区别于"逾期未完成"） |
+| `excused` | `excused` | 豁免 |
+| **`external_tool` / `not_graded` / `on_paper` 且无任何提交记录** | `null` | **待确认（外部平台提交）** 🔴 **不得显示"待完成"** |
+
+> 🔴 **展示层合并规则**：`status='done'` **或** `submission_state ∈ {submitted, graded}` → 归入已完成区。**不写回 `status`** —— 两个字段分列的意义就是让"外部真相"与"用户判断"永不互相覆盖。
+> 🔴 **不可逆要分方向**：用户手勾的 `done` **永不回退**；Canvas 自身状态**允许回退**（老师撤回 / 重设时照搬真相）。写成同一条规则必然错一边。
+> ⚠️ **`submission_types` 决定有没有"提交"这回事**：`discussion_topic`（讨论类）没有传统提交；`none` / `not_graded` / `on_paper`（考勤打卡、纸质作业）在 Canvas 里**压根不存在完成态** —— 这类永远保留手勾，不能被自动判成未完成。
 
 ### 3.10 `canvas_credentials`（Canvas 访问凭证）
 
@@ -352,11 +378,13 @@ CREATE UNIQUE INDEX tasks_source_unique
 
 | `source` | 同步时可覆盖的字段 | 用户可改、且**不会被覆盖**的字段 |
 |---|---|---|
-| `canvas` | `title`、`due_date`、`external_updated_at`、`last_seen_at`、`is_deleted` | `status`（标记完成） |
+| `canvas` | `title`、`due_date`、`external_updated_at`、`last_seen_at`、`is_deleted`、**`submission_state`**、**`submitted_at`** | `status`（标记完成） |
 | `syllabus`（派生考试） | `title`、`due_date`（由 `exam_dates` 派生） | 无 —— **改考试请改 `exam_dates`** |
 | `manual` | 不参与同步 | 全部 |
 
 > 这条规则的反面同样重要：**不要整行 `upsert` Canvas 任务**，否则用户刚勾掉的"已完成"会在下次同步时被打回 `pending`。这是这类应用最常见的体验 bug。
+>
+> 新增 `submission_state` / `submitted_at` **不破坏**这条规则 —— 它们记的是**外部真相**，与用户主权的 `status` 是两个维度（ADR-015）。
 
 ### 4.2 增量同步判定
 
@@ -557,3 +585,4 @@ syllabus 可能含教师姓名、office hour 地址、评分细则等个人信�
 | 2026-09-09 | **补「删账号时 Storage 不在级联链上」这一条**（P0-3-2）：全部业务表都挂在 `profiles`（或经 `courses`）的 `ON DELETE CASCADE` 上，删 `profiles` 行即清空；但 **`storage.objects` 与数据库没有外键关系**，必须单独按 `{user_id}` 前缀递归删（`list()` 只返一层且把文件夹当条目 `id=null`，需递归），否则留下无主文件。删除顺序与失败语义（Storage 失败即整趟失败）实现在 `lib/account/delete-account.ts` |
 | 2026-09-07 | **新增 §3.14 `usage_events`**（P0-3-1）：只为 PRD 8.1 四项指标中的两项（7 日回访 / token 续期完成率）而建 —— 编辑修正率读 `parse_corrections`、人均关联课程数读 `courses.canvas_course_id`，**不重复埋点**。三类事件的写入点、每日去重规则、"埋点失败只告警 / 读数失败必须 500"的反向约定一并写入；§7.1 补索引、§7.2 补 RLS（INSERT 策略不可省，否则埋点静默全失败）；标注 P0-3-2 删账号需级联本表 | P0-3-1、`PRD.md` 8.1 |
 | 2026-09-02 | **P0-1-2 落地后对 §3.3 的补充**：`raw_text` 由 `POST /api/v1/syllabi/:id/extract` 写入，**列表与上传响应一律不读这一列**（可能几 MB，只有 extract 端点读它取前 1000 字符预览）；`extract_method` 的 CHECK 约束取值确认为 `pdf_text` / `docx` / `pptx` / `manual`（**`docx`/`pptx` 没有 `_text` 后缀**，是初版遗留，不为此改生产表）；悬挂行的兜底已实现 —— `createSignedUrl` 对不存在的对象返回 `NoSuchKey`，extract 端点据此置 `failed` + 返回 409 | P0-1-2、`API-Contract.md` §3 |
+| **2026-09-13** | **§3.9 `tasks` 新增 `submission_state` / `submitted_at` 两列**（P0-3-10，ADR-015）：分列的意义是让"外部真相"（Canvas `submission.workflow_state`）与"用户主权"（`status`）**永不互相覆盖** —— 同步只写前者，展示层合并。含 `external_tool` / `not_graded` / `on_paper` 类作业**必须落 `null` 并展示「待确认」**（Canvas 不知道 ≠ 用户没交，显示"待完成"等于诬告用户）。§4.1 同步可覆盖字段集加入这两列；§3.1 补**禁止硬编码 UTC** 的强制约束（dashboard 日期差一天的真 bug） |
