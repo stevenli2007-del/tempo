@@ -1,4 +1,6 @@
-import { loadActiveCourseIds, loadTasks } from '@/lib/tasks'
+import { TASK_COLUMNS, loadActiveCourseIds, loadTasks, toTask } from '@/lib/tasks'
+import type { TaskRow } from '@/lib/tasks'
+import { toInsertRow, validateManualTaskInput } from '@/lib/tasks/manual'
 import { getCurrentUser, internalError, jsonError, jsonOk } from '@/lib/api/response'
 
 /**
@@ -110,6 +112,103 @@ export async function GET(request: Request) {
     }
 
     return jsonOk(request, { data: tasks, meta: { total } })
+  } catch (error) {
+    return internalError(request, error)
+  }
+}
+
+/**
+ * 创建手动任务（API-Contract.md §5.1：`POST /api/v1/tasks`，`source = manual`）。
+ *
+ * ### 批量入口
+ * 契约写的是「创建手动任务」，对话框一次可能解析出多条，所以请求体是
+ * `{ tasks: [...] }`；也兼容直接传单条对象。插入全部以 `source = 'manual'` 落库。
+ *
+ * ### 🔴 闭环取值（双写入方纪律）
+ * 路由层**强制** `source='manual'` / `status='pending'` / `is_derived=false` /
+ * `submission_state=null` —— 不接收客户端传这些字段，避免任何绕过纪律的写法。
+ * 考试类型被 `validateManualTaskInput` 拒掉（考试权威源是 `exam_dates`，ADR-004）。
+ *
+ * ### 课程归属
+ * 即便 RLS 也会拦，这里仍显式校验 `courseId` 属于当前用户的未归档课程，
+ * 早失败、给清晰报错（契约 §2：归档课程的任务对外不可见）。
+ */
+export async function POST(request: Request) {
+  try {
+    const { supabase, user } = await getCurrentUser()
+    if (!user) {
+      return jsonError(request, 401, 'unauthenticated', '请先登录')
+    }
+
+    let body: unknown
+    try {
+      body = await request.json()
+    } catch {
+      return jsonError(request, 400, 'bad_request', '请求体不是合法的 JSON')
+    }
+    if (typeof body !== 'object' || body === null) {
+      return jsonError(request, 400, 'bad_request', '请求体必须是 JSON 对象')
+    }
+
+    // 兼容单对象 / 数组两种形态。
+    const rawItems = Array.isArray((body as Record<string, unknown>).tasks)
+      ? ((body as Record<string, unknown>).tasks as unknown[])
+      : [body]
+    if (rawItems.length === 0) {
+      return jsonError(request, 400, 'bad_request', 'tasks 不能为空')
+    }
+    if (rawItems.length > 50) {
+      return jsonError(request, 400, 'bad_request', '一次最多添加 50 条任务')
+    }
+
+    const validated = []
+    for (const item of rawItems) {
+      const result = validateManualTaskInput(item)
+      if (!result.ok) {
+        return jsonError(request, 400, 'validation_failed', result.message)
+      }
+      validated.push(result.value)
+    }
+
+    // 课程归属：只接受当前用户未归档的课程。
+    const { ids, error: courseError } = await loadActiveCourseIds(supabase)
+    if (courseError) {
+      throw new Error(courseError)
+    }
+    const owned = new Set(ids)
+    for (const v of validated) {
+      if (!owned.has(v.courseId)) {
+        return jsonError(request, 404, 'not_found', '课程不存在或无权访问')
+      }
+    }
+
+    const rows = validated.map(toInsertRow)
+    const { data, error } = await supabase
+      .from('tasks')
+      .insert(rows)
+      .select(TASK_COLUMNS)
+
+    if (error) {
+      throw new Error(error.message)
+    }
+
+    // 插入响应不含课程名：课程数很少，单独取一次名映射即可（与 loadTasks 同思路）。
+    const courseIds = [...new Set(validated.map((v) => v.courseId))]
+    const { data: nameRows, error: nameError } = await supabase
+      .from('courses')
+      .select('id, course_name')
+      .in('id', courseIds)
+    if (nameError) {
+      throw new Error(nameError.message)
+    }
+    const nameMap = new Map<string, string>(
+      (nameRows ?? []).map((r) => [r.id as string, r.course_name as string]),
+    )
+
+    const tasks = ((data ?? []) as TaskRow[]).map((row) =>
+      toTask(row, nameMap.get(row.course_id) ?? ''),
+    )
+    return jsonOk(request, { data: tasks }, 201)
   } catch (error) {
     return internalError(request, error)
   }

@@ -116,3 +116,55 @@ export async function PATCH(request: Request, { params }: RouteContext) {
     return internalError(request, error)
   }
 }
+
+/**
+ * 删除任务（API-Contract.md §5.1：`DELETE /api/v1/tasks/:id`）。
+ *
+ * ### 🔴 只允许删手动任务
+ * 同步来的任务（Canvas / 大纲派生）如果被用户删掉，下次同步又会被重新拉回来，
+ * 等于「删了个寂寞」还制造困惑。所以 `source !== 'manual'` 一律拒绝，
+ * 明确告诉用户「这事儿得去源头（Canvas / 课程页）处理」。
+ *
+ * ### 软删除
+ * 置 `is_deleted = true`，不物理删除（与全表约定一致，Database.md 4.4）。
+ * 已软删的行 `loadTaskById` 查不到 → 重复删除返回 404（幂等）。
+ */
+export async function DELETE(request: Request, { params }: RouteContext) {
+  try {
+    const { id } = await params
+    if (!UUID_PATTERN.test(id)) {
+      return jsonError(request, 400, 'bad_request', '任务 ID 格式不正确')
+    }
+
+    const { supabase, user } = await getCurrentUser()
+    if (!user) {
+      return jsonError(request, 401, 'unauthenticated', '请先登录')
+    }
+
+    const { task, error: loadError } = await loadTaskById(supabase, id)
+    if (loadError) {
+      throw new Error(loadError)
+    }
+    if (!task) {
+      return jsonError(request, 404, 'not_found', '任务不存在或无权访问')
+    }
+
+    if (task.source !== 'manual') {
+      return jsonError(
+        request,
+        400,
+        'validation_failed',
+        '只有手动添加的任务可以删除；来自 Canvas / 大纲的任务会随同步刷新，无法在此删除',
+      )
+    }
+
+    const { error } = await supabase.from('tasks').update({ is_deleted: true }).eq('id', id)
+    if (error) {
+      throw new Error(error.message)
+    }
+
+    return jsonOk(request, { data: { id, deleted: true } })
+  } catch (error) {
+    return internalError(request, error)
+  }
+}

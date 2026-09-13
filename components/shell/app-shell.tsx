@@ -4,6 +4,7 @@ import { cn } from "@/lib/utils"
 import { CONTENT_ML } from "./shell-widths"
 import { Sidebar } from "./sidebar"
 import { Topbar } from "./topbar"
+import { CourseUpdateFab } from "@/components/course-update-fab"
 
 export function AppShell({
   children,
@@ -27,6 +28,7 @@ export function AppShell({
         >
           {children}
         </main>
+        <CourseUpdateFab />
       </div>
     </div>
   )
