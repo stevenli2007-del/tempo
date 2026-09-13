@@ -48,7 +48,20 @@ const UNIQUE_VIOLATION = '23505'
 
 /** Canvas submission_types 里"压根不存在完成态"的几类：永远保留手勾，同步不写提交态。 */
 const NO_COMPLETION_TYPES = new Set(['none', 'not_graded', 'on_paper'])
-/** 外链类（Gradescope 等 LTI）。Canvas 无提交记录 → 展示「待确认」，不显示"待完成"。 */
+/**
+ * 外链类（Gradescope 等 LTI）。
+ *
+ * ⚠️ Canvas **观察不到**外部平台的提交动作，只靠 LTI 成绩回传才知道结果。所以它对这类作业
+ * 的任何"未交"信号都是**推断**而非**观察** —— 2026-09-13 用真实 PAT 实测：Chem 1AL
+ * 「Lab 1: Airbags」(external_tool, due 9/9) 在 Gradescope 已交，Canvas 仍报 `unsubmitted`。
+ * 拿它去显示"待完成/已逾期"就是诬告用户（ADR-013：Canvas 不知道 ≠ 用户没交）。
+ *
+ * 但**不能反过来一刀切成"待确认"**：那会把已评分的 Homework 1–4 也标成"未知"。
+ * 因此按「方向 + 时间」区别对待：
+ * - 正信号（graded / submitted / pending_review）照常采信 —— 那是 LTI 回传的事实；
+ * - 负信号（unsubmitted / missing）**且已过 due** → 降级 `external_unconfirmed`（展示「待确认」，不诬告）；
+ * - 负信号但**还没到期** → 保留 `unsubmitted`（"还没做"这时是可信的，提醒不能被吞掉）。
+ */
 const EXTERNAL_TOOL_TYPE = 'external_tool'
 
 /**
@@ -57,16 +70,21 @@ const EXTERNAL_TOOL_TYPE = 'external_tool'
  * 返回 `submissionState`（落 `tasks.submission_state`）+ `submittedAt`（落 `tasks.submitted_at`）。
  * 任何异常形状都降级到最保守值 —— 宁可让用户手勾，也不替他判定"没交"。
  *
+ * @param now 本次同步的时刻。**必须传**：同一条 Canvas 数据在"到期前 / 到期后"可信度不同 ——
+ *   到期前它说"未交"就是"还没做"（该继续催，那是 Tempo 的本职）；
+ *   到期后它还说"未交"就不可信了（见 EXTERNAL_TOOL_TYPE 的实测）。
+ *
  * 分支：
  *  ① submission_types 含 none/not_graded/on_paper → null（无完成态，用户手勾）
  *  ② 有内联 submission：
  *       graded → graded；submitted → submitted；pending_review → pending_review
- *       unsubmitted → **external_tool 则降级 external_unconfirmed**（见 EXTERNAL_TOOL_TYPE 注释）；
+ *       unsubmitted → **external_tool 且已过 due** 则降级 external_unconfirmed（见 EXTERNAL_TOOL_TYPE 注释）；
  *                     其余看 Canvas 的 missing 标记 → missing / unsubmitted
  *  ③ 无内联 submission → external_tool → external_unconfirmed（待确认）；其余 → null
  */
 export function deriveSubmission(
   assignment: CanvasAssignment,
+  now: Date,
 ): { submissionState: string | null; submittedAt: string | null } {
   const types = assignment.submissionTypes
   if (types.some((t) => NO_COMPLETION_TYPES.has(t))) {
@@ -82,10 +100,13 @@ export function deriveSubmission(
         return { submissionState: 'submitted', submittedAt: submission.submittedAt }
       case 'pending_review':
         return { submissionState: 'pending_review', submittedAt: submission.submittedAt }
-      case 'unsubmitted':
+      case 'unsubmitted': {
         // ⚠️ external_tool 的"未交"是 Canvas 的**推断**（它看不见 Gradescope 里的提交），
-        //    已实测出现假阴性（Lab 1: Airbags）。降级「待确认」，绝不当"待完成"晾给用户。
-        if (types.includes(EXTERNAL_TOOL_TYPE)) {
+        //    实测出现过假阴性（Lab 1: Airbags 已交却报未交）。但**只在已过 due 时才降级** ——
+        //    没到期就降级，会把"这周还有一次讨论区小测"这类真提醒一起吞掉（那是 Tempo 的本职）。
+        const isOverdue =
+          assignment.dueAt !== null && new Date(assignment.dueAt).getTime() < now.getTime()
+        if (types.includes(EXTERNAL_TOOL_TYPE) && isOverdue) {
           return { submissionState: 'external_unconfirmed', submittedAt: null }
         }
         // Canvas 自己标记了缺交 → 用 missing 态（区别于普通"未交"）。
@@ -93,6 +114,7 @@ export function deriveSubmission(
           submissionState: submission.missing ? 'missing' : 'unsubmitted',
           submittedAt: null,
         }
+      }
       default:
         // deleted / 其他未知态 → 保守当"无记录"。
         return { submissionState: null, submittedAt: null }
@@ -143,8 +165,8 @@ function sameInstant(a: string | null, b: string | null): boolean {
  * `is_deleted` 也算变化条件：之前被软删除的行这次又出现了（老师恢复了作业），
  * 必须写一次把它恢复 —— 否则用户会看到"作业回来了但列表里没有"。
  */
-function hasChanged(existing: ExistingRow, incoming: CanvasAssignment): boolean {
-  const { submissionState, submittedAt } = deriveSubmission(incoming)
+function hasChanged(existing: ExistingRow, incoming: CanvasAssignment, now: Date): boolean {
+  const { submissionState, submittedAt } = deriveSubmission(incoming, now)
   return (
     existing.is_deleted ||
     existing.title !== incoming.title ||
@@ -201,13 +223,16 @@ export async function applyCanvasTasks({
   const inserts: Record<string, unknown>[] = []
   const updates: { id: string; patch: Record<string, unknown> }[] = []
 
+  // 把同步时刻转成 Date 一次，给 deriveSubmission 的「时间闸门」用。
+  const nowDate = new Date(now)
+
   for (const assignment of assignments) {
     // 同一个 source_id 在一批里重复出现时以第一条为准（去重，避免插入撞唯一索引）。
     if (seenSourceIds.has(assignment.externalId)) continue
     seenSourceIds.add(assignment.externalId)
 
     const existing = bySourceId.get(assignment.externalId)
-    const { submissionState, submittedAt } = deriveSubmission(assignment)
+    const { submissionState, submittedAt } = deriveSubmission(assignment, nowDate)
     if (!existing) {
       inserts.push({
         course_id: courseId,
@@ -226,7 +251,7 @@ export async function applyCanvasTasks({
       continue
     }
 
-    if (hasChanged(existing, assignment)) {
+    if (hasChanged(existing, assignment, nowDate)) {
       // ⚠️ 这里刻意没有 status：用户的"已完成"不被同步覆盖（文件头铁律 1）。
       // submission_state / submitted_at 是 Canvas 真相，同步可写（ADR-015）。
       updates.push({
