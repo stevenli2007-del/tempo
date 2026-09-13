@@ -374,6 +374,21 @@ Steven 说「完成 P0-1-5b 就收手」，Bud 交付 5b 后收到含糊的「Pl
     注意 `isOverdue` 用时间戳比较是对的 —— 不是"判断错了"，是**标签印错了日子**。
     本项目实现见 `Database.md` §3.1、P0-3-10 执行卡。
 
+19. 🔴 **CSS 自定义属性是惰性求值的：同名覆盖会静默污染引用它的变量 —— 「字看不见」先查它是不是解析成了底色。**
+    `--muted-foreground: var(--muted)` **不是**把当时的 `--muted` 抄一份，而是在**使用点**再去解析
+    `--muted` 的**最终**值。所以在同一个选择器块里，**后面**再写一次 `--muted` 就把它改了，
+    而前面所有引用它的变量会跟着一起变 —— 没有任何警告。
+    反例（P0-3-3 实测，我自己写出来的）：把 Stride 的 `--muted`（文字灰 `#758078`）与 shadcn 的
+    `--muted`（底色 = `--surface2`）用了**同一个名字**，末尾为迁就 shadcn 写了
+    `--muted: var(--muted-bg)` → `--muted-foreground` 静默变成 `#f2f4ef`，而页面底色是 `#f7f8f4`。
+    结果全站 `text-muted-foreground` / `text-ink-muted`（侧栏标签、卡片副标题、说明段落）**一起消失**。
+    **`next build` 全绿、零警告**，只有肉眼看截图才发现。
+    **铁律：底色 token 与文字 token 绝不重名。** 本项目命名 —— `--muted` 是**底色**；
+    文字灰一律叫 `--ink-muted`。同理 `--on-lime`（恒定：放在 lime **底色**上的字）与
+    `--lime-dark`（浅底上的品牌绿字，暗色下会被调亮）是两种语义，混用就会出现"浅绿压浅绿"。
+    **排查手法**：看到"字糊了"，把该工具类在产物 CSS 里 grep 出来，**逐层把 `var()` 解析到最终字面值**，
+    再与背景值算对比度。别信眼睛，更别信 build 绿。本项目实现见 `app/globals.css` 文件头。
+
 ### 10.2 坑索引（细节在各自文档）
 
 | 坑 | 一句话 | 权威位置 |
@@ -408,7 +423,9 @@ Steven 说「完成 P0-1-5b 就收手」，Bud 交付 5b 后收到含糊的「Pl
 | 写端到端脚本先核对请求字段名 | `canvasDomain`（不是 `domain`）／ `externalCourseId`（不是 `canvasCourseId`）／ Canvas 课程对象的 id 是 `externalId`（不是 `id`）。传 `undefined` 时字符串 `"undefined"` **能过** `[A-Za-z0-9_-]` 校验并"关联成功"，只在同步时报「Canvas 上找不到该资源」，极易误判成上游的锅 | 本节（无其他归属）、`types/canvas.ts`、`API-Contract.md` §6 |
 | 关联成功会**自动触发一次同步** | 脚本里接着再打手动同步必撞 30s 节流（429）。要么等过窗口，要么直接复用关联那次的结果 | `API-Contract.md` §6 `POST canvas-link`、`Phase-0-MVP.md` P0-2-5 执行卡 |
 | 两个写入方共用一张表时，按 `source` 收口 | 总览页只有 `tasks` 一张表，考试派生与 Canvas 同步各写各的 `source`。**任何一条查询/更新/删除漏了 `.eq('source', …)`，就会把对方的行当"缺席"删掉** —— 这是合并展示里最贵的一类事故 | `lib/sync/canvas-tasks.ts` / `exam-tasks.ts` 文件头、`Phase-0-MVP.md` P0-2-11 执行卡 |
+| Next 路由文件夹**禁用 `_` 前缀** | `_` 开头 = **私有文件夹**，Next 直接把它排除出路由系统：`app/(routes)/_shell-preview/page.tsx` 请求得到 404，而且 **`next build` 不报任何错**、路由静默消失（build 绿 ≠ 路由存在）。预览/临时页文件夹名去掉下划线；确实必须保留 `_` 时写成 `%5Ffolder`。判据是 **curl 状态码**，不是 build 是否通过。P0-3-3 实测踩到 | 本节（无其他归属） |
+| 主题脚本会让 `<html>` 报 hydration mismatch | 无闪烁主题脚本必须在 React 水合**之前**给 `<html>` 加 `.dark`，服务端 HTML 里必然没有它 → React 报 mismatch，**开发环境报错浮层把整页压暗一层**（看起来像"配色变丑了"，极具误导性）。修法：`<html suppressHydrationWarning>`，它只豁免 `<html>` 自身属性，不掩盖子树里的真实问题 | `app/layout.tsx` 注释、本节 10.1 第 19 条 |
 
 ---
 
-*创建：2026-09-01 ｜ 最近更新：2026-09-13（§10.1 第 17 条「上游不知道 ≠ 未完成」+ 第 18 条「日期禁止硬编码 UTC」；§10.2 新增三行坑索引：Canvas 日期差一天 / assignment 里没有完成信息 / 上游"不知道"≠未完成）*
+*创建：2026-09-01 ｜ 最近更新：2026-09-13（§10.1 第 17 条「上游不知道 ≠ 未完成」+ 第 18 条「日期禁止硬编码 UTC」+ 第 19 条「CSS 变量同名覆盖静默污染」；§10.2 新增五行坑索引：Canvas 日期差一天 / assignment 里没有完成信息 / 上游"不知道"≠未完成 / Next 路由文件夹禁用 `_` 前缀 / 主题脚本 `<html>` hydration）*

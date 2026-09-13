@@ -1,4 +1,3 @@
-import Link from 'next/link'
 import { redirect } from 'next/navigation'
 
 import { Button } from '@/components/ui/button'
@@ -12,6 +11,7 @@ import { TokenExpiryBanner } from '@/components/sync/token-expiry-banner'
 import { toCredentialExpiryView } from '@/lib/sync/expiry'
 import { TaskList } from '@/components/tasks/task-list'
 import type { TaskListItem } from '@/components/tasks/task-list'
+import { AppShell } from '@/components/shell/app-shell'
 import { signOut } from '@/lib/auth/actions'
 import { loadCredentialMeta } from '@/lib/canvas/credentials'
 import type { CanvasCredentialMeta } from '@/types/canvas'
@@ -285,30 +285,12 @@ export default async function DashboardPage() {
   )
 
   return (
-    <main className="min-h-screen bg-background text-foreground">
-      <header className="border-b border-border">
-        <div className="mx-auto flex max-w-4xl items-center justify-between px-6 py-4">
-          <span className="text-sm font-semibold">Tempo</span>
-          <div className="flex items-center gap-3">
-            <Link href="/settings" className="text-sm text-muted-foreground hover:text-foreground">
-              设置
-            </Link>
-            <span className="text-sm text-muted-foreground">{email}</span>
-            {hasDemo ? <DemoControls hasDemo={hasDemo} variant="inline" /> : null}
-            <form action={signOut}>
-              <Button type="submit" variant="outline" size="sm">
-                登出
-              </Button>
-            </form>
-          </div>
-        </div>
-      </header>
-
-      <div className="mx-auto max-w-4xl space-y-8 px-6 py-10">
+    <AppShell title="课程面板">
+      <div className="mx-auto max-w-[1100px] space-y-8">
         <div className="flex items-start justify-between gap-4">
           <div>
             <h1 className="text-2xl font-semibold tracking-tight">我的课程</h1>
-            <p className="mt-2 text-sm text-muted-foreground">
+            <p className="mt-2 text-sm text-ink-muted">
               先建课程，再上传 syllabus —— Tempo 会帮你把里面的考试、评分和日程抽出来。
             </p>
           </div>
@@ -316,6 +298,16 @@ export default async function DashboardPage() {
             <SyncControls hasCanvasLink={hasCanvasLink} />
             <CourseCreatePanel />
           </div>
+        </div>
+
+        <div className="flex items-center justify-end gap-3 text-sm">
+          <span className="text-ink-muted">{email}</span>
+          {hasDemo ? <DemoControls hasDemo={hasDemo} variant="inline" /> : null}
+          <form action={signOut}>
+            <Button type="submit" variant="outline" size="sm">
+              登出
+            </Button>
+          </form>
         </div>
 
         {error ? (
@@ -400,6 +392,6 @@ export default async function DashboardPage() {
           </section>
         ))}
       </div>
-    </main>
+    </AppShell>
   )
 }

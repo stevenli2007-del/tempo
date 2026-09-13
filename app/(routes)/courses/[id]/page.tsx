@@ -5,6 +5,7 @@ import { CanvasLink } from '@/components/courses/canvas-link'
 import { CourseActions } from '@/components/courses/course-actions'
 import { SyllabusUpload } from '@/components/courses/syllabus-upload'
 import { SectionEditor } from '@/components/sections/section-editor'
+import { AppShell } from '@/components/shell/app-shell'
 import { UUID_PATTERN } from '@/lib/api/params'
 import { loadCredentialMeta } from '@/lib/canvas/credentials'
 import { loadCourseDetail } from '@/lib/course-detail'
@@ -54,7 +55,7 @@ export default async function CourseDetailPage({ params }: PageProps) {
   // 查询失败必须让用户看见，不能降级成「课程不存在」（CodingRules 7）。
   if (error) {
     return (
-      <main className="min-h-screen bg-background text-foreground">
+      <AppShell title="课程详情">
         <div className="mx-auto max-w-3xl px-6 py-10">
           <div role="alert" className="rounded-lg border border-destructive/40 bg-card p-4">
             <p className="text-sm font-medium text-destructive">课程详情加载失败</p>
@@ -64,7 +65,7 @@ export default async function CourseDetailPage({ params }: PageProps) {
             ← 返回总览
           </Link>
         </div>
-      </main>
+      </AppShell>
     )
   }
 
@@ -93,20 +94,14 @@ export default async function CourseDetailPage({ params }: PageProps) {
   const meta = [detail.courseCode, detail.instructorName].filter(Boolean).join(' · ')
 
   return (
-    <main className="min-h-screen bg-background text-foreground">
-      <header className="border-b border-border">
-        <div className="mx-auto flex max-w-3xl items-center justify-between px-6 py-4">
-          <Link href="/dashboard" className="text-sm text-muted-foreground hover:text-foreground">
-            ← 总览
-          </Link>
-          <span className="text-sm font-semibold">Tempo</span>
-        </div>
-      </header>
-
-      <div className="mx-auto max-w-3xl space-y-6 px-6 py-10">
+    <AppShell title="课程详情">
+      <div className="mx-auto max-w-3xl space-y-6">
+        <Link href="/dashboard" className="inline-block text-sm text-ink-muted hover:text-ink">
+          ← 返回总览
+        </Link>
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">{detail.courseName}</h1>
-          <p className="mt-1 text-sm text-muted-foreground">
+          <p className="mt-1 text-sm text-ink-muted">
             {[detail.semester, meta].filter(Boolean).join(' · ') || '未填写学期与编码'}
           </p>
         </div>
@@ -142,6 +137,6 @@ export default async function CourseDetailPage({ params }: PageProps) {
           />
         </section>
       </div>
-    </main>
+    </AppShell>
   )
 }

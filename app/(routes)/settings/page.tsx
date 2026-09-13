@@ -1,4 +1,3 @@
-import Link from 'next/link'
 import { redirect } from 'next/navigation'
 
 import { Button } from '@/components/ui/button'
@@ -6,6 +5,7 @@ import { DangerZone } from '@/components/settings/danger-zone'
 import { loadDataSummary } from '@/lib/account/data-summary'
 import { signOut } from '@/lib/auth/actions'
 import { createClient } from '@/lib/supabase/server'
+import { AppShell } from '@/components/shell/app-shell'
 
 export const metadata = {
   title: '设置 · Tempo',
@@ -46,27 +46,18 @@ export default async function SettingsPage() {
   const summary = await loadDataSummary(supabase, user.id)
 
   return (
-    <main className="min-h-screen bg-background text-foreground">
-      <header className="border-b border-border">
-        <div className="mx-auto flex max-w-3xl items-center justify-between px-6 py-4">
-          <span className="text-sm font-semibold">Tempo · 设置</span>
-          <div className="flex items-center gap-3">
-            <Link href="/dashboard" className="text-sm text-muted-foreground hover:text-foreground">
-              返回总览
-            </Link>
+    <AppShell title="设置与隐私">
+      <div className="mx-auto max-w-3xl space-y-10">
+        <section className="space-y-3">
+          <div className="flex items-start justify-between gap-4">
+            <h1 className="text-2xl font-semibold tracking-tight">设置与隐私</h1>
             <form action={signOut}>
               <Button type="submit" variant="outline" size="sm">
                 登出
               </Button>
             </form>
           </div>
-        </div>
-      </header>
-
-      <div className="mx-auto max-w-3xl space-y-10 px-6 py-10">
-        <section className="space-y-3">
-          <h1 className="text-2xl font-semibold tracking-tight">设置与隐私</h1>
-          <p className="text-sm text-muted-foreground">登录邮箱：{email}</p>
+          <p className="text-sm text-ink-muted">登录邮箱：{email}</p>
         </section>
 
         <section className="space-y-3">
@@ -126,7 +117,7 @@ export default async function SettingsPage() {
 
         <DangerZone email={email} hasCredential={summary.canvas.status !== null && summary.canvas.status !== 'revoked'} />
       </div>
-    </main>
+    </AppShell>
   )
 }
 

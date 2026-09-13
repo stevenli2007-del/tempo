@@ -4,79 +4,138 @@
 
 @custom-variant dark (&:is(.dark *));
 
+/* ============================================================
+   Tempo design tokens — P0-3-3
+   ------------------------------------------------------------
+   布局 / 断点 / 圆角阶 = 移植自 Stride (Harris-Mansilla/Tempo)
+   颜色系统            = Apple 系统色
+
+   为什么颜色没照搬 Stride 的色值（Steven 2026-09-13 反馈：「看不清 +
+   按苹果风格来」）：
+     ① Stride 的暗色主题是亮色的机械反转 —— 米绿/奶油调在深色下糊成
+        一团，对比度不足；
+     ② Stride 只有 `--muted` 一个名字同时承担「文字灰」和「底色灰」两种
+        语义，与 shadcn 的 `--muted` 撞名。
+   故颜色改用 macOS / iOS 系统灰阶（label / secondaryLabel / separator +
+   systemGroupedBackground 三层表面），品牌 lime 保留为**强调色**
+   （logo、主按钮、激活指示），不再大面积当表面色。
+
+   ⚠️ 命名铁律：**底色 token 与文字 token 绝不重名**。
+      `--muted` 是底色（shadcn 血统）；文字灰一律叫 `--ink-muted`。
+   ============================================================ */
+
 :root {
-  --background: oklch(1 0 0);
-  --foreground: oklch(0.145 0 0);
-  --card: oklch(1 0 0);
-  --card-foreground: oklch(0.145 0 0);
-  --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.145 0 0);
-  --primary: oklch(0.205 0 0);
-  --primary-foreground: oklch(0.985 0 0);
-  --secondary: oklch(0.97 0 0);
-  --secondary-foreground: oklch(0.205 0 0);
-  --muted: oklch(0.97 0 0);
-  --muted-foreground: oklch(0.556 0 0);
-  --accent: oklch(0.97 0 0);
-  --accent-foreground: oklch(0.205 0 0);
-  --destructive: oklch(0.577 0.245 27.325);
-  --border: oklch(0.922 0 0);
-  --input: oklch(0.922 0 0);
-  --ring: oklch(0.708 0 0);
-  --chart-1: oklch(0.87 0 0);
-  --chart-2: oklch(0.556 0 0);
-  --chart-3: oklch(0.439 0 0);
-  --chart-4: oklch(0.371 0 0);
-  --chart-5: oklch(0.269 0 0);
-  --radius: 0.625rem;
-  --sidebar: oklch(0.985 0 0);
-  --sidebar-foreground: oklch(0.145 0 0);
-  --sidebar-primary: oklch(0.205 0 0);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.97 0 0);
-  --sidebar-accent-foreground: oklch(0.205 0 0);
-  --sidebar-border: oklch(0.922 0 0);
-  --sidebar-ring: oklch(0.708 0 0);
+  /* — 品牌（Stride 血统，保留为强调色） — */
+  --lime: #d8ed9d; /* 亮底/按钮底 */
+  --lime-dark: #435727; /* 亮色下 lime 系**文字**色（浅底上） */
+  --on-lime: #232d0e; /* 恒定：放在 lime **底色**上的文字色 */
+
+  /* — Apple 亮色阶 — */
+  --bg: #f5f5f7; /* systemGroupedBackground */
+  --surface: #ffffff; /* 卡片 */
+  --surface2: #f0f0f2; /* 次级填充 tertiarySystemFill */
+  --ink: #1d1d1f; /* label */
+  --ink-muted: #6e6e73; /* secondaryLabel —— 对比 5.1:1 */
+  --ink-faint: #86868b; /* tertiaryLabel */
+  --line: #e3e3e6; /* separator */
+  --nav: #fbfbfd; /* 侧栏 */
+  --nav-active: #eaeaef; /* 侧栏激活底 */
+  --hero: #1d1d1f;
+  --accent-blue: #0071e3; /* 链接 / 聚焦环 */
+
+  /* — 课程 / 状态色 — */
+  --purple: #7664ad;
+  --purple-bg: #f0ebfa;
+  --coral: #ba6954;
+  --coral-bg: #fbeee8;
+  --blue: #4972a0;
+  --blue-bg: #e9f0fa;
+  --green: #3d836f;
+  --green-bg: #e5f2eb;
+  --amber: #946922;
+  --amber-bg: #fbf4e3;
+  --red: #c0392f;
+
+  /* Apple 式双层阴影：贴边一层 + 扩散一层 */
+  --shadow: 0 1px 2px #0000000a, 0 8px 24px #0000000d;
+  --small: 13px;
+
+  /* — shadcn 语义名 → Apple 阶 — */
+  --background: var(--bg);
+  --foreground: var(--ink);
+  --card: var(--surface);
+  --card-foreground: var(--ink);
+  --popover: var(--surface);
+  --popover-foreground: var(--ink);
+  --primary: var(--lime);
+  --primary-foreground: var(--on-lime);
+  --secondary: var(--surface2);
+  --secondary-foreground: var(--ink);
+  --muted: var(--surface2); /* shadcn 的 muted = 浅底，不是文字色 */
+  --muted-foreground: var(--ink-muted); /* ⚠️ 绝不写成 var(--muted) */
+  --accent: var(--nav-active);
+  --accent-foreground: var(--ink);
+  --destructive: var(--red);
+  --destructive-foreground: #ffffff;
+  --border: var(--line);
+  --input: var(--line);
+  --ring: var(--accent-blue);
+  --chart-1: var(--purple);
+  --chart-2: var(--blue);
+  --chart-3: var(--green);
+  --chart-4: var(--coral);
+  --chart-5: var(--amber);
+  --sidebar: var(--nav);
+  --sidebar-foreground: var(--ink);
+  --sidebar-primary: var(--lime);
+  --sidebar-primary-foreground: var(--on-lime);
+  --sidebar-accent: var(--nav-active);
+  --sidebar-accent-foreground: var(--ink);
+  --sidebar-border: var(--line);
+  --sidebar-ring: var(--accent-blue);
 }
 
 .dark {
-  --background: oklch(0.145 0 0);
-  --foreground: oklch(0.985 0 0);
-  --card: oklch(0.205 0 0);
-  --card-foreground: oklch(0.985 0 0);
-  --popover: oklch(0.205 0 0);
-  --popover-foreground: oklch(0.985 0 0);
-  --primary: oklch(0.922 0 0);
-  --primary-foreground: oklch(0.205 0 0);
-  --secondary: oklch(0.269 0 0);
-  --secondary-foreground: oklch(0.985 0 0);
-  --muted: oklch(0.269 0 0);
-  --muted-foreground: oklch(0.708 0 0);
-  --accent: oklch(0.269 0 0);
-  --accent-foreground: oklch(0.985 0 0);
-  --destructive: oklch(0.704 0.191 22.216);
-  --border: oklch(1 0 0 / 10%);
-  --input: oklch(1 0 0 / 15%);
-  --ring: oklch(0.556 0 0);
-  --chart-1: oklch(0.87 0 0);
-  --chart-2: oklch(0.556 0 0);
-  --chart-3: oklch(0.439 0 0);
-  --chart-4: oklch(0.371 0 0);
-  --chart-5: oklch(0.269 0 0);
-  --sidebar: oklch(0.205 0 0);
-  --sidebar-foreground: oklch(0.985 0 0);
-  --sidebar-primary: oklch(0.488 0.243 264.376);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.269 0 0);
-  --sidebar-accent-foreground: oklch(0.985 0 0);
-  --sidebar-border: oklch(1 0 0 / 10%);
-  --sidebar-ring: oklch(0.556 0 0);
+  /* 品牌在暗色下 → lime 保持明亮（它本来就是浅色），
+     lime-dark 反向调亮，让它能当「暗底上的文字」用。 */
+  --lime: #d8ed9d;
+  --lime-dark: #b9cc99;
+  --on-lime: #232d0e; /* 不变：lime 底上永远配深字 */
+
+  /* — macOS / iOS 暗色阶 — */
+  --bg: #161618;
+  --surface: #1f1f22;
+  --surface2: #2c2c2e;
+  --ink: #f5f5f7; /* 对比 14:1 */
+  --ink-muted: #a1a1a6; /* secondaryLabel —— 对比 5.8:1 */
+  --ink-faint: #8e8e93;
+  --line: #38383a;
+  --nav: #1b1b1e;
+  --nav-active: #2c2c2e;
+  --hero: #0a0a0b;
+  --accent-blue: #0a84ff;
+
+  --purple: #b4a4dc;
+  --purple-bg: #2e2a3d;
+  --coral: #e0a48f;
+  --coral-bg: #3b2c27;
+  --blue: #9cb9dc;
+  --blue-bg: #23333f;
+  --green: #8fc4ae;
+  --green-bg: #213630;
+  --amber: #dcc084;
+  --amber-bg: #352f22;
+  --red: #ff6b60;
+
+  --shadow: 0 1px 2px #00000080, 0 8px 24px #0000004d;
+  --small: 13px;
 }
 
 @theme inline {
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
 
+  /* shadcn color utilities */
   --color-background: var(--background);
   --color-foreground: var(--foreground);
   --color-card: var(--card);
@@ -92,6 +151,7 @@
   --color-accent: var(--accent);
   --color-accent-foreground: var(--accent-foreground);
   --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
   --color-border: var(--border);
   --color-input: var(--input);
   --color-ring: var(--ring);
@@ -109,10 +169,44 @@
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-ring: var(--sidebar-ring);
 
-  --radius-sm: calc(var(--radius) - 4px);
-  --radius-md: calc(var(--radius) - 2px);
-  --radius-lg: var(--radius);
-  --radius-xl: calc(var(--radius) + 4px);
+  /* Stride / Tempo 语义色工具类 */
+  --color-lime: var(--lime);
+  --color-lime-dark: var(--lime-dark);
+  --color-on-lime: var(--on-lime);
+  --color-nav: var(--nav);
+  --color-nav-active: var(--nav-active);
+  --color-hero: var(--hero);
+  --color-ink: var(--ink);
+  --color-ink-muted: var(--ink-muted);
+  --color-ink-faint: var(--ink-faint);
+  --color-line: var(--line);
+  --color-surface: var(--surface);
+  --color-surface2: var(--surface2);
+  --color-accent-blue: var(--accent-blue);
+  --color-purple: var(--purple);
+  --color-purple-bg: var(--purple-bg);
+  --color-coral: var(--coral);
+  --color-coral-bg: var(--coral-bg);
+  --color-blue: var(--blue);
+  --color-blue-bg: var(--blue-bg);
+  --color-green: var(--green);
+  --color-green-bg: var(--green-bg);
+  --color-amber: var(--amber);
+  --color-amber-bg: var(--amber-bg);
+  --color-red: var(--red);
+
+  /* radii — Stride scale: badge 6 / button 10 / icon 12 / card 18 */
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 12px;
+  --radius-xl: 18px;
+  --radius-badge: 6px;
+  --radius-button: 10px;
+  --radius-icon: 12px;
+  --radius-card: 18px;
+
+  /* unified card shadow */
+  --shadow-card: var(--shadow);
 }
 
 @layer base {
@@ -120,7 +214,7 @@
     @apply border-border outline-ring/50;
   }
   body {
-    @apply bg-background text-foreground;
+    @apply bg-background text-foreground text-[15px] leading-normal antialiased;
   }
   html {
     @apply font-sans;
