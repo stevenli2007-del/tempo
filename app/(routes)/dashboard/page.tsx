@@ -1,10 +1,7 @@
 import { redirect } from 'next/navigation'
 
 import { Button } from '@/components/ui/button'
-import { CourseCard } from '@/components/courses/course-card'
-import type { UpcomingTaskView } from '@/components/courses/course-card'
 import { DemoControls } from '@/components/courses/demo-controls'
-import { CourseCreatePanel } from '@/components/courses/course-create-panel'
 import { DebtBar } from '@/components/overview/debt-bar'
 import { WeekCalendar } from '@/components/overview/week-calendar'
 import { SyncControls } from '@/components/sync/sync-controls'
@@ -19,16 +16,14 @@ import { loadCredentialMeta } from '@/lib/canvas/credentials'
 import type { CanvasCredentialMeta } from '@/types/canvas'
 import { COURSE_COLUMNS, toCourse } from '@/lib/courses'
 import type { CourseRow } from '@/lib/courses'
-import { SYLLABUS_COLUMNS, toSyllabus } from '@/lib/syllabi'
-import type { SyllabusRow } from '@/lib/syllabi'
-import { loadDebtTasks, loadTasks, loadUpcomingExams, loadUpcomingTasks } from '@/lib/tasks'
+import { loadDebtTasks, loadTasks, loadUpcomingExams } from '@/lib/tasks'
+import { formatDue } from '@/lib/tasks/format'
 import {
   buildUpcomingExams,
   buildWeekCalendar,
   debtWindow,
   summarizeDebt,
 } from '@/lib/tasks/progress'
-import { SCHOOL_TIME_ZONE } from '@/lib/time'
 import { createClient } from '@/lib/supabase/server'
 import {
   recordUsageEvent,
@@ -36,15 +31,12 @@ import {
 } from '@/lib/usage-events'
 import {
   summarizeSyncStatus,
-  toCourseSyncLine,
   toCourseSyncView,
 } from '@/lib/sync/status'
-import type { Course } from '@/types/course'
-import type { Syllabus } from '@/types/syllabus'
-import type { Task, UpcomingTask } from '@/types/task'
+import type { Task } from '@/types/task'
 
 export const metadata = {
-  title: '我的课程 · Tempo',
+  title: '课程面板 · Tempo',
 }
 
 /** 总览页任务窗口（天）。与 `GET /api/v1/tasks` 的默认 range 一致。 */
@@ -66,72 +58,12 @@ const OVERVIEW_LIMIT = 50
  */
 const EXAM_POOL = 50
 
-/**
- * 日期标签用**学校本地时区**在服务端算好，避免 hydration mismatch（见下方 formatDue）。
- *
- * 🔴 P0-3-10 修复：原先硬编码 `timeZone: 'UTC'`，导致**晚上截止的 Canvas 作业几乎全部显示晚一天**
- * —— Canvas 的 `due_at` 带真实时区（如 `2026-09-09T23:59 PDT` = `2026-09-10T06:59Z`），
- * 按 UTC 取日期就印成 9/10，而用户在伯克利看到的是 9/9。考试派生任务恰因代码硬塞 `T23:59:59 UTC`
- * 才侥幸不出错（ADR-004 要跟 Canvas 对齐的本意就是按学校本地时间）。
- *
- * P0-3-7 起这个常量搬到 `lib/time.ts` —— 周历也要按学校日历日分桶，
- * 两处必须是同一个值（否则"同一条任务在列表和日历上差一天"）。
- */
-const DUE_FORMATTER = new Intl.DateTimeFormat('zh-CN', {
-  month: 'numeric',
-  day: 'numeric',
-  weekday: 'short',
-  timeZone: SCHOOL_TIME_ZONE,
-})
-
-function formatDue(
-  iso: string | null,
-  now: Date,
-): { label: string | null; isOverdue: boolean } {
-  if (iso === null) {
-    // null = 未知日期（考试 TBD）。返回 null 让展示层渲染成「日期待定」，
-    // 不编一个假日期出来（Database.md 3.9）。
-    return { label: null, isOverdue: false }
-  }
-  const due = new Date(iso)
-  if (Number.isNaN(due.getTime())) {
-    return { label: null, isOverdue: false }
-  }
-  return { label: DUE_FORMATTER.format(due), isOverdue: due.getTime() < now.getTime() }
-}
-
-/**
- * 卡片近期任务 → 视图模型。
- *
- * `undefined` 表示**没查到这门课的任何任务**（"近期没有待办"语义，不当错误渲染）。
- * `[]` 也表示"没查到任务"（显式空数组）。
- *
- * 把这两种合并到 `[]` —— 旧版本用 `null` 表示"加载失败"、与 undefined 区分，
- * 但实际上：
- *   ① "加载失败"应**由调用方**显式判断 `tasksError` 后决定渲染分支，而不是依赖
- *      `undefined` 这个隐式信号（Map.get 不存在与查询失败在 JS 里**长得一样**）；
- *   ② 卡片只展示"这门课没有未完成的任务"，与"加载失败"是两种不同的状态，分开用 prop 传。
- */
-function toUpcomingViews(tasks: UpcomingTask[] | undefined, now: Date): UpcomingTaskView[] {
-  const list = tasks ?? []
-  return list.map((task) => {
-    const { label, isOverdue } = formatDue(task.dueDate, now)
-    // 卡片只显示"接下来要做的事"：Canvas 已判定完成（submitted/graded/pending_review）的不算逾期待催；
-    // external_unconfirmed（外部平台提交，Canvas 无记录）也不该标红"已逾期"（我们不知道真没交）。
-    const canvasCompleted =
-      task.submissionState === 'submitted' ||
-      task.submissionState === 'graded' ||
-      task.submissionState === 'pending_review'
-    const knownIncomplete = !canvasCompleted && task.submissionState !== 'external_unconfirmed'
-    return {
-      id: task.id,
-      title: task.title,
-      dueLabel: label,
-      isOverdue: isOverdue && knownIncomplete,
-      submissionState: task.submissionState,
-    }
-  })
-}
+// 日期标签与课程卡视图模型已搬到共享模块（**故意不在这里留副本**）：
+//   `formatDue` → lib/tasks/format.ts
+//   `toUpcomingViews` / `groupBySemester` / `loadLatestSyllabi` → lib/courses/course-list.ts
+//
+// P0-3-7b 把课程卡整体搬去 `/courses`，但"日期口径"与"是否算完成"两个页面必须一致 ——
+// 各留一份副本，迟早出现"同一条任务在两个页面显示不同日期"。**改那两处 = 两个页面同时改。**
 
 function toListItems(tasks: Task[], now: Date): TaskListItem[] {
   return tasks.map((task) => {
@@ -164,60 +96,6 @@ function toListItems(tasks: Task[], now: Date): TaskListItem[] {
 // 但这里显式声明，避免将来有人调整调用顺序时又退化成静态页。
 export const dynamic = 'force-dynamic'
 
-/**
- * 按学期分组。Map 保持插入顺序，配合 SQL 的 created_at 升序，分组顺序稳定可预期。
- */
-function groupBySemester(courses: Course[]): { semester: string; courses: Course[] }[] {
-  const groups = new Map<string, Course[]>()
-  for (const course of courses) {
-    const list = groups.get(course.semester)
-    if (list) {
-      list.push(course)
-    } else {
-      groups.set(course.semester, [course])
-    }
-  }
-  return Array.from(groups, ([semester, list]) => ({ semester, courses: list }))
-}
-
-/**
- * 取每门课**最新一份** syllabus。
- *
- * 只查一次（`in` + 按时间倒序）而不是每门课查一次，避免 N+1。
- * 一门课允许有多份（重新上传会新增一行），展示时取最新的那份。
- *
- * 返回的错误单独带出来：syllabus 是次要数据，它查失败不该让整个课程列表白屏，
- * 但也不能静默显示成"还没有 syllabus"（CodingRules 7）—— 所以降级成一条可见的提示。
- */
-async function loadLatestSyllabi(
-  supabase: Awaited<ReturnType<typeof createClient>>,
-  courseIds: string[],
-): Promise<{ byCourse: Map<string, Syllabus>; error: string | null }> {
-  const byCourse = new Map<string, Syllabus>()
-  if (courseIds.length === 0) {
-    return { byCourse, error: null }
-  }
-
-  const { data, error } = await supabase
-    .from('syllabi')
-    .select(SYLLABUS_COLUMNS)
-    .in('course_id', courseIds)
-    .order('uploaded_at', { ascending: false })
-
-  if (error) {
-    return { byCourse, error: error.message }
-  }
-
-  for (const row of (data ?? []) as SyllabusRow[]) {
-    // 已按 uploaded_at 倒序，第一次出现的就是该课程最新一份。
-    if (!byCourse.has(row.course_id)) {
-      byCourse.set(row.course_id, toSyllabus(row))
-    }
-  }
-
-  return { byCourse, error: null }
-}
-
 export default async function DashboardPage() {
   const supabase = await createClient()
   const {
@@ -244,7 +122,6 @@ export default async function DashboardPage() {
   // 查询失败必须让用户看见，不能因为 error 分支返回空数组就渲染成"还没有课程"。
   // 静默的旧数据/空数据比明确的错误更危险（CodingRules 7、PRD F4 失败可见性）。
   const courses = data ? (data as CourseRow[]).map(toCourse) : []
-  const groups = groupBySemester(courses)
   const email = user.email ?? '（未设置邮箱）'
   /** 是否已有示例课程（决定展示「先看看效果」入口还是「清空示例数据」）。 */
   const hasDemo = courses.some((course) => course.isDemo)
@@ -253,11 +130,6 @@ export default async function DashboardPage() {
    * 没关联过的用户同步注定空跑，不渲染按钮也不发自动请求（P0-2-6）。
    */
   const hasCanvasLink = courses.some((course) => course.canvasCourseId !== null)
-
-  const { byCourse: syllabiByCourse, error: syllabusError } = await loadLatestSyllabi(
-    supabase,
-    courses.map((course) => course.id),
-  )
 
   /**
    * 凭据状态（P0-2-7 失败分级 + P0-2-8 过期提醒共用）。
@@ -309,21 +181,18 @@ export default async function DashboardPage() {
   const reconnectCourse = firstLinkedCourse ?? courses[0]
   const reconnectHref = reconnectCourse ? `/courses/${reconnectCourse.id}` : null
 
-  // 四份任务数据互不依赖，并行发。课程 id 沿用上面已查到的未归档课程，不重复查。
+  // 三份任务数据互不依赖，并行发。课程 id 沿用上面已查到的未归档课程，不重复查。
   //
-  // ① 卡片近期任务 / ② 总览清单（`overview.tasks`，同时喂周历）/ ③ 债务条 / ④ 最近的考试。
-  // ② 和 ③ **口径不同、刻意不复用**：
+  // ① 总览清单（`overview.tasks`，同时喂周历）/ ② 债务条 / ③ 最近的考试。
+  // ① 和 ② **口径不同、刻意不复用**：
   //    清单（和周历）要考试（syllabus 派生），债务条**必须排除考试** ——
   //    同一个页面上两个消费者对考试任务的态度相反，见 `lib/tasks/progress.ts` 文件头。
-  // ④ 单独取是因为考试常落在 7 天窗口之外，② 的窗口装不下。
+  // ③ 单独取是因为考试常落在 7 天窗口之外，① 的窗口装不下。
+  //
+  // P0-3-7b：原来的第 ④ 路「卡片近期任务」（`loadUpcomingTasks`）随课程卡一起搬去
+  // `/courses` —— 这一页不再需要它，于是**少发一个查询**。
   const courseIds = courses.map((course) => course.id)
-  const [
-    { byCourse: upcomingByCourse, error: upcomingError },
-    overview,
-    debt,
-    examPool,
-  ] = await Promise.all([
-    loadUpcomingTasks(supabase, courseIds),
+  const [overview, debt, examPool] = await Promise.all([
     loadTasks(supabase, {
       courseIds,
       until: new Date(now.getTime() + OVERVIEW_RANGE_DAYS * 86_400_000).toISOString(),
@@ -333,7 +202,7 @@ export default async function DashboardPage() {
     loadDebtTasks(supabase, { courseIds, ...debtWindow(now) }),
     loadUpcomingExams(supabase, { courseIds, since: now.toISOString(), pool: EXAM_POOL }),
   ])
-  const tasksError = upcomingError ?? overview.error
+  const tasksError = overview.error
 
   // 口径与可视化模型都在纯函数层算（`lib/tasks/progress.ts`），这里只做接线。
   const debtSummary = summarizeDebt(debt.tasks, now)
@@ -345,24 +214,18 @@ export default async function DashboardPage() {
     .filter((course) => course.canvasCourseId !== null)
     .map((course) => toCourseSyncView(course, { credentialUsable: credentialUsable === true }))
   const syncOverview = summarizeSyncStatus(syncViews, now)
-  const syncLines = new Map(
-    syncViews.map((view) => [view.courseId, toCourseSyncLine(view, now)] as const),
-  )
 
   return (
     <AppShell title="课程面板">
       <div className="mx-auto max-w-[1100px] space-y-8">
         <div className="flex items-start justify-between gap-4">
           <div>
-            <h1 className="text-2xl font-semibold tracking-tight">我的课程</h1>
+            <h1 className="text-2xl font-semibold tracking-tight">接下来</h1>
             <p className="mt-2 text-sm text-ink-muted">
-              先建课程，再上传 syllabus —— Tempo 会帮你把里面的考试、评分和日程抽出来。
+              最近的作业与考试。已经过你截止日的单独收在最上面。
             </p>
           </div>
-          <div className="flex items-center gap-2">
-            <SyncControls hasCanvasLink={hasCanvasLink} />
-            <CourseCreatePanel />
-          </div>
+          <SyncControls hasCanvasLink={hasCanvasLink} />
         </div>
 
         <div className="flex items-center justify-end gap-3 text-sm">
@@ -382,20 +245,11 @@ export default async function DashboardPage() {
           </div>
         ) : null}
 
-        {syllabusError ? (
-          <div role="alert" className="rounded-lg border border-destructive/40 bg-card p-4">
-            <p className="text-sm font-medium text-destructive">Syllabus 信息加载失败</p>
-            <p className="mt-1 text-sm text-muted-foreground">
-              课程列表不受影响，但上传状态可能显示不准。{syllabusError}
-            </p>
-          </div>
-        ) : null}
-
         {tasksError ? (
           <div role="alert" className="rounded-lg border border-destructive/40 bg-card p-4">
             <p className="text-sm font-medium text-destructive">任务列表加载失败</p>
             <p className="mt-1 text-sm text-muted-foreground">
-              课程与 syllabus 不受影响，但下面的近期任务可能不完整。{tasksError}
+              下面的日历与待办清单可能不完整。{tasksError}
             </p>
           </div>
         ) : null}
@@ -468,28 +322,9 @@ export default async function DashboardPage() {
           <DemoControls hasDemo={hasDemo} variant="cta" />
         ) : null}
 
-        {groups.map((group) => (
-          <section key={group.semester} className="space-y-3">
-            <h2 className="text-sm font-medium text-muted-foreground">{group.semester}</h2>
-            <div className="grid gap-4 sm:grid-cols-2">
-              {group.courses.map((course) => (
-                <CourseCard
-                  key={course.id}
-                  course={course}
-                  syllabus={syllabiByCourse.get(course.id) ?? null}
-                  // 卡片分支不再用「undefined → null」隐式判定加载失败：
-                  // Map.get() 不存在（这门课没任务）与查询错误是两种不同状态，
-                  // 全部转成「空数组」让卡片显示「近期没有待办」；
-                  // 真正的加载失败由 `loadError`（来自 tasksError）显式控制。
-                  upcomingTasks={toUpcomingViews(upcomingByCourse.get(course.id), now)}
-                  loadError={tasksError}
-                  // 未关联的课查不到 view → undefined → 卡片不渲染同步行。
-                  syncLine={syncLines.get(course.id) ?? null}
-                />
-              ))}
-            </div>
-          </section>
-        ))}
+        {/* 课程卡（按学期分组的 13 张）已搬到 `/courses`（P0-3-7b）—— 这一页只回答
+            「接下来要做什么」。卡片的数据构造在 `lib/courses/course-list.ts`，
+            与课程列表页**共用同一份**，不要在这里重新实现。 */}
       </div>
     </AppShell>
   )

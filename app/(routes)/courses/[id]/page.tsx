@@ -61,8 +61,8 @@ export default async function CourseDetailPage({ params }: PageProps) {
             <p className="text-sm font-medium text-destructive">课程详情加载失败</p>
             <p className="mt-1 text-sm text-muted-foreground">{error}</p>
           </div>
-          <Link href="/dashboard" className="mt-4 inline-block text-sm text-muted-foreground">
-            ← 返回总览
+          <Link href="/courses" className="mt-4 inline-block text-sm text-muted-foreground">
+            ← 返回我的课程
           </Link>
         </div>
       </AppShell>
@@ -96,8 +96,8 @@ export default async function CourseDetailPage({ params }: PageProps) {
   return (
     <AppShell title="课程详情">
       <div className="mx-auto max-w-3xl space-y-6">
-        <Link href="/dashboard" className="inline-block text-sm text-ink-muted hover:text-ink">
-          ← 返回总览
+        <Link href="/courses" className="inline-block text-sm text-ink-muted hover:text-ink">
+          ← 返回我的课程
         </Link>
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">{detail.courseName}</h1>

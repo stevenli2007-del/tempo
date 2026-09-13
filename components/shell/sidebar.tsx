@@ -2,13 +2,21 @@
 
 import Link from "next/link"
 import { usePathname } from "next/navigation"
-import { GraduationCap, LayoutDashboard, Settings } from "lucide-react"
+import { BookOpen, GraduationCap, LayoutDashboard, Settings } from "lucide-react"
 
 import { cn } from "@/lib/utils"
 import { SIDEBAR_W } from "./shell-widths"
 
+/**
+ * 导航项。`match` 决定高亮范围 —— **必须覆盖该栏目的全部子路由**，
+ * 否则用户点进详情页时侧栏一片灰，看起来像"迷路了"。
+ *
+ * P0-3-7b 拆出「我的课程」：`/courses` 与 `/courses/[id]` 是两个层级，
+ * 但都属于同一个栏目，所以用前缀匹配而不是等值匹配。
+ */
 const NAV = [
   { href: "/dashboard", label: "课程面板", icon: LayoutDashboard, match: (p: string) => p === "/dashboard" || p.startsWith("/dashboard") },
+  { href: "/courses", label: "我的课程", icon: BookOpen, match: (p: string) => p.startsWith("/courses") },
   { href: "/settings", label: "设置与隐私", icon: Settings, match: (p: string) => p.startsWith("/settings") },
 ] as const
 
