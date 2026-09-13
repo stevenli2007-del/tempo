@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation'
 import { useState } from 'react'
 
 import { courseColorVar, courseColorKey } from '@/lib/courses/course-color'
-import type { TaskStatus } from '@/types/task'
+import type { TaskStatus, TaskSubmissionState } from '@/types/task'
 
 /**
  * 跨课程近期任务列表（P0-1-9，PRD F5）。
@@ -34,6 +34,10 @@ export interface TaskListItem {
   status: TaskStatus
   /** 派生任务（考试）不可在此编辑内容，但**允许**标记完成 —— 完成状态是用户自己的。 */
   isDerived: boolean
+  /** Canvas 提交态（P0-3-10）；null = 不追踪。 */
+  submissionState: TaskSubmissionState | null
+  /** Canvas 提交时刻（ISO）或 null。 */
+  submittedAt: string | null
 }
 
 interface TaskListProps {
@@ -53,8 +57,38 @@ interface TaskRowProps {
   onToggle: (item: TaskListItem) => void
 }
 
+/**
+ * 任务行的「提交态标注」（P0-3-10）。
+ * 用户已手勾（status=done）时不另标 —— 用户主权优先。
+ * - submitted / graded / pending_review → 「已提交（Canvas）」（positive）
+ * - external_unconfirmed → 「待确认（外部平台提交）」（neutral，绝不写"待完成"诬告用户）
+ */
+function submissionNote(
+  item: TaskListItem,
+): { label: string; tone: 'positive' | 'neutral' } | null {
+  if (item.status === 'done') return null
+  switch (item.submissionState) {
+    case 'submitted':
+    case 'graded':
+    case 'pending_review':
+      return { label: '已提交（Canvas）', tone: 'positive' }
+    case 'external_unconfirmed':
+      return { label: '待确认（外部平台提交）', tone: 'neutral' }
+    default:
+      return null
+  }
+}
+
 function TaskRow({ item, busy, onToggle }: TaskRowProps) {
   const isDone = item.status === 'done'
+  const note = submissionNote(item)
+
+  // 逾期文案：Canvas 标记缺交（missing）区别于普通"逾期未完成"。
+  const overdueText = item.isOverdue
+    ? item.submissionState === 'missing'
+      ? '（逾期未交）'
+      : '（已逾期）'
+    : ''
 
   return (
     <li className="flex items-start gap-3 rounded-lg border border-border bg-card px-4 py-3">
@@ -93,13 +127,22 @@ function TaskRow({ item, busy, onToggle }: TaskRowProps) {
             />
             {item.courseName}
           </span>
+          {note ? (
+            <span
+              className={`shrink-0 text-xs ${
+                note.tone === 'positive' ? 'text-primary/80' : 'text-muted-foreground/70'
+              }`}
+            >
+              {note.label}
+            </span>
+          ) : null}
           {item.isDerived ? (
             <span className="shrink-0 text-xs text-muted-foreground/70">考试</span>
           ) : null}
         </div>
         <p className={`mt-0.5 text-xs ${item.isOverdue ? 'text-destructive' : 'text-muted-foreground'}`}>
           {item.dueLabel ?? '日期待定'}
-          {item.isOverdue ? '（已逾期）' : ''}
+          {overdueText}
         </p>
       </div>
     </li>
@@ -114,8 +157,15 @@ export function TaskList({ items }: TaskListProps) {
   const [error, setError] = useState<string | null>(null)
 
   // 服务端已按 dueDate 升序排好（null 排最后），这里只做分组，不打乱顺序。
-  const pending = items.filter((item) => item.status === 'pending')
-  const done = items.filter((item) => item.status === 'done')
+  // P0-3-10 合并规则：status='done' **或** Canvas 已判定完成（submitted/graded/pending_review）
+  // → 归入「已完成」区；其余（含 external_unconfirmed / missing / 未交）留在待办。
+  const isEffectivelyDone = (item: TaskListItem): boolean =>
+    item.status === 'done' ||
+    item.submissionState === 'submitted' ||
+    item.submissionState === 'graded' ||
+    item.submissionState === 'pending_review'
+  const pending = items.filter((item) => !isEffectivelyDone(item))
+  const done = items.filter((item) => isEffectivelyDone(item))
 
   // P0-3-6：最近 OVERVIEW_VISIBLE 条待办直接列出，其余收进可展开 BOX。
   // 注意：这是**展示层**截断，数据已在服务端全部取回（dashboard 的 OVERVIEW_LIMIT 只是 DB 安全上限），

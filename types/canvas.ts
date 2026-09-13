@@ -75,4 +75,28 @@ export type CanvasAssignment = {
   dueAt: string | null
   /** 该作业在 Canvas 上的最后更新时间，用于判断是否真的变了（Database.md §4.2）。 */
   externalUpdatedAt: string | null
+  /**
+   * Canvas 的 `submission_types`（决定有没有"提交"这回事）。
+   * 含 `online_upload` / `online_text_entry` / `online_quiz` → 能自动判；
+   * 含 `external_tool`（Gradescope 等 LTI 外链）→ Canvas 无提交记录，展示「待确认」；
+   * 含 `none` / `not_graded` / `on_paper`（考勤打卡、纸质作业）→ **没有完成态**，永远保留手勾。
+   */
+  submissionTypes: string[]
+  /**
+   * 内联的"当前用户提交"对象（请求带 `include[]=submission` 时返回）。
+   * `null` = Canvas 在此作业上没有该用户的提交记录（external_tool 外链类常为此态）。
+   */
+  submission: CanvasSubmission | null
+}
+
+/** 内联提交对象里 Tempo 用到的字段（P0-3-10，Canvas `submission` 的子集）。 */
+export type CanvasSubmission = {
+  /** `unsubmitted` / `submitted` / `pending_review` / `graded` / … */
+  workflowState: string | null
+  /** ISO 8601 或 null（未提交）。 */
+  submittedAt: string | null
+  /** Canvas 判定迟到。 */
+  late: boolean
+  /** Canvas 判定缺交（逾期且未交）。 */
+  missing: boolean
 }

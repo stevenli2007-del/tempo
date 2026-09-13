@@ -14,7 +14,8 @@ import type { getCurrentUser } from '@/lib/api/response'
  *    用户勾掉的"已完成"必须在下一次同步后依然是已完成 ——
  *    "我明明做完了，第二天又变回未完成"是这类应用最常见的体验 bug（Database.md 4.1）。
  *    本文件写入的字段集合是封闭的：`title` / `due_date` / `external_updated_at` /
- *    `last_seen_at` / `is_deleted`，**没有 `status`**。
+ *    `last_seen_at` / `is_deleted` / `submission_state` / `submitted_at`，**没有 `status`**。
+ *    `submission_state` 是 Canvas 真相（ADR-015：与用户主权的 `status` 分列，展示层合并）。
  *
  * 2. **没有变化就不写库**（Database.md 4.2 的原话：不刷 `updated_at`）。
  *    `updated_at` 应该表示"这条数据什么时候真的变过"，而不是"什么时候被同步扫到过"。
@@ -45,6 +46,61 @@ const CANVAS_TASK_TYPE = 'assignment'
 /** Postgres 唯一约束冲突（并发同步抢同一行时用得上）。 */
 const UNIQUE_VIOLATION = '23505'
 
+/** Canvas submission_types 里"压根不存在完成态"的几类：永远保留手勾，同步不写提交态。 */
+const NO_COMPLETION_TYPES = new Set(['none', 'not_graded', 'on_paper'])
+/** 外链类（Gradescope 等 LTI）。Canvas 无提交记录 → 展示「待确认」，不显示"待完成"。 */
+const EXTERNAL_TOOL_TYPE = 'external_tool'
+
+/**
+ * 把一条 Canvas 作业映射成 Tempo 的提交态（P0-3-10 的"五个分支"全在此收口）。
+ *
+ * 返回 `submissionState`（落 `tasks.submission_state`）+ `submittedAt`（落 `tasks.submitted_at`）。
+ * 任何异常形状都降级到最保守值 —— 宁可让用户手勾，也不替他判定"没交"。
+ *
+ * 分支：
+ *  ① submission_types 含 none/not_graded/on_paper → null（无完成态，用户手勾）
+ *  ② 有内联 submission：
+ *       graded → graded；submitted → submitted；pending_review → pending_review
+ *       unsubmitted → missing 看 Canvas 标记，否则 unsubmitted
+ *  ③ 无内联 submission（external_tool 外链类常为此态）→
+ *       external_tool → external_unconfirmed（待确认）；其余 → null
+ */
+export function deriveSubmission(
+  assignment: CanvasAssignment,
+): { submissionState: string | null; submittedAt: string | null } {
+  const types = assignment.submissionTypes
+  if (types.some((t) => NO_COMPLETION_TYPES.has(t))) {
+    return { submissionState: null, submittedAt: null }
+  }
+
+  const submission = assignment.submission
+  if (submission) {
+    switch (submission.workflowState) {
+      case 'graded':
+        return { submissionState: 'graded', submittedAt: submission.submittedAt }
+      case 'submitted':
+        return { submissionState: 'submitted', submittedAt: submission.submittedAt }
+      case 'pending_review':
+        return { submissionState: 'pending_review', submittedAt: submission.submittedAt }
+      case 'unsubmitted':
+        // Canvas 自己标记了缺交 → 用 missing 态（区别于普通"未交"）。
+        return {
+          submissionState: submission.missing ? 'missing' : 'unsubmitted',
+          submittedAt: null,
+        }
+      default:
+        // deleted / 其他未知态 → 保守当"无记录"。
+        return { submissionState: null, submittedAt: null }
+    }
+  }
+
+  // 没有内联提交记录。
+  if (types.includes(EXTERNAL_TOOL_TYPE)) {
+    return { submissionState: 'external_unconfirmed', submittedAt: null }
+  }
+  return { submissionState: null, submittedAt: null }
+}
+
 export type CanvasTaskCounts = {
   created: number
   updated: number
@@ -62,6 +118,8 @@ type ExistingRow = {
   due_date: string | null
   external_updated_at: string | null
   is_deleted: boolean
+  submission_state: string | null
+  submitted_at: string | null
 }
 
 /** 时间值比较：两边都是 null 算相同；有一边解析不出来算不同（保守地重写一次）。 */
@@ -81,11 +139,14 @@ function sameInstant(a: string | null, b: string | null): boolean {
  * 必须写一次把它恢复 —— 否则用户会看到"作业回来了但列表里没有"。
  */
 function hasChanged(existing: ExistingRow, incoming: CanvasAssignment): boolean {
+  const { submissionState, submittedAt } = deriveSubmission(incoming)
   return (
     existing.is_deleted ||
     existing.title !== incoming.title ||
     !sameInstant(existing.due_date, incoming.dueAt) ||
-    !sameInstant(existing.external_updated_at, incoming.externalUpdatedAt)
+    !sameInstant(existing.external_updated_at, incoming.externalUpdatedAt) ||
+    existing.submission_state !== submissionState ||
+    !sameInstant(existing.submitted_at, submittedAt)
   )
 }
 
@@ -112,7 +173,9 @@ export async function applyCanvasTasks({
 }): Promise<ApplyCanvasTasksResult> {
   const { data, error } = await supabase
     .from('tasks')
-    .select('id, source_id, title, due_date, external_updated_at, is_deleted')
+    .select(
+      'id, source_id, title, due_date, external_updated_at, is_deleted, submission_state, submitted_at',
+    )
     .eq('course_id', courseId)
     .eq('source', CANVAS_SOURCE)
 
@@ -139,6 +202,7 @@ export async function applyCanvasTasks({
     seenSourceIds.add(assignment.externalId)
 
     const existing = bySourceId.get(assignment.externalId)
+    const { submissionState, submittedAt } = deriveSubmission(assignment)
     if (!existing) {
       inserts.push({
         course_id: courseId,
@@ -151,12 +215,15 @@ export async function applyCanvasTasks({
         is_derived: false,
         external_updated_at: assignment.externalUpdatedAt,
         last_seen_at: now,
+        submission_state: submissionState,
+        submitted_at: submittedAt,
       })
       continue
     }
 
     if (hasChanged(existing, assignment)) {
       // ⚠️ 这里刻意没有 status：用户的"已完成"不被同步覆盖（文件头铁律 1）。
+      // submission_state / submitted_at 是 Canvas 真相，同步可写（ADR-015）。
       updates.push({
         id: existing.id,
         patch: {
@@ -165,6 +232,8 @@ export async function applyCanvasTasks({
           external_updated_at: assignment.externalUpdatedAt,
           last_seen_at: now,
           is_deleted: false,
+          submission_state: submissionState,
+          submitted_at: submittedAt,
         },
       })
     }

@@ -8,6 +8,7 @@ import { syllabusStatusText } from '@/components/courses/syllabus-status'
 import { courseColorKey, courseColorVar } from '@/lib/courses/course-color'
 import type { CourseSyncLine } from '@/lib/sync/status'
 import type { Course } from '@/types/course'
+import type { TaskSubmissionState } from '@/types/task'
 import type { Syllabus } from '@/types/syllabus'
 
 /**
@@ -33,6 +34,8 @@ export interface UpcomingTaskView {
   /** null = 日期待定（TBD）。 */
   dueLabel: string | null
   isOverdue: boolean
+  /** Canvas 提交态（P0-3-10）；null = 不追踪。卡片显示「已提交（Canvas）」等轻量标注。 */
+  submissionState: TaskSubmissionState | null
 }
 
 interface CourseCardProps {
@@ -57,19 +60,37 @@ interface CourseCardProps {
   syncLine?: CourseSyncLine | null
 }
 
+/** 卡片上的轻量提交态标注（P0-3-10）。返回文案，null = 不标。 */
+function submissionBadge(state: TaskSubmissionState | null): string | null {
+  switch (state) {
+    case 'submitted':
+    case 'graded':
+    case 'pending_review':
+      return '已提交（Canvas）'
+    case 'external_unconfirmed':
+      return '待确认（外部平台）'
+    default:
+      return null
+  }
+}
+
 function UpcomingTasks({ tasks }: { tasks: UpcomingTaskView[] }) {
   return (
     <ul className="mt-2 space-y-1">
-      {tasks.map((task) => (
-        <li key={task.id} className="flex items-baseline gap-2 text-xs">
-          <span className="truncate text-foreground/80">{task.title}</span>
-          <span
-            className={`shrink-0 ${task.isOverdue ? 'text-destructive' : 'text-muted-foreground'}`}
-          >
-            {task.dueLabel ?? '日期待定'}
-          </span>
-        </li>
-      ))}
+      {tasks.map((task) => {
+        const badge = submissionBadge(task.submissionState)
+        return (
+          <li key={task.id} className="flex items-baseline gap-2 text-xs">
+            <span className="truncate text-foreground/80">{task.title}</span>
+            <span
+              className={`shrink-0 ${task.isOverdue ? 'text-destructive' : 'text-muted-foreground'}`}
+            >
+              {task.dueLabel ?? '日期待定'}
+              {badge ? ` · ${badge}` : ''}
+            </span>
+          </li>
+        )
+      })}
     </ul>
   )
 }

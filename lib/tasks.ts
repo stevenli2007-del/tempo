@@ -1,5 +1,12 @@
 import { createClient } from '@/lib/supabase/server'
-import type { Task, TaskSource, TaskStatus, TaskType, UpcomingTask } from '@/types/task'
+import type {
+  Task,
+  TaskSource,
+  TaskStatus,
+  TaskSubmissionState,
+  TaskType,
+  UpcomingTask,
+} from '@/types/task'
 
 /**
  * tasks 表的读取（P0-1-9，总览页数据源）。
@@ -32,15 +39,25 @@ export type TaskRow = {
   source: string
   status: string
   is_derived: boolean
+  submission_state: string | null
+  submitted_at: string | null
 }
 
 /** 列表与单条查询统一用这份 select，避免各处字段不齐导致形状漂移。 */
 export const TASK_COLUMNS =
-  'id, course_id, title, due_date, task_type, source, status, is_derived'
+  'id, course_id, title, due_date, task_type, source, status, is_derived, submission_state, submitted_at'
 
 const TASK_TYPES = new Set<string>(['assignment', 'exam', 'reading', 'other'])
 const TASK_SOURCES = new Set<string>(['canvas', 'syllabus', 'manual'])
 const TASK_STATUSES = new Set<string>(['pending', 'done'])
+const TASK_SUBMISSION_STATES = new Set<string>([
+  'unsubmitted',
+  'submitted',
+  'pending_review',
+  'graded',
+  'missing',
+  'external_unconfirmed',
+])
 
 /**
  * 收窄枚举列。
@@ -68,6 +85,8 @@ export function toTask(row: TaskRow, courseName: string): Task {
     source: toEnum<TaskSource>(row.source, TASK_SOURCES, 'source'),
     status: toEnum<TaskStatus>(row.status, TASK_STATUSES, 'status'),
     isDerived: row.is_derived,
+    submissionState: row.submission_state === null ? null : toEnum<TaskSubmissionState>(row.submission_state, TASK_SUBMISSION_STATES, 'submission_state'),
+    submittedAt: row.submitted_at,
   }
 }
 
@@ -196,7 +215,7 @@ export async function loadUpcomingTasks(
 
   const { data, error } = await supabase
     .from('tasks')
-    .select('id, course_id, title, due_date')
+    .select('id, course_id, title, due_date, submission_state')
     .in('course_id', courseIds)
     .eq('is_deleted', false)
     .eq('status', 'pending')
@@ -213,13 +232,14 @@ export async function loadUpcomingTasks(
     course_id: string
     title: string
     due_date: string | null
+    submission_state: string | null
   }[]) {
     const list = byCourse.get(row.course_id)
     if (list) {
       if (list.length >= perCourse) continue
-      list.push({ id: row.id, title: row.title, dueDate: row.due_date })
+      list.push({ id: row.id, title: row.title, dueDate: row.due_date, submissionState: row.submission_state as TaskSubmissionState | null })
     } else {
-      byCourse.set(row.course_id, [{ id: row.id, title: row.title, dueDate: row.due_date }])
+      byCourse.set(row.course_id, [{ id: row.id, title: row.title, dueDate: row.due_date, submissionState: row.submission_state as TaskSubmissionState | null }])
     }
   }
 

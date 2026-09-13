@@ -49,18 +49,21 @@ const OVERVIEW_RANGE_DAYS = 7
 const OVERVIEW_LIMIT = 50
 
 /**
- * 日期标签用固定时区（UTC）在**服务端**算好。
+ * 日期标签用固定时区在**服务端**算好，避免 hydration mismatch（见下方 formatDue）。
  *
- * 若把 ISO 串交给客户端组件用 `toLocaleDateString()` 渲染，服务端（UTC）与浏览器
- * （用户本地时区）会得出不同结果 → hydration mismatch。
- * 代价：处在 UTC-7 的用户看到的日期边界会与本地时间差至多几小时。
- * Phase 0 接受 —— 考试派生时间统一是当日 23:59:59 UTC，按 UTC 取日期不会出现"差一天"。
+ * 🔴 P0-3-10 修复：原先硬编码 `timeZone: 'UTC'`，导致**晚上截止的 Canvas 作业几乎全部显示晚一天**
+ * —— Canvas 的 `due_at` 带真实时区（如 `2026-09-09T23:59 PDT` = `2026-09-10T06:59Z`），
+ * 按 UTC 取日期就印成 9/10，而用户在伯克利看到的是 9/9。考试派生任务恰因代码硬塞 `T23:59:59 UTC`
+ * 才侥幸不出错（ADR-004 要跟 Canvas 对齐的本意就是按学校本地时间）。
+ * 改为学校时区（Phase 0 仅服务 Berkeley，ADR-004）。
  */
+const SCHOOL_TIME_ZONE = 'America/Los_Angeles'
+
 const DUE_FORMATTER = new Intl.DateTimeFormat('zh-CN', {
   month: 'numeric',
   day: 'numeric',
   weekday: 'short',
-  timeZone: 'UTC',
+  timeZone: SCHOOL_TIME_ZONE,
 })
 
 function formatDue(
@@ -95,23 +98,45 @@ function toUpcomingViews(tasks: UpcomingTask[] | undefined, now: Date): Upcoming
   const list = tasks ?? []
   return list.map((task) => {
     const { label, isOverdue } = formatDue(task.dueDate, now)
-    return { id: task.id, title: task.title, dueLabel: label, isOverdue }
+    // 卡片只显示"接下来要做的事"：Canvas 已判定完成（submitted/graded/pending_review）的不算逾期待催；
+    // external_unconfirmed（外部平台提交，Canvas 无记录）也不该标红"已逾期"（我们不知道真没交）。
+    const canvasCompleted =
+      task.submissionState === 'submitted' ||
+      task.submissionState === 'graded' ||
+      task.submissionState === 'pending_review'
+    const knownIncomplete = !canvasCompleted && task.submissionState !== 'external_unconfirmed'
+    return {
+      id: task.id,
+      title: task.title,
+      dueLabel: label,
+      isOverdue: isOverdue && knownIncomplete,
+      submissionState: task.submissionState,
+    }
   })
 }
 
 function toListItems(tasks: Task[], now: Date): TaskListItem[] {
   return tasks.map((task) => {
     const { label, isOverdue } = formatDue(task.dueDate, now)
+    // Canvas 已判定完成（submitted/graded/pending_review）→ 不再当"逾期待催"；
+    // external_unconfirmed（外部平台提交，Canvas 无记录）→ 我们不知道真没交，也不标红。
+    // 这两类都不算"已知未完成"，只有 status=pending 且非以上两者才标红（P0-3-10 的 isOverdue 连带修）。
+    const canvasCompleted =
+      task.submissionState === 'submitted' ||
+      task.submissionState === 'graded' ||
+      task.submissionState === 'pending_review'
+    const knownIncomplete = !canvasCompleted && task.submissionState !== 'external_unconfirmed'
     return {
       id: task.id,
       courseId: task.courseId,
       courseName: task.courseName,
       title: task.title,
       dueLabel: label,
-      // 已完成的不标逾期：它已经是历史，不需要"催"。
-      isOverdue: isOverdue && task.status === 'pending',
+      isOverdue: isOverdue && task.status === 'pending' && knownIncomplete,
       status: task.status,
       isDerived: task.isDerived,
+      submissionState: task.submissionState,
+      submittedAt: task.submittedAt,
     }
   })
 }

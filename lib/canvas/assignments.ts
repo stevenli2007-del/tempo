@@ -34,6 +34,14 @@ type CanvasApiAssignment = {
   updated_at?: string | null
   published?: boolean
   workflow_state?: string | null
+  submission_types?: unknown
+  /** `include[]=submission` 时返回的内联提交对象（当前用户）。 */
+  submission?: {
+    workflow_state?: string | null
+    submitted_at?: string | null
+    late?: boolean
+    missing?: boolean
+  } | null
 }
 
 /** Sync-Strategy §4：单页 100 条。实测 6 门教学课最多 25 条，一页绰绰有余。 */
@@ -47,7 +55,9 @@ export const MAX_PAGES_PER_COURSE = 3
  * 不在客户端手工拼 `page=2` —— Canvas 的分页游标格式可能变，Link 头才是契约。
  */
 export function assignmentsPath(externalCourseId: string): string {
-  return `/api/v1/courses/${encodeURIComponent(externalCourseId)}/assignments?per_page=${ASSIGNMENTS_PER_PAGE}`
+  // 同一个请求带 include[]=submission：零额外请求数（Sync-Strategy §4 三级熔断不受影响），
+  // 拿回当前用户的内联提交，用于 P0-3-10 的提交状态同步。
+  return `/api/v1/courses/${encodeURIComponent(externalCourseId)}/assignments?per_page=${ASSIGNMENTS_PER_PAGE}&include[]=submission`
 }
 
 /**
@@ -77,11 +87,32 @@ export function toCanvasAssignments(raw: unknown): CanvasAssignment[] {
     if (externalId === '' || seen.has(externalId)) continue
 
     seen.add(externalId)
+
+    // submission_types：Canvas 给的是数组；异常形状一律降级为 []（最保守：当成"无法自动判定"，保留手勾）。
+    let submissionTypes: string[] = []
+    if (Array.isArray(item.submission_types)) {
+      submissionTypes = item.submission_types.filter((t): t is string => typeof t === 'string')
+    }
+
+    // 内联提交：null / 缺省都当"Canvas 无记录"。
+    let submission: CanvasAssignment['submission'] = null
+    if (item.submission && typeof item.submission === 'object') {
+      const s = item.submission
+      submission = {
+        workflowState: typeof s.workflow_state === 'string' ? s.workflow_state : null,
+        submittedAt: typeof s.submitted_at === 'string' ? s.submitted_at : null,
+        late: typeof s.late === 'boolean' ? s.late : false,
+        missing: typeof s.missing === 'boolean' ? s.missing : false,
+      }
+    }
+
     result.push({
       externalId,
       title: typeof item.name === 'string' && item.name.trim() !== '' ? item.name : '未命名作业',
       dueAt: typeof item.due_at === 'string' ? item.due_at : null,
       externalUpdatedAt: typeof item.updated_at === 'string' ? item.updated_at : null,
+      submissionTypes,
+      submission,
     })
   }
 

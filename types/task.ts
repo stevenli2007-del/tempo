@@ -14,6 +14,28 @@
 /** 任务状态。取值与 tasks.status 的 CHECK 约束一致。 */
 export type TaskStatus = 'pending' | 'done'
 
+/**
+ * Canvas 提交态（P0-3-10）。`tasks.submission_state` 的取值，**null = Canvas 不追踪完成态**。
+ *
+ * 与用户主权的 `status`（pending/done）分列（ADR-015）：同步写前者、永不写后者，
+ * 展示层合并成"是否算完成"。
+ *
+ * - `null`                无提交态（on_paper/none/not_graded → 用户手勾；或 external_tool 待判定）
+ * - `unsubmitted`         追踪但未交
+ * - `submitted`           已提交未评分
+ * - `pending_review`      已交待查重
+ * - `graded`              已评分（视为完成）
+ * - `missing`             Canvas 标记缺交（逾期且未交）
+ * - `external_unconfirmed` 外部平台提交，Canvas 无记录 → 展示「待确认」
+ */
+export type TaskSubmissionState =
+  | 'unsubmitted'
+  | 'submitted'
+  | 'pending_review'
+  | 'graded'
+  | 'missing'
+  | 'external_unconfirmed'
+
 /** 任务来源。Phase 0 只有这三个（Database.md §末「Phase 0 枚举」注记）。 */
 export type TaskSource = 'canvas' | 'syllabus' | 'manual'
 
@@ -41,6 +63,13 @@ export type Task = {
    * 用户不可直接编辑内容字段，改了会收到 `422 derived_task_immutable`（ADR-004 的接口层强制点）。
    */
   isDerived: boolean
+  /**
+   * Canvas 提交态（P0-3-10）。`null` = Canvas 不追踪完成态。
+   * 与 `status` 分列：同步写它、永不写 `status`，展示层合并（ADR-015）。
+   */
+  submissionState: TaskSubmissionState | null
+  /** Canvas 提交时刻（ISO 8601）或 null。展示层按学校时区渲染。 */
+  submittedAt: string | null
 }
 
 /**
@@ -55,4 +84,6 @@ export type UpcomingTask = {
   title: string
   /** null = TBD，卡片上同样按 TBD 渲染。 */
   dueDate: string | null
+  /** Canvas 提交态（P0-3-10）；null = 不追踪。卡片用于显示「已提交（Canvas）」等。 */
+  submissionState: TaskSubmissionState | null
 }
