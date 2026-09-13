@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 import { useState } from 'react'
 
 import { syllabusStatusText } from '@/components/courses/syllabus-status'
+import { courseColorKey, courseColorVar } from '@/lib/courses/course-color'
 import type { CourseSyncLine } from '@/lib/sync/status'
 import type { Course } from '@/types/course'
 import type { Syllabus } from '@/types/syllabus'
@@ -115,6 +116,12 @@ export function CourseCard({
       <div className="flex items-start justify-between gap-4">
         <Link href={`/courses/${course.id}`} className="min-w-0 flex-1">
           <div className="flex items-center gap-2">
+            {/* 课程色点（P0-3-6 配套）：与总览任务列表共用同一颗色，形成对应。 */}
+            <span
+              className="h-3 w-3 shrink-0 rounded-full"
+              style={{ backgroundColor: courseColorVar(courseColorKey(course.id)) }}
+              aria-hidden
+            />
             <h3 className="truncate text-base font-semibold text-card-foreground underline-offset-4 hover:underline">
               {course.courseName}
             </h3>

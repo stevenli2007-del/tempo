@@ -4,6 +4,7 @@ import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { useState } from 'react'
 
+import { courseColorVar, courseColorKey } from '@/lib/courses/course-color'
 import type { TaskStatus } from '@/types/task'
 
 /**
@@ -82,7 +83,16 @@ function TaskRow({ item, busy, onToggle }: TaskRowProps) {
           >
             {item.title}
           </Link>
-          <span className="shrink-0 text-xs text-muted-foreground">{item.courseName}</span>
+          <span className="inline-flex shrink-0 items-center gap-1.5 text-xs text-muted-foreground">
+            {/* 课程色点（P0-3-6 配套）：同 courseId 永远同色，与课程卡一致，
+                一眼区分任务归属；色值随主题切换。 */}
+            <span
+              className="h-2.5 w-2.5 shrink-0 rounded-full"
+              style={{ backgroundColor: courseColorVar(courseColorKey(item.courseId)) }}
+              aria-hidden
+            />
+            {item.courseName}
+          </span>
           {item.isDerived ? (
             <span className="shrink-0 text-xs text-muted-foreground/70">考试</span>
           ) : null}
