@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 import { useState } from 'react'
 
 import { courseColorVar, courseColorKey } from '@/lib/courses/course-color'
+import { isEffectivelyDone } from '@/lib/tasks/progress'
 import type { TaskStatus, TaskSubmissionState } from '@/types/task'
 
 /**
@@ -159,11 +160,9 @@ export function TaskList({ items }: TaskListProps) {
   // 服务端已按 dueDate 升序排好（null 排最后），这里只做分组，不打乱顺序。
   // P0-3-10 合并规则：status='done' **或** Canvas 已判定完成（submitted/graded/pending_review）
   // → 归入「已完成」区；其余（含 external_unconfirmed / missing / 未交）留在待办。
-  const isEffectivelyDone = (item: TaskListItem): boolean =>
-    item.status === 'done' ||
-    item.submissionState === 'submitted' ||
-    item.submissionState === 'graded' ||
-    item.submissionState === 'pending_review'
+  //
+  // P0-3-7 起判定提到 `lib/tasks/progress.ts` 的 `isEffectivelyDone()` ——
+  // 周历要用**完全相同**的规则过滤，两处各写一份迟早会只改一处。
   const pending = items.filter((item) => !isEffectivelyDone(item))
   const done = items.filter((item) => isEffectivelyDone(item))
 
