@@ -71,8 +71,15 @@ export function CourseForm(props: CourseFormProps) {
       }
 
       if (mode === 'create') {
+        // 响应体是扁平的课程对象（jsonOk 直接序列化 toCourse）。
+        const created = (await response.json()) as { id: string }
         form.reset()
+        router.refresh()
+        // P0-3-5：建课直接进详情页，落地即看到五个板块空态 + 可选上传，而不是留在总览。
+        router.push(`/courses/${created.id}`)
+        return
       }
+
       // 服务端组件重新取数，列表立刻反映变更。
       router.refresh()
       onDone?.()

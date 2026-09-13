@@ -118,11 +118,7 @@ export default async function CourseDetailPage({ params }: PageProps) {
         </section>
 
         <section className="rounded-xl border border-border bg-card p-5 shadow-sm">
-          <h2 className="text-sm font-medium text-foreground">Syllabus</h2>
-          <SyllabusUpload courseId={detail.id} syllabus={detail.syllabus} />
-        </section>
-
-        <section className="rounded-xl border border-border bg-card p-5 shadow-sm">
+          <h2 className="mb-3 text-sm font-medium text-foreground">五个板块</h2>
           <SectionEditor
             courseId={detail.id}
             sections={{
@@ -134,6 +130,9 @@ export default async function CourseDetailPage({ params }: PageProps) {
             }}
             parseStatus={detail.syllabus ? detail.syllabus.parseStatus : 'none'}
             defaultOpen
+            uploadSlot={
+              <SyllabusUpload courseId={detail.id} syllabus={detail.syllabus} />
+            }
           />
         </section>
       </div>

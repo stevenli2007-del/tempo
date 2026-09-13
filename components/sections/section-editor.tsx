@@ -44,6 +44,7 @@ export function SectionEditor({
   sections,
   parseStatus,
   defaultOpen = false,
+  uploadSlot,
 }: {
   courseId: string
   sections: StoredSections
@@ -51,6 +52,11 @@ export function SectionEditor({
   parseStatus: 'none' | 'pending' | 'processing' | 'completed' | 'failed'
   /** 详情页默认展开（总览卡片里默认折叠）。 */
   defaultOpen?: boolean
+  /**
+   * 可选：把 syllabus 上传当作「模块内的可选动作」注入此处（P0-3-5）。
+   * 不传则五板块是纯查看/编辑区，上传由父页面另行放置。
+   */
+  uploadSlot?: React.ReactNode
 }) {
   const [open, setOpen] = useState(defaultOpen)
   const [mode, setMode] = useState<Mode>('view')
@@ -92,6 +98,13 @@ export function SectionEditor({
           </button>
         ) : null}
       </div>
+
+      {open && uploadSlot ? (
+        <div className="mt-3">
+          <p className="mb-2 text-xs font-medium text-foreground">上传 syllabus 自动填充（可选）</p>
+          {uploadSlot}
+        </div>
+      ) : null}
 
       {open && parseStatus === 'none' ? (
         <p className="mt-3 text-sm text-muted-foreground">
