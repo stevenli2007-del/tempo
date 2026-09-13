@@ -1,0 +1,22 @@
+Data Structures and Algorithms – Spring 2026
+Course website: https://example.edu/cs61b
+Instructor: Prof. Hilfinger
+
+Course Schedule (by week):
+
+Week 1   Introduction, asymptotic notation, proofs
+Week 2   Divide and conquer
+Week 3   Sorting algorithms
+Week 4   Heaps and priority queues
+Week 5   Binary search trees
+Week 6   Hash tables and amortized analysis
+Week 7   Midterm review
+Week 8   Graph representations
+Week 9   Breadth-first and depth-first search
+Week 10  Shortest paths (Dijkstra)
+Week 11  Dynamic programming
+Week 12  Greedy algorithms
+Week 13  NP-completeness and reductions
+Week 14  Approximation algorithms and final review
+
+The midterm is scheduled in Week 7. The final exam is during finals week.

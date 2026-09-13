@@ -54,7 +54,7 @@ export const COURSE_OUTLINE_SCHEMA = {
   properties: {
     items: {
       type: 'array',
-      description: '按 syllabus 中出现的先后顺序排列的章节/周次安排。没有大纲时返回空数组。',
+      description: '按 syllabus 中出现的先后顺序排列的授课/主题清单（周次、讲座编号、章节、日期等任意顺序标签）。没有大纲时返回空数组。',
       items: {
         type: 'object',
         properties: {
@@ -64,7 +64,7 @@ export const COURSE_OUTLINE_SCHEMA = {
           },
           weekLabel: {
             type: ['string', 'null'],
-            description: '周次或章节标签，如 "Week 3"、"Ch. 5"。原文没标注时填 null。',
+            description: '周次/章节/讲座编号等任意顺序标签，如 "Week 3"、"L1"、"第5讲"、"1"。原文没标注时填 null。',
           },
           topic: { type: 'string', description: '该周次/章节的主题。' },
           sourceExcerpt: EXCERPT,

@@ -6,7 +6,8 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint ."
+    "lint": "eslint .",
+    "regress": "npx -y tsx scripts/regress-course-outline.ts"
   },
   "dependencies": {
     "@base-ui/react": "^1.7.0",

@@ -26,6 +26,12 @@ export type LLMRunParams = LLMExtractParams & {
   /** prompt 版本号，如 `v1`。修正数据要能归因到具体版本，所以**必填**。 */
   promptVersion: string
   syllabusId?: string | null
+  /**
+   * 是否写 `llm_runs` 审计行。默认 true（业务调用必记，支撑 ADR-003 复审）。
+   * 独立脚本（如 `scripts/regress-course-outline.ts`）没有 Next 请求上下文，
+   * 调 `cookies()` 会抛错，且不该往库里插回归噪音 —— 显式传 false 跳过审计。
+   */
+  record?: boolean
 }
 
 type LLMRunInsert = {
@@ -70,7 +76,8 @@ async function recordRun(row: LLMRunInsert): Promise<void> {
  * `LLMResult` 的 error 分支。调用方只看 `ok`。
  */
 export async function runStructured<T>(params: LLMRunParams): Promise<LLMResult<T>> {
-  const { userId, purpose, promptVersion, syllabusId = null, ...extractParams } = params
+  const { userId, purpose, promptVersion, syllabusId = null, record = true, ...extractParams } =
+    params
 
   let provider
   try {
@@ -99,24 +106,26 @@ export async function runStructured<T>(params: LLMRunParams): Promise<LLMResult<
     latencyMs: fallbackLatencyMs,
   }
 
-  await recordRun({
-    user_id: userId,
-    purpose,
-    syllabus_id: syllabusId,
-    // ⚠️ 用 usage 里「实际服务的模型」，而不是 provider 上「请求时填的模型」：
-    // `deepseek-chat` 这类别名会静默指向不同底座（本次实测返回 `deepseek-v4-flash`），
-    // 记别名的话将来按模型对比准确率就失真了。只有拿不到 usage 时才退回配置值。
-    provider: usage.provider,
-    model: usage.model,
-    prompt_version: promptVersion,
-    input_tokens: usage.inputTokens,
-    output_tokens: usage.outputTokens,
-    latency_ms: usage.latencyMs,
-    status: result.ok ? 'success' : 'failed',
-    error_message: result.ok
-      ? null
-      : `${result.error.code}: ${result.error.message}`.slice(0, ERROR_MESSAGE_MAX_LENGTH),
-  })
+  if (record) {
+    await recordRun({
+      user_id: userId,
+      purpose,
+      syllabus_id: syllabusId,
+      // ⚠️ 用 usage 里「实际服务的模型」，而不是 provider 上「请求时填的模型」：
+      // `deepseek-chat` 这类别名会静默指向不同底座（本次实测返回 `deepseek-v4-flash`），
+      // 记别名的话将来按模型对比准确率就失真了。只有拿不到 usage 时才退回配置值。
+      provider: usage.provider,
+      model: usage.model,
+      prompt_version: promptVersion,
+      input_tokens: usage.inputTokens,
+      output_tokens: usage.outputTokens,
+      latency_ms: usage.latencyMs,
+      status: result.ok ? 'success' : 'failed',
+      error_message: result.ok
+        ? null
+        : `${result.error.code}: ${result.error.message}`.slice(0, ERROR_MESSAGE_MAX_LENGTH),
+    })
+  }
 
   if (!result.ok) {
     console.error('[llm] 调用失败:', {

@@ -1,0 +1,51 @@
+CHEMISTRY 1A – Fall 2026
+Instructors: Dr. Debjani Roy & Dr. Alexis Shusterman
+Head GSIs: Jesse DiCenso & Katherine Hightower
+Contact: chem1a@berkeley.edu
+
+Course workload: 9 hours per week. There are 40 lectures; you can earn 1 point per lecture up to a maximum of 30 points.
+
+Tentative Course Schedule and Suggested Readings:
+
+UNIT 1 – HEALTH (matter)
+L1   W   Aug 26   periodic table of elements, atoms, and ions
+L2   F   Aug 28   atomic structure and electron configuration
+L3   M   Aug 31   periodic trends
+L4   W   Sep 2    chemical bonding basics
+L5   F   Sep 4    ionic and covalent bonds
+L6   M   Sep 7    molecular geometry
+L7   W   Sep 9    stoichiometry
+L8   F   Sep 11   limiting reactants
+L9   M   Sep 14   solution concentration
+L10  F   Sep 18   intermolecular forces (Ch. 10.1)
+L11  M   Sep 21   solutions and solubility
+Sep 22   UNIT 1 EXAM (covers L1–L11)
+
+UNIT 2 – POWER (thermodynamics)
+L12  W   Sep 23   chemical reactions (Ch. 4.1, 4.3)
+L13  F   Sep 25   heat transfer
+L14  M   Sep 28   work and internal energy
+L15  W   Sep 30   bond strengths and lengths (Ch. 7.5)
+L16  F   Oct 2    heats of reaction (Ch. 5.3)
+L17  M   Oct 5    dispersed and entropy
+L18  W   Oct 7    Gibbs energy (Ch. 16.4)
+L19  F   Oct 9    reduction-oxidation
+Oct 20   UNIT 2 EXAM (covers L12–L22)
+
+UNIT 3 – POISON (equilibria)
+L23  W   Oct 28   acid-base equilibria
+L24  F   Oct 30   pH and pKa
+L25  M   Nov 2    buffers
+L26  W   Nov 4    solubility equilibria
+L27  F   Nov 6    reaction rates
+L28  M   Nov 9    rate laws
+L29  W   Nov 11   reaction mechanisms
+L30  F   Nov 13   catalysis
+
+UNIT 4 – ENERGY (electrochemistry)
+L31  W   Nov 18   galvanic cells
+L32  F   Nov 20   standard reduction potentials
+L33  M   Nov 23   batteries
+L34  W   Dec 2    electrolysis
+
+FINAL EXAM (covers L1–L40)

@@ -39,7 +39,7 @@ import type { JSONSchema } from '@/lib/llm'
  * PRD F3 要求把用户修正存成 diff 当优化种子，而"这次改动有没有变准"只能靠
  * prompt 版本 + 模型名两个维度分组统计；版本不动的话新旧调用混在一起，数据就废了。
  */
-export const PROMPT_VERSION = 'v1'
+export const PROMPT_VERSION = 'v2'
 
 /**
  * 少于这个字符数就不值得调 LLM —— 扫描件或排版异常的文件抽出来往往只有几行乱码，

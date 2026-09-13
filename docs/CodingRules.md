@@ -425,7 +425,8 @@ Steven 说「完成 P0-1-5b 就收手」，Bud 交付 5b 后收到含糊的「Pl
 | 两个写入方共用一张表时，按 `source` 收口 | 总览页只有 `tasks` 一张表，考试派生与 Canvas 同步各写各的 `source`。**任何一条查询/更新/删除漏了 `.eq('source', …)`，就会把对方的行当"缺席"删掉** —— 这是合并展示里最贵的一类事故 | `lib/sync/canvas-tasks.ts` / `exam-tasks.ts` 文件头、`Phase-0-MVP.md` P0-2-11 执行卡 |
 | Next 路由文件夹**禁用 `_` 前缀** | `_` 开头 = **私有文件夹**，Next 直接把它排除出路由系统：`app/(routes)/_shell-preview/page.tsx` 请求得到 404，而且 **`next build` 不报任何错**、路由静默消失（build 绿 ≠ 路由存在）。预览/临时页文件夹名去掉下划线；确实必须保留 `_` 时写成 `%5Ffolder`。判据是 **curl 状态码**，不是 build 是否通过。P0-3-3 实测踩到 | 本节（无其他归属） |
 | 主题脚本会让 `<html>` 报 hydration mismatch | 无闪烁主题脚本必须在 React 水合**之前**给 `<html>` 加 `.dark`，服务端 HTML 里必然没有它 → React 报 mismatch，**开发环境报错浮层把整页压暗一层**（看起来像"配色变丑了"，极具误导性）。修法：`<html suppressHydrationWarning>`，它只豁免 `<html>` 自身属性，不掩盖子树里的真实问题 | `app/layout.tsx` 注释、本节 10.1 第 19 条 |
+| `tsx` 独立脚本不加载 `.env.local` | `npm run` 跑的 `tsx scripts/...` **不会**自动注入 `.env.local`（那是 Next 的特权）。脚本若要读 `DEEPSEEK_API_KEY` 等密钥，必须自己解析 `.env.local`（`scripts/regress-course-outline.ts` 的 `loadEnvLocal()` 是零依赖范例：读 `.env.local` → 逐行塞 `process.env`，已存在的真实环境变量优先、值去引号）。另：独立脚本**没有 Next 请求上下文**，`cookies()` 会抛 "outside a request scope"，调 `runStructured()` 需传 `record:false` 跳过 `llm_runs` 审计，避免刷屏 + 污染生产库。P0-3-4 回归脚本实测踩到 | 本节（无其他归属）、`scripts/regress-course-outline.ts` |
 
 ---
 
-*创建：2026-09-01 ｜ 最近更新：2026-09-13（§10.1 第 17 条「上游不知道 ≠ 未完成」+ 第 18 条「日期禁止硬编码 UTC」+ 第 19 条「CSS 变量同名覆盖静默污染」；§10.2 新增五行坑索引：Canvas 日期差一天 / assignment 里没有完成信息 / 上游"不知道"≠未完成 / Next 路由文件夹禁用 `_` 前缀 / 主题脚本 `<html>` hydration）*
+*创建：2026-09-01 ｜ 最近更新：2026-09-13（§10.1 第 17 条「上游不知道 ≠ 未完成」+ 第 18 条「日期禁止硬编码 UTC」+ 第 19 条「CSS 变量同名覆盖静默污染」；§10.2 新增六行坑索引：Canvas 日期差一天 / assignment 里没有完成信息 / 上游"不知道"≠未完成 / Next 路由文件夹禁用 `_` 前缀 / 主题脚本 `<html>` hydration / `tsx` 独立脚本不加载 `.env.local`）*

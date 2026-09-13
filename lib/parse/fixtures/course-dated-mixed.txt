@@ -1,0 +1,24 @@
+Calculus II – Fall 2026
+Instructor: Dr. Lee
+Office hours: Tue 2–4pm, 309 Evans
+
+Schedule:
+
+Jan 15   Review of definite integrals
+Jan 22   Integration by parts
+Jan 29   Trigonometric integrals
+Feb 5    Partial fractions
+Feb 12   Sequences and series
+Feb 19   Comparison tests
+Feb 26   Power series
+Mar 4    Taylor and Maclaurin series
+Mar 11   Midterm (covers Jan 15 – Mar 4)
+Mar 25   Parametric equations
+Apr 1    Polar coordinates
+Apr 8    Vectors in 3D
+Apr 15   Partial derivatives
+Apr 22   Multiple integrals
+Apr 29   Line and surface integrals
+May 6    Final exam
+
+Homework is due every Friday. The midterm and final are cumulative.
