@@ -40,7 +40,12 @@ export const metadata = {
 
 /** 总览页任务窗口（天）。与 `GET /api/v1/tasks` 的默认 range 一致。 */
 const OVERVIEW_RANGE_DAYS = 7
-/** 一次最多展示多少条。Phase 0 任务量在几十条以内，不做分页 UI。 */
+/**
+ * 总览页任务查询的 DB 安全上限 —— 只是"最多取回多少条"，**不是展示条数**。
+ * 展示层收敛（最近 10 条待办 + 溢出收进 BOX）在 `TaskList` 里做（P0-3-6 的 `OVERVIEW_VISIBLE`），
+ * 这里必须取回足够数据，BOX 展开后才能看到全部，不会静默消失。
+ * Phase 0 任务量在几十条以内，50 是宽裕上限；真超过时列表仍只显示 10 + 一个溢出盒。
+ */
 const OVERVIEW_LIMIT = 50
 
 /**
@@ -357,11 +362,6 @@ export default async function DashboardPage() {
               </p>
             </div>
             <TaskList items={toListItems(overview.tasks, now)} />
-            {overview.total > overview.tasks.length ? (
-              <p className="text-xs text-muted-foreground">
-                还有 {overview.total - overview.tasks.length} 条没显示（一次最多 {OVERVIEW_LIMIT} 条）
-              </p>
-            ) : null}
           </section>
         ) : null}
 

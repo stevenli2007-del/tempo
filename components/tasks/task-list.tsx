@@ -39,6 +39,13 @@ interface TaskListProps {
   items: TaskListItem[]
 }
 
+/**
+ * 总览页「最近要做的事」默认直接展示的**待办**条数（P0-3-6）。
+ * 超出部分收进可展开 BOX，不一股脑全抛。
+ * 与「已完成折叠」语义对齐 —— 已完成项永远在下方独立折叠盒，不计入这 10 条。
+ */
+const OVERVIEW_VISIBLE = 10
+
 interface TaskRowProps {
   item: TaskListItem
   busy: boolean
@@ -92,12 +99,19 @@ function TaskRow({ item, busy, onToggle }: TaskRowProps) {
 export function TaskList({ items }: TaskListProps) {
   const router = useRouter()
   const [isDoneExpanded, setIsDoneExpanded] = useState(false)
+  const [isMoreExpanded, setIsMoreExpanded] = useState(false)
   const [busyId, setBusyId] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
 
   // 服务端已按 dueDate 升序排好（null 排最后），这里只做分组，不打乱顺序。
   const pending = items.filter((item) => item.status === 'pending')
   const done = items.filter((item) => item.status === 'done')
+
+  // P0-3-6：最近 OVERVIEW_VISIBLE 条待办直接列出，其余收进可展开 BOX。
+  // 注意：这是**展示层**截断，数据已在服务端全部取回（dashboard 的 OVERVIEW_LIMIT 只是 DB 安全上限），
+  // 所以「还有 N 条」展开后能看到全部，不会静默消失。
+  const visiblePending = pending.slice(0, OVERVIEW_VISIBLE)
+  const hiddenPending = pending.slice(OVERVIEW_VISIBLE)
 
   async function handleToggle(item: TaskListItem) {
     setError(null)
@@ -149,7 +163,7 @@ export function TaskList({ items }: TaskListProps) {
       ) : null}
 
       <ul className="space-y-2">
-        {pending.map((item) => (
+        {visiblePending.map((item) => (
           <TaskRow
             key={item.id}
             item={item}
@@ -158,6 +172,31 @@ export function TaskList({ items }: TaskListProps) {
           />
         ))}
       </ul>
+
+      {hiddenPending.length > 0 ? (
+        <div className="rounded-lg border border-border bg-card/40">
+          <button
+            type="button"
+            onClick={() => setIsMoreExpanded(!isMoreExpanded)}
+            className="flex w-full items-center gap-2 px-4 py-2.5 text-left text-sm text-muted-foreground"
+          >
+            <span className="text-xs">{isMoreExpanded ? '▾' : '▸'}</span>
+            还有 {hiddenPending.length} 条待办
+          </button>
+          {isMoreExpanded ? (
+            <ul className="space-y-2 px-4 pb-3">
+              {hiddenPending.map((item) => (
+                <TaskRow
+                  key={item.id}
+                  item={item}
+                  busy={busyId === item.id}
+                  onToggle={(target) => void handleToggle(target)}
+                />
+              ))}
+            </ul>
+          ) : null}
+        </div>
+      ) : null}
 
       {pending.length === 0 && done.length > 0 ? (
         <p className="text-sm text-muted-foreground">这段时间的事都做完了。</p>
