@@ -20,13 +20,14 @@ export type TaskStatus = 'pending' | 'done'
  * 与用户主权的 `status`（pending/done）分列（ADR-015）：同步写前者、永不写后者，
  * 展示层合并成"是否算完成"。
  *
- * - `null`                无提交态（on_paper/none/not_graded → 用户手勾；或 external_tool 待判定）
- * - `unsubmitted`         追踪但未交
+ * - `null`                无提交态（on_paper/none/not_graded → 用户手勾；或无法判定）
+ * - `unsubmitted`         追踪但未交（**不含 external_tool**，见下条）
  * - `submitted`           已提交未评分
  * - `pending_review`      已交待查重
  * - `graded`              已评分（视为完成）
  * - `missing`             Canvas 标记缺交（逾期且未交）
- * - `external_unconfirmed` 外部平台提交，Canvas 无记录 → 展示「待确认」
+ * - `external_unconfirmed` 外部平台（Gradescope 等 LTI）：Canvas 无可信记录（无记录，**或**它说的
+ *                         "未交"其实只是推断 —— 实测出现过已交却报未交）→ 展示「待确认」
  */
 export type TaskSubmissionState =
   | 'unsubmitted'

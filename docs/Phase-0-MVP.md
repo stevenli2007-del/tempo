@@ -1247,10 +1247,14 @@ Phase 0 列表只有几十条，每行再加一个 tag 只会更密，信息增�
 - **实现记录（2026-09-13）**：
   - ✅ 开工实测：用真实 PAT 跑 `assignments?include[]=submission`，确认内联 `submission`（当前用户）含 `workflow_state` / `submitted_at` / `late` / `missing`，`submission_types` 为数组 —— 与下方设计一致。
   - ✅ 数据层：`supabase/migrations/20260913000000_tasks_submission_state.sql`（**Steven 手动在 Dashboard SQL Editor 执行**；本地+prod 共享实例）。
+    → **2026-09-13 已执行**，并用 service role 只读探针复核两列真实存在（HTTP 200 读到 `submission_state` / `submitted_at`）。
   - ✅ 同步层：`canvas-tasks.ts` 加 `deriveSubmission()`（五个分支全收口），写入 `submission_state` / `submitted_at`；**绝不碰 `status`**（ADR-015）。
+  - ✅ **实测补强（2026-09-13 下午，真函数干跑）**：用真实 PAT 跑 `toCanvasAssignments` + `deriveSubmission`（**真函数，非复刻**）覆盖 14 门活跃课，发现 `external_tool` 的**负信号不可信** —— Chem 1AL「Lab 1: Airbags」(due 9/9) 在 Gradescope 已交、Canvas 仍报 `unsubmitted`（Steven 已确认交了）。
+    → 口径修正：`external_tool` 的 `unsubmitted` / `missing` **降级为 `external_unconfirmed`（待确认）**；正信号（`graded`/`submitted`/`pending_review`）照常采信。影响面 19 条（CHEM 1A：HW7 + 12 条 quiz + Unit2/3/Final Exam；Chem 1AL：Lab 1/2；Physics 7A：HW02/HW03/Roll Call）。
   - ✅ 展示层：`task-list.tsx` 合并规则（canvas 已提交→已完成区，但不误标用户手勾）+ 「已提交（Canvas）」「待确认（外部平台提交）」标注；`course-card.tsx` 卡片轻量标注。
   - ✅ 日期修复：`dashboard` 日期标签时区 `UTC` → `America/Los_Angeles`；`isOverdue` 连带修（已提交/外部平台不标红）。
-  - ⏳ 待 Steven：跑迁移 SQL → 触发一次全量 Canvas 重同步 → 按 5 条验收路径复核。
+  - ✅ 文档校正：`Database.md §3.9` / `Decisions.md ADR-015` 的映射表原本写着 CHECK 约束里不存在的 `excused`、且漏了 `external_unconfirmed` → 已改为与 `deriveSubmission` 一一对应。
+  - ⏳ 待 Steven：代码 push 上线 → 触发一次同步把老行回填（`hasChanged` 已纳入两列比较，**任意一次同步即回填**，无需特殊"全量重同步"）→ 按 5 条验收路径复核。
 - **做什么**：Steven #7 的两件事。
   ① **提交状态**：`assignmentsPath()` 加 `include[]=submission`（**同一个请求，零额外请求数**，不碰三级熔断），新增 `tasks.submission_state` / `submitted_at`，展示层合并三态。
   ② **日期差一天**：`app/(routes)/dashboard/page.tsx:54-59` 硬编码 `timeZone:'UTC'` 渲染日期标签。其上方注释（`:46-52`）的"按 UTC 取日期不会差一天"论证**只对考试派生任务成立**（`exam-tasks.ts:94` 硬编码 `T23:59:59`，恰好落在 UTC 当日）；Canvas 的真实 `due_at` 带时区（`2026-09-09T23:59 PDT` = `2026-09-10T06:59Z`）就**必然差一天**。
@@ -1262,8 +1266,10 @@ Phase 0 列表只有几十条，每行再加一个 tag 只会更密，信息增�
   3. **合并规则**：`status='done'` **或** `submission_state ∈ {submitted, graded}` → 已完成区（Canvas 来的可标「已提交（Canvas）」）；`missing` 且已过期 → **逾期未交**（区别于"逾期未完成"）。
   4. **不可逆要分方向**：用户手勾的 done **永不回退**；Canvas 自身状态**允许回退**（老师撤回 / 重设时照搬真相）。
   5. **`isOverdue` 连带修**：改为「过了 due **且** 两个来源都没完成」——**已提交的逾期不该再标红**。
-- **🔴 「待确认」第三态（ADR-013 的直接产物）**：`external_tool` 类（Gradescope 外链）且 Canvas 无提交记录时，**不显示"待完成"**，改显示**「待确认（外部平台提交）」**。
+- **🔴 「待确认」第三态（ADR-013 的直接产物）**：`external_tool` 类（Gradescope 外链）**Canvas 无可信记录**时，**不显示"待完成"**，改显示**「待确认（外部平台提交）」**。
   > 理由：Canvas 不知道 ≠ 用户没交。**显示"待完成"等于诬告用户** —— 这正是 Steven 体感的来源。宁可说"未知"，不要猜错方向。
+  > ⚠️ "无可信记录"包含两种情形：① 完全无提交记录；② **有记录但值不可信**（`unsubmitted`/`missing` —— Canvas 看不见 Gradescope 里的提交，
+  > 只等成绩回传；实测 Lab 1 已交却报 `unsubmitted`）。而 `graded`/`submitted`/`pending_review` 是 LTI 回传的事实，**照常采信**。
 - **验收路径（5 条，都能点）**：① R4A 的 I.4 → **「已提交（待评分）」**；② I.3 / I.2 → 已完成；③ 手勾的 done → 二次同步后**仍是 done**；④ 考勤打卡类（`not_graded`）→ 仍能手勾、同步不打回；⑤ 已提交但过了 due → **不再标红「已逾期」**。
 - **顺带记一条外部事实**：Gradescope 官方明确 **Gradescope 侧的 due date / 延期不会自动同步到 Canvas**（需手动对齐）。所以 Chem 1A 在 Canvas 上显示的 deadline **可能不是真 deadline** —— 比状态显示错严重得多。本卡至少要做到对这类课标注「以 Gradescope 为准」。
 

@@ -360,8 +360,12 @@ Steven 说「完成 P0-1-5b 就收手」，Bud 交付 5b 后收到含糊的「Pl
     当外部源拿不到某个状态时，真相可能只是"我们看不到"（平台没接口、没回传、权限不足），
     而不是"用户没做"。把它显示成"未完成"等于**诬告用户** —— 这正是「允许不知道」（§7）要防的事。
     正解是显式的第三态：**「待确认」**（Stride 里的 `availability: unknown`）。
-    反例（Steven 2026-09-13 实测）：Chem 1A 的 Homework 6 提交在 Gradescope，
-    Canvas 侧是 `external_tool` 外链且无任何提交记录 → Tempo 显示"待完成"，**而 Canvas 自己连个状态标签都没有**。
+    反例（Steven 2026-09-13 实测）：Chem 1AL「Lab 1: Airbags」(due 9/9) 交在 Gradescope，
+    Canvas 却报 `unsubmitted` —— 按"未完成"渲染就是诬告。
+    🔴 **同一平台的信号要分方向对待**：`external_tool` 类的**正信号**（`graded`/`submitted`/`pending_review`）
+    是 LTI 回传的**事实**，照常采信；**负信号**（`unsubmitted`/`missing`）是 Canvas 的**推断**
+    （它看不见外部平台的提交动作，只等成绩回传），一律降级为「待确认」。
+    ⚠️ 反过来把 `external_tool` 一刀切成「待确认」也是错的 —— 那会把 Homework 1–4 这些**已评分**的作业全标成"未知"。
     同一规则的另一半：`submission_types` 为 `none` / `not_graded` / `on_paper` 的作业
     （考勤打卡、纸质作业）在 Canvas 里**压根不存在完成态**，这类必须永远保留手勾，不能被自动判成未完成。
     本项目实现见 P0-3-10 执行卡、`Database.md` §3.9。

@@ -244,22 +244,32 @@ CREATE UNIQUE INDEX tasks_source_unique
 
 ```sql
 submission_state text CHECK (submission_state IN
-  ('unsubmitted','submitted','graded','pending_review','missing','excused'))  -- nullable
+  ('unsubmitted','submitted','pending_review','graded','missing','external_unconfirmed'))  -- nullable
 ```
 
-映射 Canvas `submission.workflow_state`：
+映射 Canvas `submission.workflow_state`（与 `lib/sync/canvas-tasks.ts` 的 `deriveSubmission` 一一对应）：
 
-| Canvas `submission` | `submission_state` | UI 展示 |
+| Canvas 侧情形 | `submission_state` | UI 展示 |
 |---|---|---|
-| `graded` | `graded` | 已完成 |
+| `graded` | `graded` | 已完成区（标「已提交（Canvas）」） |
 | `submitted`（未评分） | `submitted` | **已提交（待评分）** |
-| `unsubmitted` + `missing` | `missing` | **逾期未交**（区别于"逾期未完成"） |
-| `excused` | `excused` | 豁免 |
-| **`external_tool` / `not_graded` / `on_paper` 且无任何提交记录** | `null` | **待确认（外部平台提交）** 🔴 **不得显示"待完成"** |
+| `pending_review`（待查重） | `pending_review` | 已提交 |
+| `unsubmitted` **且** Canvas 标 `missing` | `missing` | **逾期未交**（区别于"逾期未完成"） |
+| `unsubmitted`（非外链类） | `unsubmitted` | 待办 + 已逾期 |
+| **`external_tool`（Gradescope 等 LTI）的"未交"信号** —— `unsubmitted` / `missing` | `external_unconfirmed` | **待确认（外部平台提交）** 🔴 **不得显示"待完成"** |
+| **`external_tool` 且完全无提交记录** | `external_unconfirmed` | **待确认（外部平台提交）** 🔴 同上 |
+| `none` / `not_graded` / `on_paper`（考勤、纸质） | `null` | 无完成态概念 → 保留手勾 |
+| 其他未知态（`excused` 等）／无记录且非外链 | `null` | 保守当"无记录" → 保留手勾 |
+
+> 🔴 **`external_tool` 的信号必须分方向**：**正信号**（`graded`/`submitted`/`pending_review`）是 LTI 回传的**事实**，照常采信；
+> **负信号**（`unsubmitted`/`missing`）是 Canvas 的**推断** —— 它看不见 Gradescope 里的提交动作，只等成绩回传。
+> 实测（2026-09-13）：Chem 1AL「Lab 1: Airbags」(due 9/9) 在 Gradescope 已交，Canvas 仍报 `unsubmitted`。
+> 拿它渲染"未完成/已逾期"就是**诬告用户**（ADR-013），故一律降级为「待确认」。
 
 > 🔴 **展示层合并规则**：`status='done'` **或** `submission_state ∈ {submitted, graded}` → 归入已完成区。**不写回 `status`** —— 两个字段分列的意义就是让"外部真相"与"用户判断"永不互相覆盖。
 > 🔴 **不可逆要分方向**：用户手勾的 `done` **永不回退**；Canvas 自身状态**允许回退**（老师撤回 / 重设时照搬真相）。写成同一条规则必然错一边。
-> ⚠️ **`submission_types` 决定有没有"提交"这回事**：`discussion_topic`（讨论类）没有传统提交；`none` / `not_graded` / `on_paper`（考勤打卡、纸质作业）在 Canvas 里**压根不存在完成态** —— 这类永远保留手勾，不能被自动判成未完成。
+> ⚠️ **`submission_types` 决定有没有"提交"这回事**：`discussion_topic`（讨论类）没有传统提交；`none` / `not_graded` / `on_paper`（考勤打卡、纸质作业）**没有可信的提交语义** —— 这类永远保留手勾，不能被自动判成未完成。
+> （2026-09-13 实测：这类作业 Canvas 其实也带 `workflow_state`，但它的含义取决于"你到场了没 / 纸质作业交给助教了没"，自动采信照样会误判 → 仍保留手勾。）
 
 ### 3.10 `canvas_credentials`（Canvas 访问凭证）
 

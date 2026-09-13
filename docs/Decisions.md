@@ -573,13 +573,15 @@ Steven 报 #7：R4A 的 I.4 讨论作业**已经交了**（Canvas 显示 Not Yet
 
 **映射与展示规则**
 
-| Canvas `submission` | `submission_state` | UI 展示 |
+| Canvas 侧情形 | `submission_state` | UI 展示 |
 |---|---|---|
-| `graded` | `graded` | 已完成 |
-| `submitted`（未评分） | `submitted` | **已提交（待评分）** |
-| `unsubmitted` + `missing` | `missing` | 逾期未交（区别于"逾期未完成"） |
-| `excused` | `excused` | 豁免 |
-| **`external_tool` / `not_graded` / `on_paper` 且无提交记录** | `null` | **待确认（外部平台提交）** 🔴 不得显示"待完成" |
+| `graded` / `submitted` / `pending_review` | 同名值 | 已完成区（标「已提交（Canvas）」） |
+| `unsubmitted` + `missing`（非外链） | `missing` | 逾期未交（区别于"逾期未完成"） |
+| **`external_tool`（Gradescope 等 LTI）的"未交"信号或完全无记录** | `external_unconfirmed` | **待确认（外部平台提交）** 🔴 不得显示"待完成" |
+| `none` / `not_graded` / `on_paper`（考勤、纸质） | `null` | 保留手勾（Canvas 无完成态概念） |
+
+> 🔴 **外链类信号分方向**（2026-09-13 实测补强）：LTI 回传的**正信号**采信；Canvas 自己推断的**负信号**降级为「待确认」——
+> 它看不见 Gradescope 里的提交，实测出现过"已在 Gradescope 交、Canvas 仍报 `unsubmitted`"，直接渲染"未完成"就是诬告（ADR-013）。
 
 **两个方向的不对称规则（刻意）**
 

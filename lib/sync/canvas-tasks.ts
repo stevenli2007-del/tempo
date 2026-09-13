@@ -61,9 +61,9 @@ const EXTERNAL_TOOL_TYPE = 'external_tool'
  *  ① submission_types 含 none/not_graded/on_paper → null（无完成态，用户手勾）
  *  ② 有内联 submission：
  *       graded → graded；submitted → submitted；pending_review → pending_review
- *       unsubmitted → missing 看 Canvas 标记，否则 unsubmitted
- *  ③ 无内联 submission（external_tool 外链类常为此态）→
- *       external_tool → external_unconfirmed（待确认）；其余 → null
+ *       unsubmitted → **external_tool 则降级 external_unconfirmed**（见 EXTERNAL_TOOL_TYPE 注释）；
+ *                     其余看 Canvas 的 missing 标记 → missing / unsubmitted
+ *  ③ 无内联 submission → external_tool → external_unconfirmed（待确认）；其余 → null
  */
 export function deriveSubmission(
   assignment: CanvasAssignment,
@@ -83,6 +83,11 @@ export function deriveSubmission(
       case 'pending_review':
         return { submissionState: 'pending_review', submittedAt: submission.submittedAt }
       case 'unsubmitted':
+        // ⚠️ external_tool 的"未交"是 Canvas 的**推断**（它看不见 Gradescope 里的提交），
+        //    已实测出现假阴性（Lab 1: Airbags）。降级「待确认」，绝不当"待完成"晾给用户。
+        if (types.includes(EXTERNAL_TOOL_TYPE)) {
+          return { submissionState: 'external_unconfirmed', submittedAt: null }
+        }
         // Canvas 自己标记了缺交 → 用 missing 态（区别于普通"未交"）。
         return {
           submissionState: submission.missing ? 'missing' : 'unsubmitted',
