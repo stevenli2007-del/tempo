@@ -713,6 +713,49 @@ Tempo 当纯日历用（说明定位错位，需重新审视）。
 
 ---
 
+### ADR-018：LLM provider 按**能力**路由（文本 DeepSeek / 视觉 Claude）
+
+- **状态**：已接受
+- **日期**：2026-09-13（P0-3-9 领卡时，关闭待决项 **O-11**）
+- **影响**：`lib/llm/*`（`types.ts` / `env.ts` / `index.ts` / `run.ts` / 新增 `providers/claude.ts`）、`TechStack.md` §2 / §5.2、`API-Contract.md` §5、`Phase-0-MVP.md` P0-3-9
+- **关系**：本条是 [ADR-003](./Decisions.md#adr-003)（可插拔 provider 抽象层）的**能力维度扩展**，不推翻它
+
+**背景**
+
+ADR-003 立了 provider 抽象层，承诺「切换只改配置、业务代码不动」。但落地时 `LLM_PROVIDER` 是**单一全局开关** —— 语义是"全站换一家"。
+
+P0-3-9（对话框·截图档）需要**视觉**，而 DeepSeek 无视觉（ADR-003 已知）。于是"换一家"与"只让图片走另一家"正面冲突：
+
+- 走**全局切 Claude**：每次 syllabus 解析（五板块）也搬到 Claude —— 成本上升，且 **P0-3-4 刚修好的解析质量必须重跑回归自证不退**，等于让一个低风险的图片功能去刺激高风险文本链路。
+- 走**图片路径绕过抽象层**：在抽象层旁边开一条影子通道，ADR-003 的可插拔承诺当场作废（下次换视觉厂商就要改业务代码）。
+
+**决策**
+
+1. provider 选择**按能力**而非全局：`capability ∈ { text, vision }`。
+   - `text` → 环境变量 `LLM_PROVIDER`（默认 `deepseek`），模型 `LLM_MODEL`（默认 `deepseek-chat`）
+   - `vision` → 环境变量 `LLM_PROVIDER_VISION`（默认 `claude`），模型 `LLM_MODEL_VISION`（默认 `claude-sonnet-5`）
+2. `LLMMessage.content` 从 `string` 扩为 `string | LLMContentPart[]`：`{ type:'text', text }` / `{ type:'image', mediaType, dataBase64 }`。**每个 adapter 自己映射到厂商格式**，业务代码只构造这两种块。
+3. `LLMProvider` 增加**能力声明**；`getLLMProvider(capability)` 在「选中的 provider 不支持该能力」时**立刻抛 `LLMConfigError`**（fail closed）—— 不允许一个无视觉的 provider 静默接到图片请求、然后返回一个看起来很像"没识别出任务"的空结果。
+4. 新增 `claude` adapter，用**原生 fetch**（与 `deepseek.ts` 同构，**零新依赖**，不引官方 SDK）。
+5. **只加环境变量，不加表结构**。`llm_runs.provider` 从此会出现 `claude` 行 —— 这正是 ADR-003 复审条件所需的数据。
+
+**理由**
+
+保住 ADR-003 的原意（业务代码不碰厂商），**同时不必为视觉把全站搬到贵的那家**。文本抽取是**高频 + 量大**（每次解析五板块），图片是**低频 + 少量**；让高频留在便宜的那家，是唯一划算的排布。这也是"能力路由"而非"全局切换"的全部论点 —— 不是因为多 provider 更时髦，而是因为**两类负载的成本结构差一个数量级**。
+
+**后果**
+
+- 配置项从 1 个变 2 个，**环境变量错配的失败模式多了一种** → 必须 fail closed，且报错文案要**指名缺哪个变量**（沿用 `lib/llm/env.ts` 既有风格）。
+- ⚠️ **统计陷阱（重要）**：`llm_runs` 的 `provider` 维度从此**不再单调**。按 provider 比准确率时必须**同时带上 capability** —— 否则"Claude 准确率更低"这个结论可能只是因为它只处理了更难的那部分输入（截图）。ADR-003 的复审条件（按 provider / 模型 / prompt 版本对比准确率）从此要按 `(capability, provider, model)` 三元组切分。
+- 新增 provider = 写一个 adapter + 声明能力；**不新增能力时零成本**（老调用方一行不改）。
+- 隐私面扩大：截图走 Anthropic（服务器在美国境内），与 DeepSeek（中国境内）**并存** → `Security-Privacy.md` A12 与待决项 **O-08** 必须同时记这两笔出境（见 P0-3-9 执行卡）。
+
+**复审条件**
+
+出现第三种能力（audio / 长文档批处理）；或**图片量超过文本量**（那时正解是给 vision 也换一个便宜 provider，而不是退回全局切换）。
+
+---
+
 ## 待决事项（尚未拍板，需后续决策）
 
 **约定**：每条待决事项在**最相关的那份文档**里有详细说明，`Decisions.md` 只维护索引。避免在两处各写一半导致漂移。
@@ -729,7 +772,7 @@ Tempo 当纯日历用（说明定位错位，需重新审视）。
 | **O-08** | **LLM 数据出境策略**（DeepSeek 服务在中国境内） | ⏳ **待 Steven 拍板** | `Security-Privacy.md` 第 6 节（暂按选项 A 执行） |
 | **O-09** | 是否接入第三方埋点 | ⏳ 待 Steven 定 | `Security-Privacy.md` 第 12 节 |
 | **O-10** | 隐私政策页面正式文案 | ⏳ Phase 0 开发中 | `Security-Privacy.md` 第 12 节 |
-| **O-11** | **截图档的多模态 provider 选型**（Claude / Gemini / GPT） | ⏳ **待 Steven 拍板** | `Phase-0-MVP.md` P0-3-9。DeepSeek **无视觉**，ADR-003 的抽象层需扩出 `vision` 能力。反向选项：先 OCR 转文字再喂 DeepSeek（省钱，但丢版式/表格/邮件信息） |
+| ~~O-11~~ | ~~截图档的多模态 provider 选型~~ | ✅ **已解决**（2026-09-13，Steven 拍板） | **Claude**（默认 `claude-sonnet-5`，可用 `LLM_MODEL_VISION` 覆写）。配套架构决策见 **ADR-018**（provider 按能力路由）。`Phase-0-MVP.md` P0-3-9 |
 | **O-12** | 入站邮件走"转发到专属地址"还是 Gmail API | ⏳ 已定路径：先转发（M3 P0-3-11），Gmail 留 Phase 1 | `Decisions.md` **ADR-014** |
 
 > ✅ **原阻塞项 O-06 已于 2026-09-01 解除**（PAT 入口可用），开发路径不再有任何前置阻塞，可从 `Phase-0-MVP.md` 的 P0-0-1 开始。
@@ -737,4 +780,4 @@ Tempo 当纯日历用（说明定位错位，需重新审视）。
 
 ---
 
-*创建：2026-09-01 ｜ 最近更新：2026-09-13（新增 ADR-017 产品定位「电子秘书（Jarvis）而非日历 App」）*
+*创建：2026-09-01 ｜ 最近更新：2026-09-13（新增 **ADR-018** LLM provider 按能力路由；ADR-017 产品定位「电子秘书（Jarvis）而非日历 App」；待决项 **O-11** 关闭）*
