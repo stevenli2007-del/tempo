@@ -1,6 +1,7 @@
 import { createClient } from '@/lib/supabase/server'
 import type {
   Task,
+  TaskCandidate,
   TaskSource,
   TaskStatus,
   TaskSubmissionState,
@@ -403,5 +404,61 @@ export async function loadTaskById(
     return { task: toTask(row, courseName), error: null }
   } catch (error) {
     return { task: null, error: error instanceof Error ? error.message : String(error) }
+  }
+}
+
+// ---------- 单课候选（P0-3-8b 检索） ----------
+
+/**
+ * 某门课的候选任务（P0-3-8b「用户输入 → 先检索现有任务」的数据源）。
+ *
+ * ### 为什么不复用 `loadTasks()`
+ * `GET /api/v1/tasks` 是**总览页口径**：跨课程合并、只设时间上界、分页。
+ * 而检索要回答的是「**这门课**里有没有叫 HW7 的任务」—— 需要**该课全部的未删任务**，
+ * 不分时间窗（一场考试/作业可能在一年后），且只要轻量字段（不要 status 等展示态）。
+ * 给 `loadTasks` 加参数会牵动公开契约 `range` 的语义，所以另开一条。
+ *
+ * ### 🔴 调用方必须先做课程归属校验
+ * 这里只 `.eq('course_id', …)`。`tasks` 的 RLS 经 `courses.user_id` 判定、
+ * **不看 `is_archived`**，所以归档课程的行仍会被放行 —— 调用方（`/tasks/search`）
+ * 必须先 `loadActiveCourseIds()` 确认该 courseId 属于当前用户的未归档课程。
+ */
+export async function loadTasksByCourse(
+  supabase: ServerSupabase,
+  courseId: string,
+): Promise<{ candidates: TaskCandidate[]; error: string | null }> {
+  const { data, error } = await supabase
+    .from('tasks')
+    .select('id, title, due_date, task_type, source, is_derived')
+    .eq('course_id', courseId)
+    .eq('is_deleted', false)
+    .order('due_date', { ascending: true, nullsFirst: false })
+    .order('created_at', { ascending: true })
+
+  if (error) {
+    return { candidates: [], error: error.message }
+  }
+
+  try {
+    const candidates = (
+      (data ?? []) as {
+        id: string
+        title: string
+        due_date: string | null
+        task_type: string
+        source: string
+        is_derived: boolean
+      }[]
+    ).map((row) => ({
+      id: row.id,
+      title: row.title,
+      dueDate: row.due_date,
+      taskType: toEnum<TaskType>(row.task_type, TASK_TYPES, 'task_type'),
+      source: toEnum<TaskSource>(row.source, TASK_SOURCES, 'source'),
+      isDerived: row.is_derived,
+    }))
+    return { candidates, error: null }
+  } catch (error) {
+    return { candidates: [], error: error instanceof Error ? error.message : String(error) }
   }
 }

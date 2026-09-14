@@ -551,11 +551,19 @@
 ｜ ❌「你已完成 47 项」虚荣大数字（与"少打开 Canvas"无关）｜ ❌ 庆祝动画（激励排在最后，M3 不做）
 
 ### `PATCH /api/v1/tasks/:id`
-**只允许更新 `status`**（pending / done）—— 「标记任务完成」的唯一入口。
+
+可改两类字段：
+
+| 字段 | 准入 | 说明 |
+|---|---|---|
+| `status`（pending / done） | **任何来源** | 「标记任务完成」的唯一入口，用户主权 |
+| `title` / `dueDate`（内容字段） | **仅 `source='manual'`** | P0-3-8b：对话框「改期 / 改名」的落写入口 |
 
 ```jsonc
-// request
+// 改状态
 { "status": "done" }
+// 改内容（P0-3-8b，仅手动任务）
+{ "dueDate": "2026-09-20" }   // 或 { "title": "…" }；可同时传
 // response 200 → 完整的 task 对象（含 courseName）
 ```
 
@@ -564,22 +572,75 @@
 | 未登录 | 401 | `unauthenticated` | |
 | 非法 uuid | 400 | `bad_request` | |
 | 请求体不是 JSON / 不是对象 | 400 | `bad_request` | |
-| 缺 `status` / 值不是 pending·done | 400 | `validation_failed` | |
-| **派生任务**传 `title` / `dueDate` | **422** | `derived_task_immutable` | 错误信息引导去课程页改 `exam_dates`；`details.immutableFields` 列出被拒字段 |
-| 非派生任务传 `title` / `dueDate` | 400 | `validation_failed` | 手动任务编辑不在 P0-1-9 范围，**明确拒绝而非静默忽略** |
+| 既无 `status` 也无 `title`·`dueDate` | 400 | `bad_request` | |
+| `status` 值不是 pending·done | 400 | `validation_failed` | |
+| `title` 为空串 | 400 | `validation_failed` | |
+| `dueDate` 无法解析 | 400 | `validation_failed` | 复用 `normalizeDueDate`（禁止编造日期） |
+| **派生任务**传 `title` / `dueDate` | **422** | `derived_task_immutable` | ADR-004：引导去课程页改 `exam_dates`；`details.immutableFields` 列出被拒字段 |
+| **非 manual 任务**传 `title` / `dueDate` | **422** | `source_not_editable` | P0-3-8b：`source ∈ {canvas, syllabus}` 的内容真相在源头，改了会被同步覆盖；`details.source` 给出实际来源 |
 | 不存在 / 不属于当前用户 / **课程已归档** | 404 | `not_found` | [ADR-010](./Decisions.md#adr-010) |
 
-> **422 与 400 的分工**：422 是 ADR-004 在接口层的强制点 —— 派生任务的权威源是 `exam_dates`，
-> 改 task 的 title / dueDate 会在下次保存或同步时被覆盖回去，所以必须拦下来并把用户**引导到正确的地方**。
-> 非派生任务的情形只是"本阶段不支持"，用 400 就够。
+> 🔴 **为什么内容字段按 `source` 分准入**（P0-3-8b）：绕过去改 = 造一个下次同步就被覆盖的假相。
+> 手动任务（`manual`）真相在 Tempo → 放行；Canvas（`canvas`）真相在 Canvas、考试（派生）真相在
+> `exam_dates` → 均 422 并**把用户引导到正确的地方**，而不是静默忽略（静默忽略会让前端以为改成功了）。
 >
 > **已完成的任务不隐藏**：`GET` 照常返回（`status = "done"`），折叠由前端做
 > （Steven 拍板 2026-09-03：横线划掉 + 折叠，不是隐藏、不是置灰混排）。
 
 ### `POST /api/v1/tasks` — 创建手动任务（`source = manual`）
-### `DELETE /api/v1/tasks/:id` — 软删除，**仅允许 `source = manual`**（同步来的任务不能被用户删，否则下次同步又回来）
 
-> 以上两个**未实现**：P0-1-9 范围是「仅 syllabus 数据」，手动任务的增删不在本卡。
+- 请求体 `{ tasks: [...] }`（批量）或单条对象；字段 `courseId` / `title` / `taskType` / `dueDate`。
+- 路由层**强制** `source='manual'` / `status='pending'` / `is_derived=false` / `submission_state=null`
+  —— **不接收**客户端传这几个字段（写入闭环取值，见 `lib/tasks/manual.ts`）。
+- `taskType` 只接受 `assignment` / `reading` / `other`；**`exam` 被拒**（权威源是 `exam_dates`，ADR-004）。
+- 课程归属显式校验（非当前用户未归档课程 → 404）。响应 **201** + 建成任务数组。
+
+### `DELETE /api/v1/tasks/:id` — 软删除，**仅允许 `source = manual`**
+
+- 置 `is_deleted = true`（软删，不物理删）。
+- **同步来的任务（canvas / syllabus）一律拒绝**：删了下次同步又回来，等于"删了个寂寞"还制造困惑 → 引导去源头。
+- 重复删除返回 404（幂等）。
+
+> ✅ **`POST` / `DELETE` / `PATCH` 内容编辑已由 P0-3-8 / P0-3-8b 实现**（原 §5 的「未实现」注记作废）。
+
+### `POST /api/v1/tasks/parse` — 课程更新解析（P0-3-8，**不落库**）
+
+对话框「扔进一段课程更新 → 结构化预览」的服务端一半。
+
+```jsonc
+// request
+{ "text": "Homework 7 截止改到 9/20", "courseId": "…" }
+// response 200 —— ⚠️ 只产预览，不写 tasks
+{
+  "data": {
+    "tasks": [ { "title": "Homework 7", "taskType": "assignment", "dueDate": "2026-09-20", "notes": null } ],
+    "warnings": []
+  }
+}
+```
+
+- LLM 走 `runStructured`（`purpose='course_update_parse'`，温度 0，审计落 `llm_runs`）。
+- **绝不产出 `exam`**：考试日期变更进 `warnings` 提示「请到课程页更新」（ADR-004）。
+- `dueDate` 未给则 `null`（禁止编造）。课程归属校验同上。LLM 失败 → 502 `llm_failed`。
+
+### `GET /api/v1/tasks/search?courseId=<uuid>&q=<标题文本>&limit=5` — 任务候选检索（P0-3-8b）
+
+对话框「**先检索现有任务**」的服务端一半：给定课程 + 一段标题，返回该课里最像的现有任务。
+
+```jsonc
+{
+  "data": [
+    { "id": "…", "title": "HW 7", "dueDate": "2026-09-17T23:59:59Z",
+      "taskType": "assignment", "source": "manual", "isDerived": false, "score": 1 }
+  ]
+}
+```
+
+- **确定性匹配、不用 LLM**（`lib/tasks/match.ts`）：缩写归一（HW==Homework）+ 编辑距离 + 二元组 Dice；
+  **不写 `llm_runs`、不花 token**。理由：LLM 会幻觉出不存在的任务 id，而改错用户的日程代价与幻觉进日程同级。
+- 各来源候选**一并返回**（manual / canvas / syllabus），谁能改由前端判（只有 `manual` 可改，见上 PATCH）。
+- `q` 为空 → 返回 `[]`（不是错误）。`limit` 默认 5、上限 20。
+- 同名任务返回按 `score` 降序的多个候选，由**用户消歧**（0 命中 → 新增；有命中 → 列举选择）。
 
 ---
 

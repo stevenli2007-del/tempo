@@ -1,5 +1,6 @@
 import { TASK_COLUMNS, loadTaskById, toTask } from '@/lib/tasks'
 import type { TaskRow } from '@/lib/tasks'
+import { normalizeDueDate } from '@/lib/tasks/manual'
 import { getCurrentUser, internalError, jsonError, jsonOk } from '@/lib/api/response'
 import { UUID_PATTERN } from '@/lib/api/params'
 import type { TaskStatus } from '@/types/task'
@@ -7,16 +8,20 @@ import type { TaskStatus } from '@/types/task'
 /**
  * 单条任务端点（API-Contract.md 第 5 节）。
  *
- * PATCH **只允许更新 `status`**（pending / done）—— 这是「标记任务完成」的唯一入口。
+ * PATCH 可改两类字段：
+ * - **`status`**（pending / done）：任务状态的唯一入口，**任何来源都可改** —— 这是「标记完成」。
+ * - **`title` / `dueDate`**（内容字段）：**只有 `source='manual'` 的任务可改**（P0-3-8b）。
  *
- * ### 为什么内容字段一律拒绝
- * - **派生任务**（`isDerived = true`，Phase 0 即 `exam_dates` 生成的考试任务）：
- *   权威源是 `exam_dates`，改 task 的 title / dueDate 会在下次保存/同步时被覆盖回去
- *   （ADR-004）。所以返回 **422 `derived_task_immutable`**，并把用户引导到课程页 ——
- *   这是 ADR-004 在接口层的强制点，不是可选的友好提示。
- * - **非派生任务**：Phase 0 手动任务的编辑（契约 §5 的 POST / DELETE 之外的字段修改）
- *   不在 P0-1-9 范围内，返回 400 明确说"目前只支持改状态"，
- *   **不静默忽略** —— 静默忽略会让前端以为改成功了。
+ * ### 🔴 为什么内容字段按 `source` 分准入（P0-3-8b）
+ * 每个来源有各自的权威源，绕过去改 = 造一个下次同步就被覆盖的假相：
+ * - **派生任务**（`isDerived = true`，即 `exam_dates` 生成的考试任务）：权威源是
+ *   `exam_dates`，改 task 会在下次保存/同步时被覆盖回去（ADR-004）。返回
+ *   **422 `derived_task_immutable`** 并把用户引导到课程页 —— 这是 ADR-004 的接口层强制点。
+ * - **`source='canvas'`**：内容真相在 Canvas，改 task 会被下次同步覆盖（ADR-015 同源心态）。
+ *   返回 **422 `source_not_editable`**，引导用户去 Canvas 改、或等同步自动更新。
+ * - **`source='manual'`**：真相就在 Tempo，用户主权 → **允许直接改**。
+ *
+ * 这样"改日期"这类诉求就不会出现「改了又被同步改回」的最难查的一类 bug。
  *
  * ### 关于 404
  * 不存在 / 不属于当前用户 / **所在课程已归档** 三种情况统一 404（ADR-010）。
@@ -30,8 +35,10 @@ interface RouteContext {
 
 const STATUSES: TaskStatus[] = ['pending', 'done']
 
-/** 有明确语义、用户可能会以为能改、因此必须显式拒绝的字段。 */
-const IMMUTABLE_CONTENT_FIELDS = ['title', 'dueDate']
+/** 可编辑的内容字段（**仅限 `source='manual'`**）。其余来源的编辑显式拒绝，不静默忽略。 */
+const CONTENT_FIELDS = ['title', 'dueDate'] as const
+
+const TITLE_MAX = 500
 
 export async function PATCH(request: Request, { params }: RouteContext) {
   try {
@@ -56,7 +63,8 @@ export async function PATCH(request: Request, { params }: RouteContext) {
     }
     const raw = body as Record<string, unknown>
 
-    // 先取现有行：既要 is_derived 来决定给 422 还是 400，也要拿到课程名组装响应。
+    // 先取现有行：既要 is_derived / source 来决定内容字段的准入（422 哪种码），
+    // 也要拿到课程名组装响应。
     const { task: existing, error: loadError } = await loadTaskById(supabase, id)
     if (loadError) {
       throw new Error(loadError)
@@ -65,9 +73,19 @@ export async function PATCH(request: Request, { params }: RouteContext) {
       return jsonError(request, 404, 'not_found', '任务不存在或无权访问')
     }
 
-    const presentContentFields = IMMUTABLE_CONTENT_FIELDS.filter(
-      (field) => raw[field] !== undefined,
-    )
+    const presentContentFields = CONTENT_FIELDS.filter((field) => raw[field] !== undefined)
+    const hasStatus = raw.status !== undefined
+
+    if (presentContentFields.length === 0 && !hasStatus) {
+      return jsonError(
+        request,
+        400,
+        'bad_request',
+        '请求体必须包含 status（改状态）或 title / dueDate（改内容）',
+      )
+    }
+
+    // 内容字段准入：派生任务 422（ADR-004），非手动任务 422（会被同步覆盖）。
     if (presentContentFields.length > 0) {
       if (existing.isDerived) {
         return jsonError(
@@ -78,26 +96,45 @@ export async function PATCH(request: Request, { params }: RouteContext) {
           { immutableFields: presentContentFields },
         )
       }
-      return jsonError(
-        request,
-        400,
-        'validation_failed',
-        '目前只支持修改任务状态（pending / done），暂不支持修改标题或日期',
-        { immutableFields: presentContentFields },
-      )
+      if (existing.source !== 'manual') {
+        return jsonError(
+          request,
+          422,
+          'source_not_editable',
+          '这条任务来自 Canvas 同步，在这里改会被下次同步覆盖 —— 请在 Canvas 侧修改，或等 Tempo 同步自动更新。Tempo 只允许直接编辑手动添加的任务',
+          { source: existing.source, immutableFields: presentContentFields },
+        )
+      }
     }
 
-    if (raw.status === undefined) {
-      return jsonError(request, 400, 'bad_request', '请求体必须包含 status')
+    // 只组装请求里真实出现的字段，避免把没传的字段误写成 null。
+    const update: { status?: TaskStatus; title?: string; due_date?: string | null } = {}
+
+    if (hasStatus) {
+      if (typeof raw.status !== 'string' || !STATUSES.includes(raw.status as TaskStatus)) {
+        return jsonError(request, 400, 'validation_failed', 'status 只能是 pending 或 done')
+      }
+      update.status = raw.status as TaskStatus
     }
-    if (typeof raw.status !== 'string' || !STATUSES.includes(raw.status as TaskStatus)) {
-      return jsonError(request, 400, 'validation_failed', 'status 只能是 pending 或 done')
+
+    if (presentContentFields.includes('title')) {
+      if (typeof raw.title !== 'string' || raw.title.trim() === '') {
+        return jsonError(request, 400, 'validation_failed', 'title 不能为空')
+      }
+      update.title = raw.title.trim().slice(0, TITLE_MAX)
     }
-    const status = raw.status as TaskStatus
+
+    if (presentContentFields.includes('dueDate')) {
+      const due = normalizeDueDate(raw.dueDate)
+      if (!due.ok) {
+        return jsonError(request, 400, 'validation_failed', due.message)
+      }
+      update.due_date = due.value
+    }
 
     const { data, error } = await supabase
       .from('tasks')
-      .update({ status })
+      .update(update)
       .eq('id', id)
       .select(TASK_COLUMNS)
       .maybeSingle()

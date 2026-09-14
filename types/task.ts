@@ -88,3 +88,27 @@ export type UpcomingTask = {
   /** Canvas 提交态（P0-3-10）；null = 不追踪。卡片用于显示「已提交（Canvas）」等。 */
   submissionState: TaskSubmissionState | null
 }
+
+/**
+ * 候选匹配用的轻量任务（P0-3-8b）。
+ *
+ * 「用户输入 → 先检索现有任务」里检索结果的形状：只带判断「是不是它」与渲染选项
+ * 需要的字段，不带 `status` / `submissionState` 这些展示态 —— 匹配用不到它们。
+ * 与 `Task` 的区别是**没有 `courseName`**：检索已限定在单门课内，课程名是冗余的。
+ */
+export type TaskCandidate = {
+  id: string
+  title: string
+  /** null = TBD。 */
+  dueDate: string | null
+  taskType: TaskType
+  source: TaskSource
+  /** true = 派生缓存（考试）。**不可在对话框直接改内容**（ADR-004）。 */
+  isDerived: boolean
+}
+
+/**
+ * 带相似度得分的候选（`matchTasks()` 的返回项）。`score ∈ [0,1]`，越大越像，
+ * 归一化后完全相同为 1。前端按 score 降序展示，让用户挑要改哪条。
+ */
+export type TaskMatch = TaskCandidate & { score: number }
