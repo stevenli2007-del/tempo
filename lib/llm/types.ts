@@ -59,10 +59,34 @@ export type JSONSchema = {
 
 export type LLMMessageRole = 'system' | 'user' | 'assistant'
 
+/**
+ * 多模态内容块（[ADR-018](../../docs/Decisions.md#adr-018)）。
+ *
+ * `LLMMessage.content` 从 `string` 扩为 `string | LLMContentPart[]`：
+ * 文本档只是 `string`（与旧调用方零改动），截图档用块数组。
+ * 业务代码**只**构造这两种块；映射到厂商格式是各 adapter 自己的事。
+ */
+export type LLMContentPart =
+  | { type: 'text'; text: string }
+  /** 已解码为 base64 的图片数据（浏览器侧压缩后即用即弃，不落库）。 */
+  | { type: 'image'; mediaType: 'image/png' | 'image/jpeg' | 'image/webp'; dataBase64: string }
+
 export type LLMMessage = {
   role: LLMMessageRole
-  content: string
+  /** 纯文本 `string`，或多模态块数组（`text` / `image`）。 */
+  content: string | LLMContentPart[]
 }
+
+/**
+ * Provider 能力（[ADR-018](../../docs/Decisions.md#adr-018)）。
+ *
+ * - `text`：纯文本结构化抽取（五板块 syllabus 解析走这里，默认 DeepSeek）
+ * - `vision`：多模态（截图档走这里，默认 Claude）
+ *
+ * `getLLMProvider(capability)` 会在「选中的 provider 不支持该能力」时立刻抛
+ * `LLMConfigError`（fail closed），绝不允许无视觉的 provider 静默接到图片请求。
+ */
+export type LLMCapability = 'text' | 'vision'
 
 export type LLMExtractParams = {
   /** 输出必须匹配的 schema。会同时用于约束模型输出与校验返回值。 */
@@ -129,6 +153,8 @@ export interface LLMProvider {
   readonly name: string
   /** 写进 `llm_runs.model` 的具体模型名，如 `deepseek-chat`。 */
   readonly model: string
+  /** 该 provider 支持的能力（[ADR-018](../../docs/Decisions.md#adr-018)）。`getLLMProvider(capability)` 据此 fail closed。 */
+  readonly capabilities: readonly LLMCapability[]
 
   /**
    * 结构化抽取：传入 messages + JSON schema，返回**符合 schema** 的对象。

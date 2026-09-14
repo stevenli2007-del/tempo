@@ -104,19 +104,20 @@ Next.js App（前端页面 + Route Handlers 后端逻辑）
 
 ```
 lib/llm/
-  index.ts          → 对外统一入口：getLLMProvider()
-  types.ts          → LLMProvider 接口 + 请求/响应类型 + JSON Schema 子集
-  env.ts            → 环境变量读取与校验（缺 key / 坏值立刻抛明确中文错误）
+  index.ts          → 对外统一入口：getLLMProvider(capability)
+  types.ts          → LLMProvider 接口 + 请求/响应类型 + JSON Schema 子集 + 多模态内容块
+  env.ts            → 按能力读取环境变量（缺 key / 坏值立刻抛明确中文错误）
   schema.ts         → validateJsonSchema()：校验模型输出是否符合 schema
   run.ts            → runStructured()：调模型 + 每次调用写 llm_runs 审计
   providers/
-    deepseek.ts     → 默认 provider（原生 fetch，不引厂商 SDK）
-    claude.ts       → 兜底 provider，**尚未实现**
+    deepseek.ts     → text 能力 provider（原生 fetch，不引厂商 SDK）
+    claude.ts       → vision 能力 provider（P0-3-9 补上，原生 fetch，不引厂商 SDK）
 ```
 
-> **P0-1-3 已交付 `index/types/env/schema/run` + `providers/deepseek.ts`。**
-> `providers/claude.ts` **故意不写** —— 一段从未真正调通过的死代码比明确报错更危险。
-> `LLM_PROVIDER=claude` 时 `getLLMEnv()` 直接抛："claude adapter 尚未实现…要启用需先补 adapter 并自测"。
+> **P0-1-3 已交付 `index/types/env/schema/run` + `providers/deepseek.ts`**；**P0-3-9（关闭 O-11）补上 `providers/claude.ts`**。
+> 切换 provider 由「全局单一开关」升级为「**按能力路由**」（[ADR-018](./Decisions.md#adr-018)）：文本档继续 DeepSeek、
+> 截图档走 Claude，二者并存互不干扰。`getLLMProvider(capability)` 在「选中的 provider 不支持该能力」时立刻抛
+> `LLMConfigError`（fail closed），不允许无视觉的 provider 静默接到图片请求。
 
 **统一接口（已实现）**
 
@@ -151,13 +152,15 @@ type LLMResult<T> =
 
 **环境变量**（均无 `NEXT_PUBLIC_` 前缀 —— LLM key 是密钥，打了前缀就进前端产物）
 
-| 变量 | 默认 | 说明 |
-|---|---|---|
-| `LLM_PROVIDER` | `deepseek` | 只接受 `deepseek` / `claude` |
-| `DEEPSEEK_API_KEY` | — | provider 为 deepseek 时**必填** |
-| `ANTHROPIC_API_KEY` | — | provider 为 claude 时必填（adapter 未实现，暂用不到） |
-| `LLM_MODEL` | `deepseek-chat` | 换模型不改代码 |
-| `LLM_TIMEOUT_MS` | `120000` | 必须是正整数毫秒 |
+| 变量 | 默认 | 能力 | 说明 |
+|---|---|---|---|
+| `LLM_PROVIDER` | `deepseek` | text | 文本档 provider，只接受 `deepseek` / `claude` |
+| `LLM_MODEL` | `deepseek-chat` | text | 换文本模型不改代码 |
+| `DEEPSEEK_API_KEY` | — | text | `LLM_PROVIDER=deepseek` 时**必填** |
+| `LLM_PROVIDER_VISION` | `claude` | vision | 截图档 provider（[ADR-018](./Decisions.md#adr-018)），只接受 `deepseek` / `claude` |
+| `LLM_MODEL_VISION` | `claude-sonnet-5` | vision | 换视觉模型不改代码（可覆写为更省的 `claude-haiku-4-5`） |
+| `ANTHROPIC_API_KEY` | — | vision | `LLM_PROVIDER_VISION=claude` 时**必填**（P0-3-9 启用截图档需配置） |
+| `LLM_TIMEOUT_MS` | `120000` | 共用 | 必须是正整数毫秒 |
 
 > ⚠️ **Vercel 上新增/修改环境变量后必须手动 Redeploy**，已完成的 build 不会带新变量（P0-0-6 踩过）。
 

@@ -17,6 +17,7 @@
 import { validateJsonSchema } from '../schema'
 import type {
   JSONSchema,
+  LLMCapability,
   LLMError,
   LLMExtractParams,
   LLMMessage,
@@ -191,10 +192,12 @@ async function callChatCompletions(
 
 export function createDeepSeekProvider(config: DeepSeekConfig): LLMProvider {
   const baseUrl = config.baseUrl ?? BASE_URL
+  const capabilities: readonly LLMCapability[] = ['text']
 
   return {
     name: 'deepseek',
     model: config.model,
+    capabilities,
 
     async extractStructured<T>(params: LLMExtractParams): Promise<LLMResult<T>> {
       const startedAt = Date.now()

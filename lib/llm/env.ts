@@ -8,7 +8,7 @@
  * 打了前缀就会进前端产物（`Security-Privacy.md` 第 5 节）。
  */
 
-import type { LLMProviderName } from './types'
+import type { LLMCapability, LLMProviderName } from './types'
 
 export type LLMEnv = {
   provider: LLMProviderName
@@ -25,20 +25,42 @@ export class LLMConfigError extends Error {
   }
 }
 
-/** 各 provider 的默认模型。可用 `LLM_MODEL` 覆盖（换模型不改代码）。 */
-const DEFAULT_MODEL: Record<LLMProviderName, string> = {
-  deepseek: 'deepseek-chat',
-  claude: '',
+/**
+ * 能力 → provider 配置映射（[ADR-018](../../docs/Decisions.md#adr-018)）。
+ *
+ * - `text`：默认 `deepseek`（高频 + 量大，走便宜那家）
+ * - `vision`：默认 `claude`（多模态；DeepSeek 无视觉）
+ *
+ * 每条含：provider 名、API key 变量、模型覆盖变量、默认模型。
+ * Claude 的默认模型 `claude-sonnet-5` 取自 Anthropic 官方文档（非凭印象）。
+ */
+const CAPABILITY_CONFIG: Record<
+  LLMCapability,
+  { providerEnv: string; defaultProvider: LLMProviderName; keyEnv: string; modelEnv: string; defaultModel: string }
+> = {
+  text: {
+    providerEnv: 'LLM_PROVIDER',
+    defaultProvider: 'deepseek',
+    keyEnv: 'DEEPSEEK_API_KEY',
+    modelEnv: 'LLM_MODEL',
+    defaultModel: 'deepseek-chat',
+  },
+  vision: {
+    providerEnv: 'LLM_PROVIDER_VISION',
+    defaultProvider: 'claude',
+    keyEnv: 'ANTHROPIC_API_KEY',
+    modelEnv: 'LLM_MODEL_VISION',
+    defaultModel: 'claude-sonnet-5',
+  },
 }
 
 const DEFAULT_TIMEOUT_MS = 120_000
 
 /**
- * 已实现的 provider。Claude 是 ADR-003 的兜底方案，**adapter 尚未实现** ——
- * 与其写一段从未真正调通过的死代码，不如在这里明确报错。
- * 要切 Claude 时，先写 adapter + 自测，再把它加进这个集合。
+ * 已实现的 provider。Claude adapter 已在 P0-3-9（关闭 O-11）补上，
+ * 因此这里同时放 `deepseek` 与 `claude`。
  */
-const IMPLEMENTED_PROVIDERS: LLMProviderName[] = ['deepseek']
+const IMPLEMENTED_PROVIDERS: LLMProviderName[] = ['deepseek', 'claude']
 
 function parseTimeoutMs(raw: string | undefined): number {
   if (!raw) return DEFAULT_TIMEOUT_MS
@@ -52,36 +74,44 @@ function parseTimeoutMs(raw: string | undefined): number {
   return parsed
 }
 
-export function getLLMEnv(): LLMEnv {
-  const rawProvider = (process.env.LLM_PROVIDER ?? 'deepseek').trim().toLowerCase()
+/**
+ * 按**能力**读取 provider 配置（[ADR-018](../../docs/Decisions.md#adr-018)）。
+ *
+ * 与旧 `getLLMEnv()`（全局单一开关）不同：文本档与图片档可走不同 provider，
+ * 互不干扰。调用方必须显式传 `capability`，否则无法决定读哪组变量。
+ *
+ * @throws {LLMConfigError} 变量缺失 / provider 名不认识 / adapter 未实现。
+ */
+export function getLLMEnv(capability: LLMCapability): LLMEnv {
+  const cfg = CAPABILITY_CONFIG[capability]
+  const rawProvider = (process.env[cfg.providerEnv] ?? cfg.defaultProvider).trim().toLowerCase()
 
   if (rawProvider !== 'deepseek' && rawProvider !== 'claude') {
     throw new LLMConfigError(
-      `环境变量 LLM_PROVIDER 只支持 deepseek / claude，当前是 "${rawProvider}"。`
+      `环境变量 ${cfg.providerEnv} 只支持 deepseek / claude，当前是 "${rawProvider}"。`
     )
   }
   const provider: LLMProviderName = rawProvider
 
   if (!IMPLEMENTED_PROVIDERS.includes(provider)) {
     throw new LLMConfigError(
-      `LLM_PROVIDER=${provider}，但 ${provider} adapter 尚未实现。` +
-        '当前只有 deepseek 可用。要启用需先补 adapter 并自测（见 docs/TechStack.md 5.2）。'
+      `能力 ${capability} 选定的 ${cfg.providerEnv}=${provider}，但 ${provider} adapter 尚未实现。` +
+        '要启用需先补 adapter 并自测（见 docs/TechStack.md 5.2）。'
     )
   }
 
-  const keyVarName = provider === 'deepseek' ? 'DEEPSEEK_API_KEY' : 'ANTHROPIC_API_KEY'
-  const apiKey = process.env[keyVarName]?.trim()
+  const apiKey = process.env[cfg.keyEnv]?.trim()
 
   if (!apiKey) {
     throw new LLMConfigError(
-      `缺少环境变量 ${keyVarName}。本地在 .env.local 填入；` +
+      `能力 ${capability} 需要环境变量 ${cfg.keyEnv}（当前缺）。本地在 .env.local 填入；` +
         'Vercel 在 Project Settings → Environment Variables 配置后**必须手动 Redeploy**才会生效。'
     )
   }
 
-  const model = process.env.LLM_MODEL?.trim() || DEFAULT_MODEL[provider]
+  const model = process.env[cfg.modelEnv]?.trim() || cfg.defaultModel
   if (!model) {
-    throw new LLMConfigError(`provider ${provider} 没有默认模型，请用 LLM_MODEL 显式指定。`)
+    throw new LLMConfigError(`provider ${provider} 没有默认模型，请用 ${cfg.modelEnv} 显式指定。`)
   }
 
   return {

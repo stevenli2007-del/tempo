@@ -16,16 +16,22 @@ import { createClient } from '@/lib/supabase/server'
 
 import { LLMConfigError, getLLMProvider } from './index'
 
-import type { LLMExtractParams, LLMResult, LLMUsage } from './types'
+import type { LLMCapability, LLMExtractParams, LLMResult, LLMUsage } from './types'
 
 export type LLMRunParams = LLMExtractParams & {
   /** 写进 `llm_runs.user_id`。必须来自当前会话，否则 RLS 会拒掉这一行。 */
   userId: string
-  /** 调用用途，如 `syllabus_parse` / `syllabus_reparse`。列上没有 CHECK 约束，新用途直接加字面量。 */
+  /** 调用用途，如 `syllabus_parse` / `syllabus_reparse` / `course_update_vision`。列上没有 CHECK 约束，新用途直接加字面量。 */
   purpose: string
   /** prompt 版本号，如 `v1`。修正数据要能归因到具体版本，所以**必填**。 */
   promptVersion: string
   syllabusId?: string | null
+  /**
+   * 能力（[ADR-018](../../docs/Decisions.md#adr-018)）。决定走哪个 provider：
+   * `text`（默认，DeepSeek，五板块解析）/ `vision`（Claude，截图档）。
+   * 默认 `text` 以**保持所有既有调用方零改动**。
+   */
+  capability?: LLMCapability
   /**
    * 是否写 `llm_runs` 审计行。默认 true（业务调用必记，支撑 ADR-003 复审）。
    * 独立脚本（如 `scripts/regress-course-outline.ts`）没有 Next 请求上下文，
@@ -76,12 +82,19 @@ async function recordRun(row: LLMRunInsert): Promise<void> {
  * `LLMResult` 的 error 分支。调用方只看 `ok`。
  */
 export async function runStructured<T>(params: LLMRunParams): Promise<LLMResult<T>> {
-  const { userId, purpose, promptVersion, syllabusId = null, record = true, ...extractParams } =
-    params
+  const {
+    userId,
+    purpose,
+    promptVersion,
+    syllabusId = null,
+    capability = 'text',
+    record = true,
+    ...extractParams
+  } = params
 
   let provider
   try {
-    provider = getLLMProvider()
+    provider = getLLMProvider(capability)
   } catch (error) {
     // 配置坏了：provider / model 都还不知道，而 llm_runs 这两列是 NOT NULL，
     // 编不出有意义的值，因此**不落审计行**，只留服务端日志。

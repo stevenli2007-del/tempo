@@ -21,13 +21,20 @@
  *   `source='manual'` 可勾选更新；其余只展示并给出「去哪儿改」的提示。
  */
 
-import { useEffect, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { useRouter } from "next/navigation"
 
 import { Button } from "@/components/ui/button"
 
 type CourseOption = { id: string; courseName: string }
-type ParsedTask = { title: string; taskType: string; dueDate: string | null; notes: string | null }
+type ParsedTask = {
+  title: string
+  taskType: string
+  dueDate: string | null
+  notes: string | null
+  /** P0-3-9 截图档：识别到「已提交 / 提交成功页」则为 true，驱动「标记完成」提示。 */
+  submitted?: boolean | null
+}
 type ParseResult = { tasks: ParsedTask[]; warnings: string[] }
 type Candidate = {
   id: string
@@ -77,6 +84,10 @@ export function CourseUpdateFab() {
   const [courses, setCourses] = useState<CourseOption[]>([])
   const [courseId, setCourseId] = useState("")
   const [text, setText] = useState("")
+  // P0-3-9 截图档：图片状态（base64 / 预览 URL / 媒体类型）。与 text 二选一。
+  const [image, setImage] = useState<{ dataBase64: string; mediaType: string } | null>(null)
+  const [imagePreview, setImagePreview] = useState<string | null>(null)
+  const fileInputRef = useRef<HTMLInputElement>(null)
   const [loadingCourses, setLoadingCourses] = useState(false)
   const [parsing, setParsing] = useState(false)
   const [searching, setSearching] = useState(false)
@@ -103,10 +114,77 @@ export function CourseUpdateFab() {
   /** 清空一次输入的中间态（成功的 summary 单独保留，用于短暂回显）。 */
   function resetInput() {
     setText("")
+    setImage(null)
+    if (imagePreview) {
+      URL.revokeObjectURL(imagePreview)
+      setImagePreview(null)
+    }
     setParsed(null)
     setCandidatesFor({})
     setResolutions({})
     setError(null)
+  }
+
+  // ---------------------------------------------------------------
+  // P0-3-9 截图档：图片压缩 + 粘贴 / 选择
+  // ---------------------------------------------------------------
+
+  /**
+   * 客户端压缩：长边 ≤1600px、转 JPEG q≈0.8、目标 ≤1MB。
+   * 截图不落库（即传即弃），压缩只为控制请求体积与避免 HEIC 等不可直传格式。
+   */
+  async function compressImage(file: File): Promise<{ dataBase64: string; mediaType: string }> {
+    const bitmap = await createImageBitmap(file)
+    const maxEdge = 1600
+    const scale = Math.min(1, maxEdge / Math.max(bitmap.width, bitmap.height))
+    const w = Math.round(bitmap.width * scale)
+    const h = Math.round(bitmap.height * scale)
+
+    const canvas = document.createElement("canvas")
+    canvas.width = w
+    canvas.height = h
+    const ctx = canvas.getContext("2d")
+    if (!ctx) throw new Error("无法读取图片")
+    ctx.drawImage(bitmap, 0, 0, w, h)
+
+    // 先试 JPEG（通用、体积小）；体积仍超 1MB 再降质。
+    let dataUrl = canvas.toDataURL("image/jpeg", 0.8)
+    if (dataUrl.length > 1_400_000) {
+      dataUrl = canvas.toDataURL("image/jpeg", 0.6)
+    }
+    // dataUrl: "data:image/jpeg;base64,...."
+    const comma = dataUrl.indexOf(",")
+    const dataBase64 = dataUrl.slice(comma + 1)
+    bitmap.close?.()
+    return { dataBase64, mediaType: "image/jpeg" }
+  }
+
+  async function handleFile(file: File | undefined | null) {
+    if (!file) return
+    if (!file.type.startsWith("image/")) {
+      setError("请选择图片文件（PNG / JPEG / WebP）")
+      return
+    }
+    // HEIC 等浏览器 createImageBitmap 不支持的格式：明确引导转格式，不引转码依赖。
+    try {
+      const compressed = await compressImage(file)
+      setImage(compressed)
+      setImagePreview(URL.createObjectURL(file))
+      setText("")
+      setError(null)
+    } catch {
+      setError("这张图片无法读取（HEIC 等格式请先转成 PNG/JPEG 再上传）")
+    }
+  }
+
+  function handlePaste(e: React.ClipboardEvent<HTMLTextAreaElement>) {
+    const item = Array.from(e.clipboardData.items).find((i) => i.type.startsWith("image/"))
+    if (!item) return
+    const file = item.getAsFile()
+    if (file) {
+      e.preventDefault()
+      void handleFile(file)
+    }
   }
 
   /** 对该课现有任务做确定性检索，并给出默认选择（有可改的手动匹配则默认选中它）。 */
@@ -146,8 +224,13 @@ export function CourseUpdateFab() {
       setError("请先选择课程")
       return
     }
+    // 截图档与文本档二选一。
+    if (image) {
+      await handleParseImage()
+      return
+    }
     if (text.trim() === "") {
-      setError("请粘贴课程更新内容")
+      setError("请粘贴课程更新内容，或粘贴 / 选择一张截图")
       return
     }
 
@@ -190,6 +273,49 @@ export function CourseUpdateFab() {
     }
   }
 
+  /** 截图档解析分支（P0-3-9）。 */
+  async function handleParseImage() {
+    if (!image) return
+    let safeTasks: ParsedTask[] = []
+    let warnings: string[] = []
+    setParsing(true)
+    try {
+      const res = await fetch("/api/v1/tasks/parse-image", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ courseId, image }),
+      })
+      const data = await res.json()
+      if (!res.ok) {
+        // 服务端已 fail closed：明确提示「识别服务不可用」，不伪装成"没识别出任务"。
+        setError(data?.error?.message ?? "截图识别失败，请改用文字输入")
+        return
+      }
+      const result = (data.data ?? { tasks: [], warnings: [] }) as ParseResult
+      safeTasks = result.tasks.filter((t) => t.taskType !== "exam")
+      warnings = result.warnings ?? []
+      if (safeTasks.length === 0 && warnings.length === 0) {
+        setError("这张截图里没识别出可添加的任务，换个角度或改用文字试试？")
+        return
+      }
+      setParsed({ tasks: safeTasks, warnings })
+    } catch {
+      setError("网络错误，请重试")
+      return
+    } finally {
+      setParsing(false)
+    }
+
+    if (safeTasks.length > 0) {
+      setSearching(true)
+      try {
+        await loadCandidates(safeTasks, courseId)
+      } finally {
+        setSearching(false)
+      }
+    }
+  }
+
   function chooseCreate(index: number) {
     setResolutions((prev) => ({ ...prev, [index]: { mode: "create" } }))
   }
@@ -203,58 +329,100 @@ export function CourseUpdateFab() {
     setSaving(true)
     setError(null)
     try {
-      const createTasks: { courseId: string; title: string; taskType: string; dueDate: string | null }[] = []
-      const updates: { id: string; dueDate: string }[] = []
-      let skipped = 0
+      // 收集「新建」任务，并记录其中哪些是「已提交」（按创建顺序）。POST 后按返回顺序配对，
+      // 给新建且 submitted 的任务后置 PATCH status=done（POST 闭环固定 pending，不收 status）。
+      const createItems: ParsedTask[] = []
+      const newSubmittedSeq: number[] = []
+      // 其余动作（改日期 / 标记已有任务完成 / 跳过）按序执行。
+      type Action =
+        | { kind: "updateDue"; id: string; dueDate: string }
+        | { kind: "markDone"; id: string }
+        | { kind: "skip" }
+      const actions: Action[] = []
 
       parsed.tasks.forEach((task, index) => {
         const resolution = resolutions[index] ?? { mode: "create" as const }
+        const isSubmitted = task.submitted === true
         if (resolution.mode === "create") {
-          createTasks.push({
-            courseId,
-            title: task.title,
-            taskType: task.taskType,
-            dueDate: task.dueDate,
-          })
-        } else if (task.dueDate) {
-          updates.push({ id: resolution.candidate.id, dueDate: task.dueDate })
+          createItems.push(task)
+          if (isSubmitted) newSubmittedSeq.push(createItems.length - 1)
         } else {
-          // 想更新却没给出新日期 —— 无事可做，跳过而不是瞎写一个值。
-          skipped += 1
+          const candidateId = resolution.candidate.id
+          if (task.dueDate) actions.push({ kind: "updateDue", id: candidateId, dueDate: task.dueDate })
+          // 🔴 红线：截图只写 status（用户主权）。仅当识别为「已提交」才标记完成；
+          // 绝不写 submission_state / submitted_at（那是 Canvas 真相、仅同步可写，ADR-015）。
+          if (isSubmitted) actions.push({ kind: "markDone", id: candidateId })
+          else if (!task.dueDate) actions.push({ kind: "skip" })
         }
       })
 
       let created = 0
-      if (createTasks.length > 0) {
+      const createdIds: string[] = []
+      if (createItems.length > 0) {
         const res = await fetch("/api/v1/tasks", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ tasks: createTasks }),
+          body: JSON.stringify({
+            tasks: createItems.map((t) => ({
+              courseId,
+              title: t.title,
+              taskType: t.taskType,
+              dueDate: t.dueDate,
+            })),
+          }),
         })
         const data = await res.json()
         if (!res.ok) {
           setError(data?.error?.message ?? "新增失败，请重试")
           return
         }
-        created = data.data?.length ?? createTasks.length
+        const createdList = (data.data ?? []) as { id: string }[]
+        createdIds.push(...createdList.map((t) => t.id))
+        created = createdList.length
       }
 
-      let updated = 0
-      for (const item of updates) {
-        const res = await fetch(`/api/v1/tasks/${item.id}`, {
+      // 新建且 submitted 的任务：按创建顺序置 done（POST 固定 pending，后置 PATCH）。
+      let newMarkedDone = 0
+      for (const idx of newSubmittedSeq) {
+        const id = createdIds[idx]
+        if (!id) continue
+        const res = await fetch(`/api/v1/tasks/${id}`, {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ dueDate: item.dueDate }),
+          body: JSON.stringify({ status: "done" }),
         })
-        const data = await res.json()
-        if (!res.ok) {
-          setError(data?.error?.message ?? "更新失败，请重试")
-          return
-        }
-        updated += 1
+        if (res.ok) newMarkedDone += 1
       }
 
-      setSummary({ created, updated, skipped })
+      // 其余动作：改日期 / 标记已有任务完成 / 跳过。
+      let updated = 0
+      let skipped = 0
+      for (const act of actions) {
+        if (act.kind === "updateDue") {
+          const res = await fetch(`/api/v1/tasks/${act.id}`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ dueDate: act.dueDate }),
+          })
+          const data = await res.json()
+          if (!res.ok) {
+            setError(data?.error?.message ?? "更新失败，请重试")
+            return
+          }
+          updated += 1
+        } else if (act.kind === "markDone") {
+          const res = await fetch(`/api/v1/tasks/${act.id}`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ status: "done" }),
+          })
+          if (res.ok) updated += 1
+        } else if (act.kind === "skip") {
+          skipped += 1
+        }
+      }
+
+      setSummary({ created, updated: updated + newMarkedDone, skipped })
       resetInput()
       router.refresh()
       setTimeout(() => {
@@ -327,10 +495,60 @@ export function CourseUpdateFab() {
             <textarea
               value={text}
               onChange={(e) => setText(e.target.value)}
+              onPaste={handlePaste}
               rows={4}
-              placeholder="粘贴课程更新（作业、阅读、项目截止等），例如：Homework 7 截止改到 9/20"
-              className="mb-3 w-full resize-none rounded-lg border border-input bg-background px-3 py-2 text-sm text-foreground outline-none placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
+              placeholder="粘贴课程更新（作业、阅读、项目截止等），例如：Homework 7 截止改到 9/20；也可直接 Cmd+V 粘贴截图"
+              disabled={!!image}
+              className="mb-2 w-full resize-none rounded-lg border border-input bg-background px-3 py-2 text-sm text-foreground outline-none placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 disabled:opacity-50"
             />
+
+            {/* P0-3-9 截图档：选图 / 粘贴入口（与文字互斥）。 */}
+            <div className="mb-3 flex items-center gap-2">
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/png,image/jpeg,image/webp"
+                className="hidden"
+                onChange={(e) => void handleFile(e.target.files?.[0])}
+              />
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                disabled={!!image}
+                onClick={() => fileInputRef.current?.click()}
+              >
+                选择图片
+              </Button>
+              <span className="text-xs text-muted-foreground">或在此框内 Cmd+V 粘贴截图</span>
+            </div>
+
+            {image && imagePreview && (
+              <div className="mb-3 flex items-center gap-3 rounded-lg border border-border bg-muted/40 p-2">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src={imagePreview}
+                  alt="待识别截图"
+                  className="h-20 w-20 rounded object-cover"
+                />
+                <div className="flex flex-1 flex-col gap-1">
+                  <span className="text-xs text-emerald-600 dark:text-emerald-400">
+                    截图已就绪，点「解析」识别更新（将发送给视觉模型）
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setImage(null)
+                      if (imagePreview) URL.revokeObjectURL(imagePreview)
+                      setImagePreview(null)
+                    }}
+                    className="w-fit text-xs text-muted-foreground underline transition hover:text-ink"
+                  >
+                    移除截图
+                  </button>
+                </div>
+              </div>
+            )}
 
             {error && <p className="mb-2 text-sm text-destructive">{error}</p>}
             {summary && (
@@ -355,6 +573,11 @@ export function CourseUpdateFab() {
                         {taskTypeLabel(task.taskType)}
                         {task.dueDate ? ` · 截止 ${formatDay(task.dueDate)}` : " · 日期待定"}
                         {task.notes ? ` · ${task.notes}` : ""}
+                        {task.submitted === true ? (
+                          <span className="ml-1 rounded bg-emerald-500/15 px-1 text-emerald-600 dark:text-emerald-400">
+                            已提交
+                          </span>
+                        ) : null}
                       </p>
 
                       {searching ? (

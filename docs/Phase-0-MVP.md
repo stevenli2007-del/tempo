@@ -1113,7 +1113,7 @@ Phase 0 列表只有几十条，每行再加一个 tag 只会更密，信息增�
 | **P0-3-7b** | **总览页收纳**：课程卡搬出 dashboard → 新建 `/courses` 列表页 + 侧栏「我的课程」入口（**结构改动，排在 3-12 视觉扫尾之前**） | Bud | P0-3-7 | dashboard 只回答「接下来要做什么」；课程资产独立成页 | ✅ 已验收 2026-09-13（commit `ba361c4`） |
 | **P0-3-8** | **课程更新对话框（文本档）**：输入 + AI 解析 + **人工确认** + 只写手动任务 | Bud | P0-3-4 | 对话**不篡改** syllabus 权威数据（exam / 已确认项） | ✅ 用户验收通过 2026-09-13（`45d3bc3` + 3-8b `5969f55` + follow-up `4f86ab7`） |
 | **P0-3-8b** | **对话框检索/更新档**：输入后**先检索现有任务** → 0 命中新增 / 有命中列举让用户选改哪条；`PATCH` 放开手动任务内容编辑 | Bud | P0-3-8 | 只有 `source='manual'` 可改（canvas/exam 被拦并引导源头）；匹配确定性、不用 LLM | ✅ 用户验收通过 2026-09-13 |
-| **P0-3-9** | **课程更新对话框（截图档）**：多模态接入 | Bud | P0-3-8、~~O-11~~（✅ 已解除） | **验收用例：Chem 1A Homework 6 的 Gradescope 提交成功页截图 → 自动标记完成** | 🔵 决策已定 2026-09-13，待开工 |
+| **P0-3-9** | **课程更新对话框（截图档）**：多模态接入 | Bud | P0-3-8、~~O-11~~（✅ 已解除） | **验收用例：Chem 1A Homework 6 的 Gradescope 提交成功页截图 → 自动标记完成** | 🔵 **代码完成 2026-09-13（本地自测通过，待 Steven 验收）** |
 | **P0-3-10** | **Canvas 提交状态同步 + 日期时区修复**：`include[]=submission` + 三态 + 「待确认」态 + 按学校时区渲染 | Bud | — | 见下方执行卡 5 条验收路径 | ✅ 已完成（2026-09-13 用户验收） |
 | **P0-3-11** | **邮件通道**：入站（转发到 Tempo 专属地址）+ 出站（每日摘要 / 提醒推送）—— hands-off 的启用件 | Bud | P0-3-8 | 转发一封 Gradescope 提交确认邮件 → 任务自动标记完成 | ⚪ |
 | **P0-3-12** | **全站视觉统一扫尾**：把 3-5 ~ 3-11 的新界面收进设计基线 | Bud | P0-3-3 ~ 3-11 | 无遗留旧样式；对齐 Stride 观感 | ⚪ |
@@ -1307,7 +1307,7 @@ Phase 0 列表只有几十条，每行再加一个 tag 只会更密，信息增�
 - **决策（写进 PATCH 准入）**：`source='canvas'` 的内容真相在 Canvas，在这里改会被下次同步覆盖 → 拦下并引导去 Canvas 或等同步；考试归 `exam_dates`（ADR-004）。**手动任务才是 Tempo 里可自由编辑的那一类。**
 - **自测**：`next build` 全过（类型 + 编译）；纯函数回归 **48/48**（含 follow-up 年份推断）。运行时端到端烟测**已由 Steven 浏览器验收通过 2026-09-13**。
 
-#### 🎫 P0-3-9 · 课程更新对话框（截图档） 🔵 决策已定 2026-09-13（O-11 已解除），待开工
+#### 🎫 P0-3-9 · 课程更新对话框（截图档） 🔵 **代码完成 2026-09-13（本地自测通过，待 Steven 验收）**
 
 - **做什么**：截图丢进对话框 → 识别 → **与文本档共用下半段**（先检索 → 消歧 → 确认 → 落写）。本卡**不重写** 3-8 / 3-8b 的任何逻辑，只换"输入端"。
 - **🔴 四项决策（Steven 2026-09-13 拍板，四项均按推荐方案）**：
@@ -1317,15 +1317,16 @@ Phase 0 列表只有几十条，每行再加一个 tag 只会更密，信息增�
   3. **图片不落库**：浏览器压缩后 base64 直传，服务端即用即弃。**零存储 = 零孤儿文件 + 零截图 PII 留存**。
      > 与 syllabus 的关键差别：syllabus 是**要长期留的资产**（能下载、有删除入口），截图是**一次性输入**（唯一用途就是这一次解析）。为一次性输入付存储 + 递归删除 + 合规的成本，不划算（ADR-014「少一处数据就少一处合规义务」）。
   4. **范围 = 确认完成 + 新增/改期**：截图里的"已提交"信号与日期信号**都接住**，因为下半段（`match` + `PATCH`）已经就绪，多接住一类信号的增量很小。
-- **改哪些文件（计划，未开工）**：
+- **改哪些文件（已全部落地 2026-09-13）**：
   - `lib/llm/types.ts`（改）：`LLMMessage.content` → `string | LLMContentPart[]`；新增 `LLMContentPart`（text / image）；`LLMProvider` 增加能力声明。
   - `lib/llm/env.ts`（改）：`getLLMEnv(capability)`；新增 `LLM_PROVIDER_VISION` / `LLM_MODEL_VISION`；`claude` 移出「未实现」集合；补 `DEFAULT_MODEL.claude`。
   - `lib/llm/providers/claude.ts`（🆕）：Anthropic Messages API，**原生 fetch、零新依赖**（同 `deepseek.ts` 做法）。两处与 OpenAI 兼容格式的差异要写对：**`system` 是顶层参数**（不是 messages 里的 role）、**`max_tokens` 必填**。图片块 `{type:'image', source:{type:'base64', media_type, data}}`。
-  - `lib/llm/index.ts` / `run.ts`（改）：`getLLMProvider(capability)`；`runStructured` 加 `capability` 入参（默认 `text` → **现有调用方一行不改**）。
-  - `app/api/v1/tasks/parse-image/route.ts`（🆕）：`POST { courseId, image: { mediaType, dataBase64 } }` → 与 `/parse` **同形状**响应（`{data:{tasks, warnings}}`）。`purpose='course_update_vision'`，promptVersion `v1`。
-  - `components/course-update-fab.tsx`（改）：textarea 支持 **Cmd+V 粘贴截图** + 「选择图片」按钮；客户端压缩（长边 ≤1600px / JPEG q≈0.8 / 目标 ≤1MB）；缩略图 + 移除；`submitted: true` 的条目给「标记完成」选项。
-  - `scripts/regress-vision.ts`（🆕）+ `npm run regress:vision`：媒体类型白名单 / base64 体积闸门 / 压缩阈值等**纯函数**断言。
-  - 随代码一起更新：`API-Contract.md` §5（新端点）、`TechStack.md` §2/§5.2（provider 矩阵）、`Security-Privacy.md` A12。
+  - `lib/llm/index.ts` / `run.ts`（改）：`getLLMProvider(capability)`（能力不匹配立即 `LLMConfigError` fail closed）；`runStructured` 加 `capability` 入参（默认 `text` → **现有调用方一行不改**）。
+  - `app/api/v1/tasks/parse-image/route.ts`（🆕）：`POST { courseId, image: { mediaType, dataBase64 } }` → 与 `/parse` **同形状**响应（`{data:{tasks, warnings}}`）。`purpose='course_update_vision'`，promptVersion `v1`，`capability:'vision'`。图片闸门：仅 PNG/JPEG/WebP、解码 >5MB 拒绝。fail closed → 502 `llm_vision_failed`。
+  - `components/course-update-fab.tsx`（改）：textarea 支持 **Cmd+V 粘贴截图** + 「选择图片」按钮；客户端压缩（长边 ≤1600px / JPEG q≈0.8 / 目标 ≤1MB）；缩略图 + 移除；`submitted: true` 的条目显「已提交」徽标并在确认时 `PATCH status='done'`（仅 status，用户主权；新建的 submitted 任务也后置 PATCH 为 done）。
+  - `scripts/regress-vision.ts`（🆕）+ `npm run regress:vision`：媒体类型白名单 / base64 体积闸门 **纯函数**断言（13/13 通过）。
+  - 随代码一起更新：`API-Contract.md` §5（新端点）、`TechStack.md` §5.2（provider 矩阵 + 双组环境变量）、`Security-Privacy.md` §6（O-08 两笔出境：文本→中国 DeepSeek / 截图→美国 Anthropic）、`app/(routes)/settings/page.tsx` 隐私说明（新增截图出境美国 + 避免 PII 提示）。
+- **本地自测（2026-09-13）**：`next build` 全过（类型 + 编译，新增 `parse-image` 路由已编译）；`npm run regress:vision` 13/13；文本档调用方（`parse/route.ts`、`runStructured` 默认 `capability:'text'`）零改动即零回归；fail-closed 分支（缺 key → 502 `llm_vision_failed`）已实现。**视觉链路真实调用本沙箱出不去 `api.anthropic.com`，需 Steven 本地/生产验收**。
 - **🔴 红线（本卡最容易写错的地方）**：
   - **截图路径只写 `status`**（经 `PATCH`，用户主权）。**绝不写 `submission_state` / `submitted_at`** —— 那两列是"Canvas 外部真相、**仅同步可写**"（ADR-015）。写进去 = 把用户的话伪装成 Canvas 的话，且**下次同步立刻被覆盖**，制造"改了又变回去"这类最难查的 bug。
   - **确认才落写**（ADR-016 R3）：`status='done'` 也要用户点一下 —— **识别错等于替用户谎报完成**，比不识别更伤信任。
@@ -1486,3 +1487,4 @@ P0-0 基础设施
 | 2026-09-09 | **P0-3-2 设置与隐私页 代码完成 🔵（自测 23/23，待 Steven 浏览器验收）**：新增 `lib/account/{data-summary,delete-account}.ts` + 三个端点（`GET /account/data-summary` / `DELETE /account/data?scope=canvas` / `DELETE /account`）+ `app/(routes)/settings/page.tsx` + `components/settings/danger-zone.tsx`；`lib/canvas/credentials.ts` 抽出 `revokeCredential()`（P0-2-9 与本卡共用）；`/settings` 进 `PROTECTED_PREFIXES`；dashboard 头部加「设置」入口。🔴 **三条删除纪律**：① 顺序 = Storage（按 `{user_id}` 前缀递归删，含孤儿文件）→ `auth.admin.deleteUser()`（FK 级联清库）→ 兜底删 `profiles`（结论不依赖级联）；② **Storage 失败即整趟 500**，否则等于制造无主文件且事后查不出归属；③ 两个「删 Canvas」刻意并存（撤销保留任务 / `scope=canvas` 连任务一起删）。**自测走真实 HTTP**（构造 session cookie 打本地服务）：生产库 `p032-` 临时号 23/23 全绿，验证"手动任务与 syllabus 未被 scope=canvas 波及"与"孤儿文件被删"，临时号已清理干净。**另**：隐私说明明确写出 syllabus 文本会发给 DeepSeek 且其服务器不在美国境内（A12 + 开放问题 O-08 摆在明面上） | P0-3-2、`Security-Privacy.md` A11/A12 ||
 | **2026-09-13** | **M3 重定义为「打磨收敛期」（13 张卡）+ 新增 M4「验证期」（4 张卡），Steven refine 清单定稿落盘**：原 M3 六张卡拆两段 —— M3 只打磨、不接触真实用户，出口门是 **P0-3-13 版本 freeze + 内部试用**（之后不追加，防无限收敛）；原验证四张卡整体下移重编号为 **`P0-4-1 ~ P0-4-4`**。新增卡：3-3 设计基线（移植 Stride 令牌）/ 3-4 `L1–L40` 课表漏抽修复 / 3-5 模块与上传解耦 / 3-6 列表收敛 / 3-7 总览可视化 / 3-8 对话框文本档 / 3-9 对话框截图档 / **3-10 Canvas 提交状态 + 日期时区修复（地基卡）** / 3-11 邮件通道 / 3-12 视觉扫尾 / 3-13 freeze。**移出**：#9 routine、#10① 今日任务 → Phase 2；#10② Google Calendar → Phase 1。**配套**：`Roadmap.md` 五处（看板 / 内核阶梯新增「用户操作量」+ Phase 0 进度感知改「有提交状态」/ G0-7 降级 + 新增 G0-8 人工干预率 / §9 新增 M3 exit gate / §10 两条明确不做）、`Decisions.md` 新增 ADR-013~016、`Database.md` 新增 `tasks.submission_state` / `submitted_at`、`CodingRules.md` §10.1 第 17 条 + §10.2 三行坑索引、`PRD.md` §1 定位补「执行层 vs 理解层」+ §8.1 指标口径改造 |
 | 2026-09-13 | **P0-3-9 领卡：四项决策拍板 + 新增 ADR-018 + 新卡立项（本次改动为纯文档，代码未动）**：**关闭 O-11** —— 多模态 provider 定为 **Claude**（默认 `claude-sonnet-5`，型号取自 Anthropic 官方文档而非凭印象；可用 `LLM_MODEL_VISION` 覆写为 `claude-haiku-4-5`）。**新增 ADR-018「provider 按能力路由」** —— 这是本卡真正的架构决策：`LLM_PROVIDER` 原是**单一全局开关**，而截图档需要"文本走 DeepSeek（高频量大、便宜）+ 图片走 Claude（低频、才有视觉）"**并存**；全局切 Claude 会把每次 syllabus 解析也搬走（成本上升 + 需重跑 P0-3-4 回归自证不退），绕过抽象层则违反 ADR-003。ADR-018 另记一条**统计陷阱**：`llm_runs.provider` 从此不单调，按 provider 比准确率必须带上 capability。另三项决策：**图片不落库**（压缩后 base64 直传、即用即弃 → 零孤儿文件 + 零截图 PII 留存）｜**范围 = 确认完成 + 新增/改期**（复用 3-8b 的 `match` + `PATCH`）｜**零迁移**。🔴 记入红线：截图路径**只写 `status`**，**绝不写 `submission_state`/`submitted_at`**（ADR-015：那是"Canvas 外部真相、仅同步可写"，写了会被下次同步覆盖）。**🆕 新增 `P0-3-14`「主动提醒 / 优先级」**（Steven 同意立项，落 ADR-017 点名的无卡缺口），执行顺序在 3-11 与 3-12 之间（沿用「编号 ≠ 执行顺序」惯例）；其与 3-11 的出站范围边界**尚未拍板**，已写进执行卡待细化 | P0-3-9、O-11、ADR-017、ADR-018 |
+| 2026-09-13 | **P0-3-9 代码完成（待 Steven 验收）**：实现 ADR-018 能力路由 —— `lib/llm/{types,env,index,run}.ts` 重构（content 支持文字+图片块、`getLLMProvider(capability)` 能力不匹配即 fail closed、`runStructured` 加 `capability` 默认 `text` → **文本档调用方零改动**）；🆕 `lib/llm/providers/claude.ts`（Anthropic Messages API，原生 fetch、零新依赖，顶层 `system` + 必填 `max_tokens` + base64 图片块）；🆕 `app/api/v1/tasks/parse-image/route.ts`（与 `/parse` 同形状、`capability:'vision'`、图片闸门 PNG/JPEG/WebP ≤5MB、fail closed → 502 `llm_vision_failed`）；`components/course-update-fab.tsx` 加 Cmd+V 粘贴/选图 + 客户端压缩(≤1600px/JPEG q0.8) + 缩略图 + `submitted` 徽标与确认时 `PATCH status='done'`（仅 status，用户主权）；🆕 `scripts/regress-vision.ts` + `npm run regress:vision`（13/13）。文档：`API-Contract.md` §5、`TechStack.md` §5.2、`Security-Privacy.md` §6（O-08 两笔出境：文本→中国 DeepSeek / 截图→美国 Anthropic）、设置页隐私说明补截图出境美国+避免 PII。**本地自测**：`next build` 全过、`regress:vision` 13/13、文本档零回归。**未自测**：视觉真实调用（沙箱出不去 `api.anthropic.com`，需 Steven 本地/生产验收）；未 push（纯功能、触发部署待 Steven 说）。**另**：3-14 与 3-11 的出站边界仍待 Steven 拍板 | P0-3-9、ADR-018 |

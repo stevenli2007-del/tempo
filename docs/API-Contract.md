@@ -623,6 +623,30 @@
 - **绝不产出 `exam`**：考试日期变更进 `warnings` 提示「请到课程页更新」（ADR-004）。
 - `dueDate` 未给则 `null`（禁止编造）。课程归属校验同上。LLM 失败 → 502 `llm_failed`。
 
+### `POST /api/v1/tasks/parse-image` — 课程更新截图解析（P0-3-9，**不落库**）
+
+对话框「扔进一张截图 → 结构化预览」的服务端一半。**与 `/parse` 同形状响应**，下半段（先检索 → 消歧 → 确认 → 落写）完全复用（P0-3-8b）。
+
+```jsonc
+// request —— 图片由浏览器压缩后 base64 直传，服务端即用即弃（不落 Storage）
+{ "courseId": "…", "image": { "mediaType": "image/jpeg", "dataBase64": "…" } }
+// response 200 —— ⚠️ 只产预览，不写 tasks
+{
+  "data": {
+    "tasks": [ { "title": "Homework 6", "taskType": "assignment",
+                "dueDate": "2026-09-20", "submitted": true, "notes": "Gradescope 提交成功页" } ],
+    "warnings": []
+  }
+}
+```
+
+- **多模态 provider = Claude**（[ADR-018](./Decisions.md#adr-018)）：`runStructured` 传 `capability:'vision'`，默认 `claude-sonnet-5`（可用 `LLM_MODEL_VISION` 覆写）。文本档仍走 DeepSeek，**五板块解析零回归**。
+- `submitted` 字段：识别到「已提交 / 提交成功页 / Turned in」→ `true`，未交待办 → `false`，看不出 → `null`。**仅作提示**，前端据此把任务默认勾成「标记完成」；落写时只经 `PATCH status`（用户主权），**绝不写 `submission_state` / `submitted_at`**（ADR-015）。
+- **图片闸门**：仅收 `image/png` / `image/jpeg` / `image/webp`；base64 解码后 > 5MB → 400。HEIC 等不支持格式明确拒绝（不引转码依赖）。闸门逻辑有纯函数回归 `npm run regress:vision`。
+- **截图不落库**（ADR-014「少一处数据少一处合规义务」）：一次性输入，零存储 = 零孤儿文件 + 零截图 PII 留存。
+- **🔴 fail closed**：视觉未配置（`ANTHROPIC_API_KEY` 缺失）/ 超时 / 调用失败 → 502 `llm_vision_failed`，文案明确「截图识别服务暂不可用，请改用文字」。**不允许**静默降级成「没识别出任务」（那会把"服务坏了"伪装成"你这张图没内容"）。
+- 其余约束与 `/parse` 一致：`exam` 不产出、课程归属校验、`dueDate` 缺失填 `null`。审计 `purpose='course_update_vision'`。
+
 ### `GET /api/v1/tasks/search?courseId=<uuid>&q=<标题文本>&limit=5` — 任务候选检索（P0-3-8b）
 
 对话框「**先检索现有任务**」的服务端一半：给定课程 + 一段标题，返回该课里最像的现有任务。

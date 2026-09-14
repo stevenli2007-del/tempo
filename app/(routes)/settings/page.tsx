@@ -100,9 +100,11 @@ export default async function SettingsPage() {
             </p>
             <p>
               <span className="text-foreground">会发出去什么</span>
-              ：你上传的 syllabus 文本会发送给 AI 服务商（当前为 DeepSeek）做解析 —— 这是 Phase 0
-              唯一会离开我们数据库的数据流。课程名、日期这类结构化结果不会发送。⚠️
-              该服务商的服务器不在美国境内，正式对外发布前会重新评估（开放问题 O-08）。
+              ：两处会离开我们数据库的数据流 ——
+              ① 你上传的 syllabus 文本会发送给 AI 服务商（当前为 DeepSeek，服务器不在美国境内）做解析；
+              ② 课程更新对话框里粘贴的**截图**会发送给视觉模型服务商（Anthropic，服务器在美国境内）做识别。
+              两类都只发文本/图片本身，课程名、日期这类结构化结果不会发送。截图识别是一次性输入、**不留存**；
+              ⚠️ 截图可能含姓名 / 学号等个人信息，请避免包含。正式对外发布前会重新评估这两类出境（开放问题 O-08）。
             </p>
             <p>
               <span className="text-foreground">不会做什么</span>
