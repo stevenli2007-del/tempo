@@ -39,7 +39,7 @@ const PARSE_SCHEMA: JSONSchema = {
           },
           dueDate: {
             type: ['string', 'null'],
-            description: '截止日期 YYYY-MM-DD；文本未给日期或无法确定则填 null（禁止编造）',
+            description: '截止日期。文字给了具体月日（如 9/20、12月10日、Oct 5）就按 M/D 返回（如 9/20）；完全没有任何日期信息才填 null；不要自补 4 位年份（年份由系统按当前学年推断）',
           },
           notes: {
             type: ['string', 'null'],
@@ -62,7 +62,7 @@ const SYSTEM_PROMPT = `你是 Tempo 的课程更新解析器。用户会粘贴�
 
 规则：
 1. 只产出 assignment（作业/项目/论文）、reading（阅读）、other（其他待办）三类任务；**绝不**产出 exam 类型——考试日期是课程的权威数据，必须在课程页修改。若文字明显是考试日期/时间变更，不要生成任务，而是放进 warnings 并写「考试日期变更请到课程页更新」。
-2. dueDate 用 YYYY-MM-DD；若文字没给日期或无法确定，填 null（严禁编造日期或默认填学期末）。
+2. dueDate：文字给了月日（9/20、12月10日、Oct 5 等）一律返回 M/D（如 9/20）；禁止自补 4 位年份（年份由系统按当前学年推断）；只有文字完全没有任何日期信息时才填 null（严禁编造）。
 3. title 简洁、去废话；notes 可补充提交方式/字数等，没有就填 null。
 4. 输出必须严格符合 JSON schema，不要输出任何解释性文字。`
 

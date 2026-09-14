@@ -50,16 +50,26 @@ export type ManualTaskInsertRow = {
 }
 
 /**
- * 截止日期归一化。
+ * 截止日期归一化（含「缺年份 → 推断当前学年」）。
  *
  * - `null` / `''` / 缺省 → TBD（**禁止编造日期**，Database.md 3.9 硬规定）。
  * - `YYYY-MM-DD` 纯日期 → 当日 `23:59:59Z`。尾随 `Z` 与 `exam-tasks` 的
  *   `T23:59:59` 约定一致（按 UTC 落当日），总览页按学校时区渲染时仍是同一天。
+ * - `M/D`（如 `9/20`）或 `M/D/YYYY`（如 `9/20/2026`）→ 按月日解析。
  * - 已是带时区的 ISO 串 → 原样保留。
  * - 其它一律报错，绝不静默填假值。
+ *
+ * ### 缺年份 → 当前学年推断（Berkeley 学年制）
+ * 一门课的「当前学年」通常跨 Fall（8–12 月，当年）与 Spring（1–7 月，次年）。
+ * 只给月日时：月份 ≥ 8 → 取**当年**（Fall），月份 ≤ 7 → 取**次年**（Spring）。
+ * 例：2026 年运行，`9/20` → 2026-09-20，`1/15` → 2027-01-15。
+ * 这样你随口说「9/20」默认指本学期，而不是 AI 瞎编一个年份。
+ *
+ * @param now 推断基准时间，默认当前时间；测试时可注入固定日期保证确定性。
  */
 export function normalizeDueDate(
   input: unknown,
+  now: Date = new Date(),
 ): { ok: true; value: string | null } | { ok: false; message: string } {
   if (input === null || input === undefined || input === '') {
     return { ok: true, value: null }
@@ -70,14 +80,38 @@ export function normalizeDueDate(
   const trimmed = input.trim()
   if (trimmed === '') return { ok: true, value: null }
 
+  // YYYY-MM-DD（纯日期）
   const dateOnly = /^\d{4}-\d{2}-\d{2}$/.exec(trimmed)
   if (dateOnly) {
-    // 校验真实存在（挡掉 2026-13-40 这类）
     const probe = new Date(`${trimmed}T23:59:59Z`)
     if (Number.isNaN(probe.getTime())) {
       return { ok: false, message: `dueDate 不是合法日期：${trimmed}` }
     }
     return { ok: true, value: `${trimmed}T23:59:59Z` }
+  }
+
+  // M/D 或 M/D/YYYY（月/日[/年]）
+  const md = /^(\d{1,2})\/(\d{1,2})(?:\/(\d{2,4}))?$/.exec(trimmed)
+  if (md) {
+    const month = Number(md[1])
+    const day = Number(md[2])
+    let year: number
+    if (md[3]) {
+      const rawYear = Number(md[3])
+      year = md[3].length === 2 ? 2000 + rawYear : rawYear
+    } else {
+      // 缺年份 → 当前学年推断（见上方注释）。
+      year = month >= 8 ? now.getFullYear() : now.getFullYear() + 1
+    }
+    if (month < 1 || month > 12 || day < 1 || day > 31) {
+      return { ok: false, message: `dueDate 不是合法日期：${trimmed}` }
+    }
+    const iso = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`
+    const probe = new Date(`${iso}T23:59:59Z`)
+    if (Number.isNaN(probe.getTime())) {
+      return { ok: false, message: `dueDate 不是合法日期：${trimmed}` }
+    }
+    return { ok: true, value: `${iso}T23:59:59Z` }
   }
 
   const iso = new Date(trimmed)
@@ -86,7 +120,7 @@ export function normalizeDueDate(
   }
   return {
     ok: false,
-    message: `dueDate 格式无法识别：${trimmed}（请使用 YYYY-MM-DD 或带时区的 ISO 时间）`,
+    message: `dueDate 格式无法识别：${trimmed}（请使用 YYYY-MM-DD、M/D 或带时区的 ISO 时间）`,
   }
 }
 

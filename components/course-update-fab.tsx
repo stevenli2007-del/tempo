@@ -86,6 +86,8 @@ export function CourseUpdateFab() {
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [summary, setSummary] = useState<Summary | null>(null)
+  // Canvas / 考试等只读候选默认折叠，避免淹没可编辑的手动任务（P0-3-8b follow-up）。
+  const [openReadonly, setOpenReadonly] = useState<Record<number, boolean>>({})
 
   // 打开时拉一次课程列表（已拉过就不再拉）。
   useEffect(() => {
@@ -357,67 +359,110 @@ export function CourseUpdateFab() {
 
                       {searching ? (
                         <p className="mt-2 text-xs text-muted-foreground">正在匹配现有任务…</p>
-                      ) : candidates.length === 0 ? (
-                        <p className="mt-2 text-xs text-muted-foreground">
-                          未找到匹配的现有任务，将新建一条。
-                        </p>
-                      ) : (
-                        <div className="mt-2 space-y-1">
-                          <p className="text-xs text-muted-foreground">
-                            检测到 {candidates.length} 个可能匹配的现有任务，选择要更新的那条：
-                          </p>
-                          <label className="flex cursor-pointer items-start gap-2 text-sm">
-                            <input
-                              type="radio"
-                              name={`resolution-${index}`}
-                              checked={resolution.mode === "create"}
-                              onChange={() => chooseCreate(index)}
-                              className="mt-1"
-                            />
-                            <span className="text-ink">都不是，新建一条</span>
-                          </label>
-                          {candidates.map((candidate) => {
-                            const hint = candidateHint(candidate)
-                            const editable = isEditable(candidate)
-                            const selected =
-                              resolution.mode === "update" && resolution.candidate.id === candidate.id
-                            return (
-                              <label
-                                key={candidate.id}
-                                className={`flex items-start gap-2 text-sm ${
-                                  editable ? "cursor-pointer" : "cursor-not-allowed opacity-70"
-                                }`}
-                              >
+                      ) : (() => {
+                        const editableCandidates = candidates.filter(isEditable)
+                        const readonlyCandidates = candidates.filter((c) => !isEditable(c))
+                        return (
+                        <div className="mt-2 space-y-2">
+                          {editableCandidates.length > 0 ? (
+                            <div className="space-y-1">
+                              <p className="text-xs text-muted-foreground">
+                                检测到 {editableCandidates.length} 个可能匹配的现有任务，选择要更新的那条：
+                              </p>
+                              <label className="flex cursor-pointer items-start gap-2 text-sm">
                                 <input
                                   type="radio"
                                   name={`resolution-${index}`}
-                                  disabled={!editable}
-                                  checked={selected}
-                                  onChange={() => chooseCandidate(index, candidate)}
+                                  checked={resolution.mode === "create"}
+                                  onChange={() => chooseCreate(index)}
                                   className="mt-1"
                                 />
-                                <span>
-                                  <span className="text-ink">{candidate.title}</span>
-                                  <span className="text-xs text-muted-foreground">
-                                    {" "}
-                                    · 截止 {formatDay(candidate.dueDate)} · {hint.label}
-                                  </span>
-                                  {hint.reason && (
-                                    <span className="block text-xs text-amber-600 dark:text-amber-400">
-                                      {hint.reason}
-                                    </span>
-                                  )}
-                                  {selected && (
-                                    <span className="block text-xs text-emerald-600 dark:text-emerald-400">
-                                      将改为截止 {task.dueDate ? formatDay(task.dueDate) : "（未提供新日期）"}
-                                    </span>
-                                  )}
-                                </span>
+                                <span className="text-ink">都不是，新建一条</span>
                               </label>
-                            )
-                          })}
+                              {editableCandidates.map((candidate) => {
+                                const hint = candidateHint(candidate)
+                                const selected =
+                                  resolution.mode === "update" &&
+                                  resolution.candidate.id === candidate.id
+                                return (
+                                  <label
+                                    key={candidate.id}
+                                    className="flex cursor-pointer items-start gap-2 text-sm"
+                                  >
+                                    <input
+                                      type="radio"
+                                      name={`resolution-${index}`}
+                                      checked={selected}
+                                      onChange={() => chooseCandidate(index, candidate)}
+                                      className="mt-1"
+                                    />
+                                    <span>
+                                      <span className="text-ink">{candidate.title}</span>
+                                      <span className="text-xs text-muted-foreground">
+                                        {" "}
+                                        · 截止 {formatDay(candidate.dueDate)} · {hint.label}
+                                      </span>
+                                      {selected && (
+                                        <span className="block text-xs text-emerald-600 dark:text-emerald-400">
+                                          将改为截止{" "}
+                                          {task.dueDate ? formatDay(task.dueDate) : "（未提供新日期）"}
+                                        </span>
+                                      )}
+                                    </span>
+                                  </label>
+                                )
+                              })}
+                            </div>
+                          ) : (
+                            <p className="text-xs text-muted-foreground">
+                              未找到可更新的手动任务，将新建一条。
+                            </p>
+                          )}
+
+                          {readonlyCandidates.length > 0 && (
+                            <div className="rounded-lg border border-border bg-muted/30 p-2">
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  setOpenReadonly((p) => ({ ...p, [index]: !p[index] }))
+                                }
+                                className="flex w-full items-center justify-between text-xs text-muted-foreground transition hover:text-ink"
+                              >
+                                <span>只读任务（Canvas / 考试）— {readonlyCandidates.length} 项</span>
+                                <span>{openReadonly[index] ? "▾" : "▸"}</span>
+                              </button>
+                              {openReadonly[index] && (
+                                <div className="mt-2 space-y-1">
+                                  {readonlyCandidates.map((candidate) => {
+                                    const hint = candidateHint(candidate)
+                                    return (
+                                      <div
+                                        key={candidate.id}
+                                        className="flex items-start gap-2 text-sm opacity-70"
+                                      >
+                                        <input type="radio" disabled className="mt-1" />
+                                        <span>
+                                          <span className="text-ink">{candidate.title}</span>
+                                          <span className="text-xs text-muted-foreground">
+                                            {" "}
+                                            · 截止 {formatDay(candidate.dueDate)} · {hint.label}
+                                          </span>
+                                          {hint.reason && (
+                                            <span className="block text-xs text-amber-600 dark:text-amber-400">
+                                              {hint.reason}
+                                            </span>
+                                          )}
+                                        </span>
+                                      </div>
+                                    )
+                                  })}
+                                </div>
+                              )}
+                            </div>
+                          )}
                         </div>
-                      )}
+                        )
+                      })()}
                     </div>
                   )
                 })}

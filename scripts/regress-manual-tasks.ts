@@ -77,6 +77,31 @@ console.log("normalizeDueDate")
   assertErr("无法识别的日期被拒", junk)
 }
 
+console.log("normalizeDueDate 缺年份推断当前学年")
+{
+  // 固定 now = 2026-09-13（Berkeley Fall 学期）
+  const now = new Date("2026-09-13T12:00:00Z")
+
+  const f = normalizeDueDate("9/20", now)
+  assertOk("9/20 → 当年 Fall (2026)", f)
+  if (f.ok) assert("9/20 落在 2026", f.value === "2026-09-20T23:59:59Z", f.value)
+
+  const s = normalizeDueDate("1/15", now)
+  assertOk("1/15 → 次年 Spring (2027)", s)
+  if (s.ok) assert("1/15 落在 2027", s.value === "2027-01-15T23:59:59Z", s.value)
+
+  const y = normalizeDueDate("9/20/2026", now)
+  assertOk("M/D/YYYY 显式年份优先", y)
+  if (y.ok) assert("显式年份不被学年推断覆盖", y.value === "2026-09-20T23:59:59Z", y.value)
+
+  const bad = normalizeDueDate("13/40", now)
+  assertErr("非法月日被拒", bad)
+
+  const tbd = normalizeDueDate(null, now)
+  assertOk("null 仍为 TBD", tbd)
+  if (tbd.ok) assert("null 值为 null", tbd.value === null)
+}
+
 console.log("validateManualTaskInput")
 {
   const ok = validateManualTaskInput({
