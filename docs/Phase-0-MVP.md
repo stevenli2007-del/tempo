@@ -30,7 +30,7 @@
 ## 当前进度指针
 
 **当前 task**：**`P0-3-9`（课程更新对话框·截图档）** —— 🟢 **O-11 阻塞已解除**（2026-09-13 Steven 拍板）。**四项决策已定、执行卡已重写，代码未动**，等「开工」指令。
-- ✅ **O-11 关闭：多模态 provider = Claude**（默认 `claude-sonnet-5`，可用 `LLM_MODEL_VISION` 覆写；型号取自官方文档，非凭印象）。配套 **ADR-018**：provider **按能力路由** —— 文本仍走 DeepSeek（**现有五板块解析零回归**），视觉走 Claude。
+- ✅ **O-11 关闭：多模态 provider = Qwen 通义千问**（中国区 DashScope，默认 `qwen-vl-plus-latest`，可用 `LLM_MODEL_VISION` 覆写；需切回 Claude 时设 `LLM_PROVIDER_VISION=claude`）。配套 **ADR-018**：provider **按能力路由** —— 文本仍走 DeepSeek（**现有五板块解析零回归**），视觉走 Qwen。同时解决 **O-08**：两路均中国境内、无数据出境。
 - ✅ 另三项决策：**图片不落库**（浏览器压缩后 base64 直传、即用即弃）｜**范围 = 确认完成 + 新增/改期**（完全复用 3-8b 的 `match` + `PATCH`）｜**零迁移**（不新增列）。
 - 🆕 **新增 `P0-3-14`「主动提醒 / 优先级」**（Steven 2026-09-13 同意立项）—— ADR-017 点名它是"秘书"最核心的护城河，此前**无对应卡**；与 3-11 的出站范围边界见下方执行卡。
 - 上一张 `P0-3-8` + `P0-3-8b` **已验收通过 2026-09-13**（Steven 原话"验收通过，效果非常好"；代码 `45d3bc3` + `5969f55` + follow-up `4f86ab7`）。
@@ -412,7 +412,7 @@
   - **厂商异常绝不穿透**：配置错误 / 网络失败 / 非 2xx / 非法 JSON / 不符 schema，一律收敛成 `LLMResult` 的 error 分支。
   - **`llm_runs` 只存元数据，不存 prompt 与响应原文**（`Security-Privacy.md` 第 8 节）；`error_message` 只有错误分类 + 精简说明，截断 500 字符，不含 syllabus 内容。
   - **审计失败不影响调用结果**：度量表写不进去，不该让用户这次解析白跑一遍。用会话 client（不是 service role），即便 `user_id` 传错也只是写不进去，不污染别人数据。
-  - **`providers/claude.ts` 故意不写**：一段从未调通过的死代码比明确报错更危险。要切 Claude 时先写 adapter + 自测。
+  - **厂商 adapter 不得写死代码**：`deepseek.ts` / `claude.ts` / `qwen.ts` 均已实现并自测；新增视觉 provider 时照此同构新增 adapter + 自测，不得留一段从未调通过的占位代码（那种比明确报错更危险）。
 - **🔴 踩过的坑（下一个人别再踩）**：
   1. 🔥 **`llm_runs.model` 必须记「实际服务的模型」，不能记「请求时填的模型」。** 实测请求 `deepseek-chat`，响应里回来的是 `deepseek-v4-flash`。别名会静默指向不同底座，记别名的话将来按模型维度对比解析准确率就失真了。只有拿不到 usage 时才退回配置值。
   2. **环境变量覆写做分支测试时，每个 case 前必须先恢复原值。** 本次诊断路由的循环只在中途恢复一次，导致「缺 key」「坏 timeout」两个 case 实际测到的都是上一个 case 泄漏的 `LLM_PROVIDER=openai`，报错全变成「provider 名不合法」，把真实错误掩盖了。
@@ -1311,34 +1311,35 @@ Phase 0 列表只有几十条，每行再加一个 tag 只会更密，信息增�
 
 - **做什么**：截图丢进对话框 → 识别 → **与文本档共用下半段**（先检索 → 消歧 → 确认 → 落写）。本卡**不重写** 3-8 / 3-8b 的任何逻辑，只换"输入端"。
 - **🔴 四项决策（Steven 2026-09-13 拍板，四项均按推荐方案）**：
-  1. **多模态 provider = Claude**（**O-11 关闭**）。默认 `claude-sonnet-5`，可用 `LLM_MODEL_VISION` 覆写为更省的 `claude-haiku-4-5`。
-     > ⚠️ **型号来源**：`claude-sonnet-5` / `claude-haiku-4-5` 抄自 **Anthropic 官方文档**（platform.claude.com → models overview，"所有当前模型均支持图像输入"），**不是凭印象写的**；旧 ID（如 `claude-sonnet-4-5`）官方标注仍在可用列表，但不作默认。图片建议**长边 < 1600px**（官方给出的成本-质量平衡点，与下方客户端压缩一致）。
-  2. **provider 按能力路由**（新增 **ADR-018**）：文本继续 `LLM_PROVIDER=deepseek` → **现有五板块解析零回归**；视觉走 `LLM_PROVIDER_VISION=claude`。
+  1. **多模态 provider = Qwen 通义千问（中国区 DashScope，解决 O-08 数据出境）**（**O-11 关闭**）。默认 `qwen-vl-plus-latest`，可用 `LLM_MODEL_VISION` 覆写为 `qwen-vl-max-latest`；需切回 Claude 时设 `LLM_PROVIDER_VISION=claude` + `ANTHROPIC_API_KEY`。
+     > ⚠️ **型号来源**：`qwen-vl-plus-latest` / `qwen-vl-max-latest` 抄自 **DashScope 官方文档**（阿里云通义千问 VL 模型列表），**不是凭印象写的**；所有当前 Qwen VL 模型均支持图像输入。图片建议**长边 < 1600px**（成本-质量平衡点，与下方客户端压缩一致）。
+  2. **provider 按能力路由**（新增 **ADR-018**）：文本继续 `LLM_PROVIDER=deepseek` → **现有五板块解析零回归**；视觉走 `LLM_PROVIDER_VISION=qwen`（默认，中国区），可经 `LLM_PROVIDER_VISION=claude` 切回 Claude 兜底。
   3. **图片不落库**：浏览器压缩后 base64 直传，服务端即用即弃。**零存储 = 零孤儿文件 + 零截图 PII 留存**。
      > 与 syllabus 的关键差别：syllabus 是**要长期留的资产**（能下载、有删除入口），截图是**一次性输入**（唯一用途就是这一次解析）。为一次性输入付存储 + 递归删除 + 合规的成本，不划算（ADR-014「少一处数据就少一处合规义务」）。
   4. **范围 = 确认完成 + 新增/改期**：截图里的"已提交"信号与日期信号**都接住**，因为下半段（`match` + `PATCH`）已经就绪，多接住一类信号的增量很小。
 - **改哪些文件（已全部落地 2026-09-13）**：
   - `lib/llm/types.ts`（改）：`LLMMessage.content` → `string | LLMContentPart[]`；新增 `LLMContentPart`（text / image）；`LLMProvider` 增加能力声明。
-  - `lib/llm/env.ts`（改）：`getLLMEnv(capability)`；新增 `LLM_PROVIDER_VISION` / `LLM_MODEL_VISION`；`claude` 移出「未实现」集合；补 `DEFAULT_MODEL.claude`。
+  - `lib/llm/env.ts`（改）：`getLLMEnv(capability)`；新增 `LLM_PROVIDER_VISION` / `LLM_MODEL_VISION`；`claude` 移出「未实现」集合；`qwen` 一并加入已实现集合，vision 默认 provider 改 `qwen`（keyEnv `DASHSCOPE_API_KEY`、默认模型 `qwen-vl-plus-latest`）。
   - `lib/llm/providers/claude.ts`（🆕）：Anthropic Messages API，**原生 fetch、零新依赖**（同 `deepseek.ts` 做法）。两处与 OpenAI 兼容格式的差异要写对：**`system` 是顶层参数**（不是 messages 里的 role）、**`max_tokens` 必填**。图片块 `{type:'image', source:{type:'base64', media_type, data}}`。
+  - `lib/llm/providers/qwen.ts`（🆕）：通义千问 DashScope **OpenAI 兼容端点**（`/compatible-mode/v1/chat/completions`），**原生 fetch、零新依赖**。图片块映射为 `{type:'image_url', image_url:{url:'data:...;base64,...'}}`，base64 直传即用即弃。
   - `lib/llm/index.ts` / `run.ts`（改）：`getLLMProvider(capability)`（能力不匹配立即 `LLMConfigError` fail closed）；`runStructured` 加 `capability` 入参（默认 `text` → **现有调用方一行不改**）。
   - `app/api/v1/tasks/parse-image/route.ts`（🆕）：`POST { courseId, image: { mediaType, dataBase64 } }` → 与 `/parse` **同形状**响应（`{data:{tasks, warnings}}`）。`purpose='course_update_vision'`，promptVersion `v1`，`capability:'vision'`。图片闸门：仅 PNG/JPEG/WebP、解码 >5MB 拒绝。fail closed → 502 `llm_vision_failed`。
   - `components/course-update-fab.tsx`（改）：textarea 支持 **Cmd+V 粘贴截图** + 「选择图片」按钮；客户端压缩（长边 ≤1600px / JPEG q≈0.8 / 目标 ≤1MB）；缩略图 + 移除；`submitted: true` 的条目显「已提交」徽标并在确认时 `PATCH status='done'`（仅 status，用户主权；新建的 submitted 任务也后置 PATCH 为 done）。
   - `scripts/regress-vision.ts`（🆕）+ `npm run regress:vision`：媒体类型白名单 / base64 体积闸门 **纯函数**断言（13/13 通过）。
-  - 随代码一起更新：`API-Contract.md` §5（新端点）、`TechStack.md` §5.2（provider 矩阵 + 双组环境变量）、`Security-Privacy.md` §6（O-08 两笔出境：文本→中国 DeepSeek / 截图→美国 Anthropic）、`app/(routes)/settings/page.tsx` 隐私说明（新增截图出境美国 + 避免 PII 提示）。
+  - 随代码一起更新：`API-Contract.md` §5（新端点）、`TechStack.md` §5.2（provider 矩阵 + 双组环境变量）、`Security-Privacy.md` §6（O-08 已解决：文本→中国 DeepSeek / 截图→中国 Qwen，均不出境）、`app/(routes)/settings/page.tsx` 隐私说明（截图出境改为中国 Qwen + 避免 PII 提示）。
 - **本地自测（2026-09-13）**：`next build` 全过（类型 + 编译，新增 `parse-image` 路由已编译）；`npm run regress:vision` 13/13；文本档调用方（`parse/route.ts`、`runStructured` 默认 `capability:'text'`）零改动即零回归；fail-closed 分支（缺 key → 502 `llm_vision_failed`）已实现。**视觉链路真实调用本沙箱出不去 `api.anthropic.com`，需 Steven 本地/生产验收**。
 - **🔴 红线（本卡最容易写错的地方）**：
   - **截图路径只写 `status`**（经 `PATCH`，用户主权）。**绝不写 `submission_state` / `submitted_at`** —— 那两列是"Canvas 外部真相、**仅同步可写**"（ADR-015）。写进去 = 把用户的话伪装成 Canvas 的话，且**下次同步立刻被覆盖**，制造"改了又变回去"这类最难查的 bug。
   - **确认才落写**（ADR-016 R3）：`status='done'` 也要用户点一下 —— **识别错等于替用户谎报完成**，比不识别更伤信任。
-  - **零迁移**：不新增列（`llm_runs.provider` 已有列，只是多出现 `claude` 这个值）。
+  - **零迁移**：不新增列（`llm_runs.provider` 已有列，只是多出现 `claude` / `qwen` 这些值）。
   - **fail closed**：视觉未配置 / 超时 → 明确提示"截图识别暂不可用，可改用文字"，**不允许静默降级成"没识别出任务"**（那会把"服务坏了"显示成"你这张图没内容"，与 §10.1 第 17 条同源）。
 - **【交接点 · 需 Steven 手动】（3 项）**：
-  1. `ANTHROPIC_API_KEY` 填 `.env.local`；**Vercel 加同名变量后必须手动 Redeploy**（env 保存 ≠ 已注入，见 §10.2）。
-  2. 🔴 **本沙箱大概率出不去 `api.anthropic.com`** → 视觉链路的**真实调用只能在你本地或生产验证**。我这边能保证的是：类型 / 构建 / 契约 / 纯函数回归 / fail-closed 分支。
+  1. `DASHSCOPE_API_KEY` 填 `.env.local`；**Vercel 加同名变量后必须手动 Redeploy**（env 保存 ≠ 已注入，见 §10.2）。需切回 Claude 时另加 `ANTHROPIC_API_KEY` + `LLM_PROVIDER_VISION=claude`。
+  2. 🔴 **本沙箱大概率出不去 `dashscope.aliyuncs.com`** → 视觉链路的**真实调用只能在你本地或生产验证**。我这边能保证的是：类型 / 构建 / 契约 / 纯函数回归 / fail-closed 分支。
   3. **验收用例需要一张真实截图**：Chem 1A Homework 6 的 Gradescope 提交成功页（请提供，我用它当 fixture 真跑一次）。
-- **隐私（随代码一起改）**：设置页隐私说明加「**截图会发送给 AI 服务商（Anthropic，服务器在美国境内）**，请避免包含姓名 / 学号等个人信息」；`Security-Privacy.md` A12 同步；**O-08 补记**：文本档出境**中国**（DeepSeek）+ 截图档出境**美国**（Anthropic），**两笔都要写清**。
-- **验收用例（4 条，可点）**：① 对话框粘贴 Gradescope 提交成功页截图 → 解析出「Homework 6 · 已提交」→ 候选匹配到现有任务 → 确认 → 该任务变「已完成」；② 截图里带新日期的作业 → 新增或改期；③ **不配** `ANTHROPIC_API_KEY` 时点截图 → 看到"识别服务不可用"的明确提示（**不是**"没识别出任务"）；④ **文本档行为一点没变**（回归）。
-- **成本与计数**：`llm_runs` 照常记（provider=`claude`、prompt_version、图像 token 计入 `input_tokens`）。⚠️ 按 provider 比准确率时必须**带上 capability**，否则"Claude 更差"可能只是因为它只处理了更难的输入（ADR-018 后果）。
+- **隐私（随代码一起改）**：设置页隐私说明改为「**截图会发送给视觉模型服务商（通义千问 Qwen，阿里云中国区 DashScope，无数据出境）**，请避免包含姓名 / 学号等个人信息」；`Security-Privacy.md` 第 6 节同步；**O-08 已解决**：文本档与截图档均在**中国境内**处理，无数据出境。
+- **验收用例（4 条，可点）**：① 对话框粘贴 Gradescope 提交成功页截图 → 解析出「Homework 6 · 已提交」→ 候选匹配到现有任务 → 确认 → 该任务变「已完成」；② 截图里带新日期的作业 → 新增或改期；③ **不配** `DASHSCOPE_API_KEY` 时点截图 → 看到"识别服务不可用"的明确提示（**不是**"没识别出任务"）；④ **文本档行为一点没变**（回归）。
+- **成本与计数**：`llm_runs` 照常记（provider=`qwen`、prompt_version、图像 token 计入 `input_tokens`）。⚠️ 按 provider 比准确率时必须**带上 capability**，否则"Qwen 更差"可能只是因为它只处理了更难的输入（ADR-018 后果）。
 
 #### 🎫 P0-3-10 · Canvas 提交状态同步 + 日期时区修复 ✅ **已完成（2026-09-13 用户验收）**
 

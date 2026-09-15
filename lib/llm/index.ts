@@ -17,6 +17,7 @@
 import { LLMConfigError, getLLMEnv } from './env'
 import { createClaudeProvider } from './providers/claude'
 import { createDeepSeekProvider } from './providers/deepseek'
+import { createQwenProvider } from './providers/qwen'
 
 import type { LLMCapability, LLMProvider } from './types'
 
@@ -41,7 +42,7 @@ export type {
 /**
  * 按**能力**构造 provider（[ADR-018](../../docs/Decisions.md#adr-018)）。
  *
- * 文本档默认 DeepSeek、截图档默认 Claude，二者并存互不干扰。
+ * 文本档默认 DeepSeek、截图档默认 Qwen（通义千问，中国区），二者并存互不干扰。
  * 若选中的 provider 不支持请求的能力（例如有人把 `LLM_PROVIDER_VISION` 设成 `deepseek`），
  * **立刻抛 `LLMConfigError`** —— 不许一个无视觉的 provider 静默接到图片请求、然后返回一个
  * 看起来像「没识别出任务」的空结果（那会把「服务坏了」伪装成「你这张图没内容」）。
@@ -64,6 +65,13 @@ export function getLLMProvider(capability: LLMCapability): LLMProvider {
       break
     case 'claude':
       provider = createClaudeProvider({
+        apiKey: env.apiKey,
+        model: env.model,
+        timeoutMs: env.timeoutMs,
+      })
+      break
+    case 'qwen':
+      provider = createQwenProvider({
         apiKey: env.apiKey,
         model: env.model,
         timeoutMs: env.timeoutMs,

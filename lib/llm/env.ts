@@ -28,11 +28,12 @@ export class LLMConfigError extends Error {
 /**
  * 能力 → provider 配置映射（[ADR-018](../../docs/Decisions.md#adr-018)）。
  *
- * - `text`：默认 `deepseek`（高频 + 量大，走便宜那家）
- * - `vision`：默认 `claude`（多模态；DeepSeek 无视觉）
+ * - `text`：默认 `deepseek`（高频 + 量大，走便宜那家，中国区 DeepSeek）
+ * - `vision`：默认 `qwen`（通义千问，中国区 DashScope；多模态；解决 O-08 数据出境）
  *
  * 每条含：provider 名、API key 变量、模型覆盖变量、默认模型。
- * Claude 的默认模型 `claude-sonnet-5` 取自 Anthropic 官方文档（非凭印象）。
+ * Qwen 的默认模型 `qwen-vl-plus-latest` 取自 DashScope 官方文档（非凭印象）。
+ * 需要切回 Claude 视觉时设 `LLM_PROVIDER_VISION=claude` + `ANTHROPIC_API_KEY` 即可。
  */
 const CAPABILITY_CONFIG: Record<
   LLMCapability,
@@ -47,20 +48,19 @@ const CAPABILITY_CONFIG: Record<
   },
   vision: {
     providerEnv: 'LLM_PROVIDER_VISION',
-    defaultProvider: 'claude',
-    keyEnv: 'ANTHROPIC_API_KEY',
+    defaultProvider: 'qwen',
+    keyEnv: 'DASHSCOPE_API_KEY',
     modelEnv: 'LLM_MODEL_VISION',
-    defaultModel: 'claude-sonnet-5',
+    defaultModel: 'qwen-vl-plus-latest',
   },
 }
 
 const DEFAULT_TIMEOUT_MS = 120_000
 
 /**
- * 已实现的 provider。Claude adapter 已在 P0-3-9（关闭 O-11）补上，
- * 因此这里同时放 `deepseek` 与 `claude`。
+ * 已实现的 provider。`deepseek`（文本）、`claude`（视觉兜底）、`qwen`（视觉默认，关闭 O-11 / 解决 O-08）。
  */
-const IMPLEMENTED_PROVIDERS: LLMProviderName[] = ['deepseek', 'claude']
+const IMPLEMENTED_PROVIDERS: LLMProviderName[] = ['deepseek', 'claude', 'qwen']
 
 function parseTimeoutMs(raw: string | undefined): number {
   if (!raw) return DEFAULT_TIMEOUT_MS
@@ -86,9 +86,9 @@ export function getLLMEnv(capability: LLMCapability): LLMEnv {
   const cfg = CAPABILITY_CONFIG[capability]
   const rawProvider = (process.env[cfg.providerEnv] ?? cfg.defaultProvider).trim().toLowerCase()
 
-  if (rawProvider !== 'deepseek' && rawProvider !== 'claude') {
+  if (rawProvider !== 'deepseek' && rawProvider !== 'claude' && rawProvider !== 'qwen') {
     throw new LLMConfigError(
-      `环境变量 ${cfg.providerEnv} 只支持 deepseek / claude，当前是 "${rawProvider}"。`
+      `环境变量 ${cfg.providerEnv} 只支持 deepseek / claude / qwen，当前是 "${rawProvider}"。`
     )
   }
   const provider: LLMProviderName = rawProvider

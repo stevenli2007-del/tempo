@@ -94,7 +94,7 @@ Next.js App（前端页面 + Route Handlers 后端逻辑）
 
 ## 5. AI / LLM 能力：可插拔抽象层
 
-> 依据 [ADR-003](./Decisions.md#adr-003)：默认 **DeepSeek**，效果不达标可切 **Claude**，切换不改业务代码。
+> 依据 [ADR-003](./Decisions.md#adr-003)：默认 **DeepSeek**（文本）/ **Qwen 通义千问**（视觉，中国区），切换不改业务代码。
 
 ### 5.1 为什么要有抽象层
 
@@ -111,12 +111,13 @@ lib/llm/
   run.ts            → runStructured()：调模型 + 每次调用写 llm_runs 审计
   providers/
     deepseek.ts     → text 能力 provider（原生 fetch，不引厂商 SDK）
-    claude.ts       → vision 能力 provider（P0-3-9 补上，原生 fetch，不引厂商 SDK）
+    claude.ts       → vision 能力 provider（兜底，原生 fetch，不引厂商 SDK）
+    qwen.ts         → vision 能力 provider（默认，通义千问 DashScope，原生 fetch，不引厂商 SDK）
 ```
 
-> **P0-1-3 已交付 `index/types/env/schema/run` + `providers/deepseek.ts`**；**P0-3-9（关闭 O-11）补上 `providers/claude.ts`**。
+> **P0-1-3 已交付 `index/types/env/schema/run` + `providers/deepseek.ts`**；**P0-3-9（关闭 O-11 / 解决 O-08）补上 `providers/claude.ts` 与 `providers/qwen.ts`**。
 > 切换 provider 由「全局单一开关」升级为「**按能力路由**」（[ADR-018](./Decisions.md#adr-018)）：文本档继续 DeepSeek、
-> 截图档走 Claude，二者并存互不干扰。`getLLMProvider(capability)` 在「选中的 provider 不支持该能力」时立刻抛
+> 截图档默认走 **Qwen 通义千问（中国区 DashScope）**（经 `LLM_PROVIDER_VISION=claude` 可切回 Claude 兜底），二者并存互不干扰。`getLLMProvider(capability)` 在「选中的 provider 不支持该能力」时立刻抛
 > `LLMConfigError`（fail closed），不允许无视觉的 provider 静默接到图片请求。
 
 **统一接口（已实现）**
@@ -154,12 +155,13 @@ type LLMResult<T> =
 
 | 变量 | 默认 | 能力 | 说明 |
 |---|---|---|---|
-| `LLM_PROVIDER` | `deepseek` | text | 文本档 provider，只接受 `deepseek` / `claude` |
+| `LLM_PROVIDER` | `deepseek` | text | 文本档 provider，只接受 `deepseek` / `claude` / `qwen` |
 | `LLM_MODEL` | `deepseek-chat` | text | 换文本模型不改代码 |
 | `DEEPSEEK_API_KEY` | — | text | `LLM_PROVIDER=deepseek` 时**必填** |
-| `LLM_PROVIDER_VISION` | `claude` | vision | 截图档 provider（[ADR-018](./Decisions.md#adr-018)），只接受 `deepseek` / `claude` |
-| `LLM_MODEL_VISION` | `claude-sonnet-5` | vision | 换视觉模型不改代码（可覆写为更省的 `claude-haiku-4-5`） |
-| `ANTHROPIC_API_KEY` | — | vision | `LLM_PROVIDER_VISION=claude` 时**必填**（P0-3-9 启用截图档需配置） |
+| `LLM_PROVIDER_VISION` | `qwen` | vision | 截图档 provider（[ADR-018](./Decisions.md#adr-018)，默认 **Qwen 中国区**），只接受 `deepseek` / `claude` / `qwen` |
+| `LLM_MODEL_VISION` | `qwen-vl-plus-latest` | vision | 换视觉模型不改代码（可覆写为 `qwen-vl-max-latest`；需切回 Claude 时设 `claude-sonnet-5`） |
+| `DASHSCOPE_API_KEY` | — | vision | `LLM_PROVIDER_VISION=qwen` 时**必填**（默认视觉 provider，启用截图档需配置） |
+| `ANTHROPIC_API_KEY` | — | vision | 仅当 `LLM_PROVIDER_VISION=claude` 时**必填**（可选兜底） |
 | `LLM_TIMEOUT_MS` | `120000` | 共用 | 必须是正整数毫秒 |
 
 > ⚠️ **Vercel 上新增/修改环境变量后必须手动 Redeploy**，已完成的 build 不会带新变量（P0-0-6 踩过）。
@@ -172,19 +174,19 @@ type LLMResult<T> =
 **硬性要求**
 
 1. **业务代码只依赖 `LLMProvider` 接口**，不得直接 import 任何厂商 SDK
-2. 切换 provider **只改环境变量配置**（`LLM_PROVIDER=deepseek | claude`），不改业务代码
+2. 切换 provider **只改环境变量配置**（`LLM_PROVIDER=deepseek | claude | qwen`），不改业务代码
 3. 返回类型统一为 `Result<T>`（成功/失败），**不允许让厂商异常穿透到业务层**
 4. 必须记录**每次调用的 provider、模型、token 消耗、耗时**（用于评估是否要换模型）
-5. 结构化输出走 **JSON schema 约束**（DeepSeek 用 JSON Output 模式，Claude 用 tool use / structured output），**禁止"让模型自由描述再写正则解析"**
+5. 结构化输出走 **JSON schema 约束**（DeepSeek / Qwen 用 JSON Output 模式，Claude 用 tool use / structured output），**禁止"让模型自由描述再写正则解析"**
 
 ### 5.3 Provider 选型对照
 
-| 维度 | DeepSeek（默认） | Claude（兜底） |
-|---|---|---|
-| 结构化输出 | JSON Output 模式 | tool use / structured output |
-| 多模态视觉 | ❌ 官方 API 无视觉输入 | ✅ 支持图像输入 |
-| 成本 | 显著更低 | 更高 |
-| 何时切换 | 默认 | 解析效果不达标 / 需要扫描件解析时 |
+| 维度 | DeepSeek（文本默认） | Qwen 通义千问（视觉默认，中国） | Claude（视觉兜底） |
+|---|---|---|---|
+| 结构化输出 | JSON Output 模式 | JSON Output 模式（OpenAI 兼容） | tool use / structured output |
+| 多模态视觉 | ❌ 官方 API 无视觉输入 | ✅ 支持图像输入 | ✅ 支持图像输入 |
+| 成本 | 显著更低 | 低（中国区） | 更高 |
+| 何时切换 | 默认 | 默认视觉档（O-08 全境内部署） | 视觉效果不达标时经 `LLM_PROVIDER_VISION=claude` 切回 |
 
 ### 5.4 扫描件与复杂排版的降级策略
 
@@ -193,7 +195,7 @@ type LLMResult<T> =
 1. 先走常规文本抽取（见第 6 节）
 2. 抽取失败或文本量明显过少（判定为扫描件）→ **明确提示用户"这份文件我们读不出来，请手动补充关键信息"**
 3. **禁止编造**、禁止静默返回空结果
-4. 若扫描件比例超预期，再评估切到 Claude 走多模态（待决事项 O-03）
+4. 若扫描件比例超预期，再评估视觉档切到 Qwen VL 更高型号或 Claude（待决事项 O-03）
 
 ### 5.5 五板块抽取层（`lib/parse`，P0-1-4）
 

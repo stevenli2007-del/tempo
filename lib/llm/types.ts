@@ -15,10 +15,11 @@
 /**
  * 已支持的 provider 标识。
  *
- * ⚠️ 目前**只有 `deepseek` 真正实现了 adapter**；`claude` 是 ADR-003 的兜底方案，
- * 先占好位置，切换时不需要改类型。
+ * - `deepseek`：文本抽取默认 provider（[ADR-003](../../docs/Decisions.md#adr-003)）
+ * - `claude`：ADR-003 的兜底视觉 provider，经 `LLM_PROVIDER_VISION=claude` 启用
+ * - `qwen`：视觉档默认 provider（通义千问，中国区 DashScope，关闭 O-11 / 解决 O-08）
  */
-export type LLMProviderName = 'deepseek' | 'claude'
+export type LLMProviderName = 'deepseek' | 'claude' | 'qwen'
 
 // ---------------------------------------------------------------
 // JSON Schema（受支持的子集）
@@ -81,7 +82,7 @@ export type LLMMessage = {
  * Provider 能力（[ADR-018](../../docs/Decisions.md#adr-018)）。
  *
  * - `text`：纯文本结构化抽取（五板块 syllabus 解析走这里，默认 DeepSeek）
- * - `vision`：多模态（截图档走这里，默认 Claude）
+ * - `vision`：多模态（截图档走这里，默认 **Qwen 通义千问**，中国区；可经 `LLM_PROVIDER_VISION=claude` 切回 Claude）
  *
  * `getLLMProvider(capability)` 会在「选中的 provider 不支持该能力」时立刻抛
  * `LLMConfigError`（fail closed），绝不允许无视觉的 provider 静默接到图片请求。
@@ -146,7 +147,7 @@ export type LLMResult<T> =
  * 所有 LLM provider 的统一接口。
  *
  * ⚠️ 业务代码**只能**依赖这个接口，不得 import 任何厂商 SDK。
- * 目前只有 DeepSeek 实现；Claude adapter 尚未实现，`getLLMProvider()` 会给出明确报错。
+ * 已实现 adapter：`deepseek`（文本）、`claude`（视觉，兜底）、`qwen`（视觉，默认）。
  */
 export interface LLMProvider {
   /** 写进 `llm_runs.provider` 的名字，如 `deepseek`。 */

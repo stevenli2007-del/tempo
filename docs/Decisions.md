@@ -713,11 +713,11 @@ Tempo 当纯日历用（说明定位错位，需重新审视）。
 
 ---
 
-### ADR-018：LLM provider 按**能力**路由（文本 DeepSeek / 视觉 Claude）
+### ADR-018：LLM provider 按**能力**路由（文本 DeepSeek / 视觉 Qwen 通义千问，中国）
 
 - **状态**：已接受
 - **日期**：2026-09-13（P0-3-9 领卡时，关闭待决项 **O-11**）
-- **影响**：`lib/llm/*`（`types.ts` / `env.ts` / `index.ts` / `run.ts` / 新增 `providers/claude.ts`）、`TechStack.md` §2 / §5.2、`API-Contract.md` §5、`Phase-0-MVP.md` P0-3-9
+- **影响**：`lib/llm/*`（`types.ts` / `env.ts` / `index.ts` / `run.ts` / 新增 `providers/claude.ts` 与 `providers/qwen.ts`）、`TechStack.md` §2 / §5.2、`API-Contract.md` §5、`Phase-0-MVP.md` P0-3-9
 - **关系**：本条是 [ADR-003](./Decisions.md#adr-003)（可插拔 provider 抽象层）的**能力维度扩展**，不推翻它
 
 **背景**
@@ -733,11 +733,11 @@ P0-3-9（对话框·截图档）需要**视觉**，而 DeepSeek 无视觉（ADR-
 
 1. provider 选择**按能力**而非全局：`capability ∈ { text, vision }`。
    - `text` → 环境变量 `LLM_PROVIDER`（默认 `deepseek`），模型 `LLM_MODEL`（默认 `deepseek-chat`）
-   - `vision` → 环境变量 `LLM_PROVIDER_VISION`（默认 `claude`），模型 `LLM_MODEL_VISION`（默认 `claude-sonnet-5`）
+   - `vision` → 环境变量 `LLM_PROVIDER_VISION`（默认 `qwen`），模型 `LLM_MODEL_VISION`（默认 `qwen-vl-plus-latest`，中国区 DashScope）；需切回 Claude 时设 `LLM_PROVIDER_VISION=claude` + `ANTHROPIC_API_KEY`
 2. `LLMMessage.content` 从 `string` 扩为 `string | LLMContentPart[]`：`{ type:'text', text }` / `{ type:'image', mediaType, dataBase64 }`。**每个 adapter 自己映射到厂商格式**，业务代码只构造这两种块。
 3. `LLMProvider` 增加**能力声明**；`getLLMProvider(capability)` 在「选中的 provider 不支持该能力」时**立刻抛 `LLMConfigError`**（fail closed）—— 不允许一个无视觉的 provider 静默接到图片请求、然后返回一个看起来很像"没识别出任务"的空结果。
-4. 新增 `claude` adapter，用**原生 fetch**（与 `deepseek.ts` 同构，**零新依赖**，不引官方 SDK）。
-5. **只加环境变量，不加表结构**。`llm_runs.provider` 从此会出现 `claude` 行 —— 这正是 ADR-003 复审条件所需的数据。
+4. 新增 `claude` / `qwen` adapter，均用**原生 fetch**（与 `deepseek.ts` 同构，**零新依赖**，不引官方 SDK）。`qwen` 走 DashScope 的 OpenAI 兼容端点，图片块映射为 `image_url` 的 `data:` URL。
+5. **只加环境变量，不加表结构**。`llm_runs.provider` 从此会出现 `claude` / `qwen` 行 —— 这正是 ADR-003 复审条件所需的数据。
 
 **理由**
 
@@ -748,7 +748,7 @@ P0-3-9（对话框·截图档）需要**视觉**，而 DeepSeek 无视觉（ADR-
 - 配置项从 1 个变 2 个，**环境变量错配的失败模式多了一种** → 必须 fail closed，且报错文案要**指名缺哪个变量**（沿用 `lib/llm/env.ts` 既有风格）。
 - ⚠️ **统计陷阱（重要）**：`llm_runs` 的 `provider` 维度从此**不再单调**。按 provider 比准确率时必须**同时带上 capability** —— 否则"Claude 准确率更低"这个结论可能只是因为它只处理了更难的那部分输入（截图）。ADR-003 的复审条件（按 provider / 模型 / prompt 版本对比准确率）从此要按 `(capability, provider, model)` 三元组切分。
 - 新增 provider = 写一个 adapter + 声明能力；**不新增能力时零成本**（老调用方一行不改）。
-- 隐私面扩大：截图走 Anthropic（服务器在美国境内），与 DeepSeek（中国境内）**并存** → `Security-Privacy.md` A12 与待决项 **O-08** 必须同时记这两笔出境（见 P0-3-9 执行卡）。
+- 隐私面：截图走通义千问 Qwen（阿里云中国区 DashScope），与 DeepSeek（中国境内）**同在中国**，无数据出境 → 待决项 **O-08** 已解决（见 P0-3-9 执行卡与 `Security-Privacy.md` 第 6 节）。
 
 **复审条件**
 
@@ -769,14 +769,14 @@ P0-3-9（对话框·截图档）需要**视觉**，而 DeepSeek 无视觉（ADR-
 | **O-05** | 是否启用外部调度器（cron-job.org）突破每日 2 次轮询 | ⏳ 待 Steven 定 | `Sync-Strategy.md` 第 15 节 |
 | ~~O-06~~ | **bCourses 是否对学生开放 token 生成入口** | ✅ **已解决**（2026-09-01） | **可用**（Steven 实测）。M2 走 PAT，iCal 降级为长期 Plan B；细节待 P0-2-1b 补充 |
 | **O-07** | bCourses 是否启用 API 限流响应头 | ⏳ 开发中实测 | `Sync-Strategy.md` 第 15 节 |
-| **O-08** | **LLM 数据出境策略**（DeepSeek 服务在中国境内） | ⏳ **待 Steven 拍板** | `Security-Privacy.md` 第 6 节（暂按选项 A 执行） |
+| **O-08** | **LLM 数据出境策略**（DeepSeek 服务在中国境内） | ✅ **已解决**（2026-09-13，Steven 拍板「A + Qwen」） | 全中国境内部署：文本 DeepSeek（中国）+ 视觉 Qwen 通义千问（阿里云中国区 DashScope），无数据出境。`Security-Privacy.md` 第 6 节 |
 | **O-09** | 是否接入第三方埋点 | ⏳ 待 Steven 定 | `Security-Privacy.md` 第 12 节 |
 | **O-10** | 隐私政策页面正式文案 | ⏳ Phase 0 开发中 | `Security-Privacy.md` 第 12 节 |
-| ~~O-11~~ | ~~截图档的多模态 provider 选型~~ | ✅ **已解决**（2026-09-13，Steven 拍板） | **Claude**（默认 `claude-sonnet-5`，可用 `LLM_MODEL_VISION` 覆写）。配套架构决策见 **ADR-018**（provider 按能力路由）。`Phase-0-MVP.md` P0-3-9 |
+| ~~O-11~~ | ~~截图档的多模态 provider 选型~~ | ✅ **已解决**（2026-09-13，Steven 拍板） | 视觉默认 **Qwen 通义千问**（中国区 DashScope，默认 `qwen-vl-plus-latest`，可用 `LLM_MODEL_VISION` 覆写；需切回 Claude 时设 `LLM_PROVIDER_VISION=claude`）。配套架构决策见 **ADR-018**（provider 按能力路由）。`Phase-0-MVP.md` P0-3-9 |
 | **O-12** | 入站邮件走"转发到专属地址"还是 Gmail API | ⏳ 已定路径：先转发（M3 P0-3-11），Gmail 留 Phase 1 | `Decisions.md` **ADR-014** |
 
 > ✅ **原阻塞项 O-06 已于 2026-09-01 解除**（PAT 入口可用），开发路径不再有任何前置阻塞，可从 `Phase-0-MVP.md` 的 P0-0-1 开始。
-> 🔴 **O-08 涉及数据合规**，Phase 0 暂按现状执行，但**对外公开发布前必须重新评估**。
+> ✅ **O-08 已于 2026-09-13 解决**：全中国境内部署（文本 DeepSeek + 视觉 Qwen 通义千问，均不出境），对外发布无需再重新评估数据出境。
 
 ---
 

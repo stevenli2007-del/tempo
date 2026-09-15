@@ -640,11 +640,11 @@
 }
 ```
 
-- **多模态 provider = Claude**（[ADR-018](./Decisions.md#adr-018)）：`runStructured` 传 `capability:'vision'`，默认 `claude-sonnet-5`（可用 `LLM_MODEL_VISION` 覆写）。文本档仍走 DeepSeek，**五板块解析零回归**。
+- **多模态 provider = Qwen 通义千问（中国区 DashScope）**（[ADR-018](./Decisions.md#adr-018)）：`runStructured` 传 `capability:'vision'`，默认 `qwen-vl-plus-latest`（可用 `LLM_MODEL_VISION` 覆写；需切回 Claude 时设 `LLM_PROVIDER_VISION=claude`）。文本档仍走 DeepSeek，**五板块解析零回归**。
 - `submitted` 字段：识别到「已提交 / 提交成功页 / Turned in」→ `true`，未交待办 → `false`，看不出 → `null`。**仅作提示**，前端据此把任务默认勾成「标记完成」；落写时只经 `PATCH status`（用户主权），**绝不写 `submission_state` / `submitted_at`**（ADR-015）。
 - **图片闸门**：仅收 `image/png` / `image/jpeg` / `image/webp`；base64 解码后 > 5MB → 400。HEIC 等不支持格式明确拒绝（不引转码依赖）。闸门逻辑有纯函数回归 `npm run regress:vision`。
 - **截图不落库**（ADR-014「少一处数据少一处合规义务」）：一次性输入，零存储 = 零孤儿文件 + 零截图 PII 留存。
-- **🔴 fail closed**：视觉未配置（`ANTHROPIC_API_KEY` 缺失）/ 超时 / 调用失败 → 502 `llm_vision_failed`，文案明确「截图识别服务暂不可用，请改用文字」。**不允许**静默降级成「没识别出任务」（那会把"服务坏了"伪装成"你这张图没内容"）。
+- **🔴 fail closed**：视觉未配置（`DASHSCOPE_API_KEY` 缺失）/ 超时 / 调用失败 → 502 `llm_vision_failed`，文案明确「截图识别服务暂不可用，请改用文字」。**不允许**静默降级成「没识别出任务」（那会把"服务坏了"伪装成"你这张图没内容"）。
 - 其余约束与 `/parse` 一致：`exam` 不产出、课程归属校验、`dueDate` 缺失填 `null`。审计 `purpose='course_update_vision'`。
 
 ### `GET /api/v1/tasks/search?courseId=<uuid>&q=<标题文本>&limit=5` — 任务候选检索（P0-3-8b）
