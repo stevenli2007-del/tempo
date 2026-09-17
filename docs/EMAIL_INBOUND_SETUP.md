@@ -51,20 +51,33 @@ dig @1.1.1.1 NS tempocourse.com +short
 
 ---
 
-## 2. 【手动】开启 Email Routing（onboard domain）
+## 2. 🔄【进行中 2026-09-17 11:28】开启 Email Routing（onboard domain）
 
-- [ ] **官方直达链接（推荐，免翻面板）** —— 由 Cloudflare 官方文档给出，`?to=/:account/...` 会自动落到你当前 account 的对应功能页：
+> **实测状态（Steven 截图）**：已进入 `Compute → Email Service → Email Routing · tempocourse.com`，**Onboard Domain 已完成**。
+> 面板 Configuration summary 读数：`Domains: 1`、`DNS records: Locked`、**`Routing status: Syncing`**、`Routing rules: 0`、`Destination addresses: 0`。
+> ✅ **DNS 侧已实测就位（2026-09-17 11:30）** —— `Routing status` 虽显示 `Syncing`，但收信所需记录已全球可见（权威 NS 直查一致，非缓存）：
+>
+> ```
+> MX   → route1 / route2 / route3.mx.cloudflare.net  ✅
+> SPF  → v=spf1 include:_spf.mx.cloudflare.net ~all  ✅
+> DKIM → cf2024-1._domainkey（RSA 公钥已发布）        ✅
+> ```
+>
+> 即 **`tempocourse.com` 已可收信**，`Syncing` 只是面板状态滞后。可直接往下做第 3、4 步。
+> 新面板六个标签页：**Overview / Activity log / Routing rules / Destination addresses / Destination Workers / Settings**。其中 **`Destination Workers` 是本轮新出现的入口**（旧文档没有，见第 6 步）。
+
+- [x] **官方直达链接（推荐，免翻面板）** —— 由 Cloudflare 官方文档给出，`?to=/:account/...` 会自动落到你当前 account 的对应功能页：
 
 ```
 https://dash.cloudflare.com/?to=/:account/email-service/routing
 ```
 
-- [ ] 手动路径（2026-06 后新面板）：**Compute → Email Service → Email Routing**。
+- [x] 手动路径（2026-06 后新面板）：**Compute → Email Service → Email Routing**（✅ 已确认进入）。
   - ⚠️ 旧的 **Email → Email Routing** **已废弃** —— zone 侧边栏的 `Email` 分组下**只有** DMARC Management / Email Security，**不含** Email Routing（2026-09-17 实测）。
   - 找不到时用面板顶部 **⌘K 搜索**框敲 `Email Routing`。
   - ⚠️ 不要手动拼 account 级 URL（如 `dash.cloudflare.com/<account_id>/email/routing`）会 404 —— 用上面的 `?to=` 形式。
-- [ ] 点 **Onboard Domain** → 选 `tempocourse.com`。
-- [ ] 复核 Cloudflare 自动要加的 DNS 记录 → **Done**：
+- [x] 点 **Onboard Domain** → 选 `tempocourse.com`（✅ 已完成，面板 `Domains: 1`）。
+- [x] 复核 Cloudflare 自动要加的 DNS 记录 → **Done**（✅ `DNS records: Locked` = 记录已由 Cloudflare 托管）：
   - `MX` → `route1.mx.cloudflare.net` 等（收信入口）
   - `TXT`（SPF）→ 授权 Email Routing 发信
   - `TXT`（DKIM）→ 转发邮件的发信认证
@@ -73,19 +86,22 @@ https://dash.cloudflare.com/?to=/:account/email-service/routing
 
 ---
 
-## 3. 【手动】加一个「目标地址」并验证（硬性门槛）
+## 3. 【手动】下一步：加一个「目标地址」并验证（硬性门槛）
 
-- [ ] **Destination Addresses** → 填你能收信的邮箱（如 `stevenli2007@berkeley.edu`）→ 提交。
-- [ ] 去该邮箱收 Cloudflare 验证信 → 点 **Verify email address**。
+> 面板右侧 **Next Steps** 第 1 条就是这个：*"Add a destination address — Choose where forwarded email should be..."*。
 
-> 🔴 **官方明确要求**：在建任何路由规则之前，**必须**至少有一个已验证的目标地址；未验证前，指向它的规则**保持 disabled**。
+- [ ] 切到 **Destination addresses** 标签 → 在输入框里填你能收信的邮箱（如 `stevenli2007@berkeley.edu`）→ 提交。
+- [ ] 去该邮箱收 Cloudflare 验证信 → 点 **Verify email address**。（没收到就回该页点 **Resend**。）
+
+> 🔴 **官方明确要求**：*"Before you can create a routing rule, you must add and verify at least one destination address."* —— 不验证就**建不了任何规则**（指向未验证地址的规则保持 disabled）。
+> 📌 **Destination addresses 是「账户级」的**（不是 zone 级），跨域名复用；所以这一步对以后加域名也有效。
 > 我们的密址**不经过**这个收件箱（邮件进的是 Worker），但这一步是**开通 Email Routing 的前置门**，绕不过。
 
 ---
 
 ## 4. 【手动】🔴 打开 Subaddressing（`+` 子地址）—— 最容易漏的一步
 
-- [ ] **Email Routing → Settings → Subaddressing**（`+` addressing）→ 打开。
+- [ ] 就在本页切到 **Settings** 标签 → 找到 **Subaddressing**（`+` addressing / plus addressing）→ **打开**。
 
 > **为什么必须开**：我们的密址形态是 `inbound+<token>@tempocourse.com`。官方说明只有**开启后**，`+detail` 部分才会**保留在 `message.to` 里**供 Worker 读取。不开的话 token 有被规则匹配"吃掉"的风险 → Worker 拿不到 token → 入站静默失败。
 > 参考：Cloudflare Docs「Email routing rules and addresses」→ Subaddressing（RFC 5233）。
@@ -93,6 +109,8 @@ https://dash.cloudflare.com/?to=/:account/email-service/routing
 ---
 
 ## 5. 【手动】部署 Worker
+
+> 🔴 **顺序铁律：本步必须先于第 6 步。** 第 6 步的下拉里只能选「已部署的 Worker」——先配规则会选不到 `tempo-inbound-email`。
 
 ```bash
 cd /Users/youchengli/Desktop/Tempo/workers/inbound-email
@@ -102,18 +120,25 @@ npx wrangler secret put INBOUND_EMAIL_SECRET  # 粘贴密钥（与 Vercel 同一
 npx wrangler deploy
 ```
 
-- [ ] 部署成功，Cloudflare → **Workers & Pages** 里出现 **`tempo-inbound-email`**。
-- 不需要改 `wrangler.toml`：`INBOUND_WEBHOOK_URL` 默认已指向 `https://tempo-six-neon.vercel.app/api/v1/email/inbound`。
+- [ ] 部署成功，终端输出 `Uploaded tempo-inbound-email` 之类的字样；Cloudflare → **Workers & Pages** 里出现 **`tempo-inbound-email`**。
+- [ ] 部署后回到 Email Routing 页，**`Destination Workers`** 标签 / 第 6 步的动作下拉里应能看到它。
+- 不需要改 `wrangler.toml`：`name = "tempo-inbound-email"`，`INBOUND_WEBHOOK_URL` 默认已指向 `https://tempo-six-neon.vercel.app/api/v1/email/inbound`。
 - **本地已验证**（2026-09-17）：`npm install` ✅、`postal-mime@2.7.6` 的 `PostalMime.parse` 返回 `{text, html}` ✅、`wrangler deploy --dry-run` 打包成功（109 KiB，`INBOUND_WEBHOOK_URL` 绑定正常）✅。
+  - ⚠️ 若 `wrangler login` 后报「multiple accounts」，选账号邮箱为 `stevenli2007@berkeley.edu` 的那个。
 
 ---
 
 ## 6. 【手动】Catch-all 规则 → Worker（关键）
 
-- [ ] **Email Routing → Routing Rules → Catch-all rule → Enable**。
-- [ ] **Action: Send to a Worker** → 选 `tempo-inbound-email` → **Save**。
+面板右侧 **Next Steps** 第 2、3 条就是这两件事：*"Add a destination Worker"* / *"Edit your catch-all rule"*。
 
-> **为什么用 catch-all 而不是普通地址**：密址的 token 是**动态的**（每用户一个，懒生成），只有 catch-all（`*@tempocourse.com`）能兜住 `inbound+任何token@`。普通规则只匹配固定 local part，会漏。
+- [ ] 切到 **Routing rules** 标签 → **Enable catch-all rule**（打开后显示 Active）。
+- [ ] 该规则的 **Action: Send to a Worker** → **Worker/Destination** 选 `tempo-inbound-email` → **Save**。
+- [ ] （等价入口）**Destination Workers** 标签也可把 `tempo-inbound-email` 登记为投递目标；效果与上面一致，任选一条即可，**不要重复建普通规则**。
+- [ ] 保存后 `Routing rules` 计数应为 **1**、catch-all 状态 **Active**。
+
+> **为什么必须用 catch-all 而不是普通地址规则**：密址 token 是**动态的**（每用户一个、懒生成）。官方对 Subaddressing 的原文是 *"The `+detail` part does not affect rule matching"* —— 也就是说 `inbound+<token>@` 会按 `inbound@` 去匹配普通规则、`+token` 不进匹配。**只有 catch-all（`*@tempocourse.com`）能兜住所有 `inbound+任意token@`**。普通规则只匹配固定 local part，会漏。
+> ⚠️ 现在**不要**再建任何普通地址规则（如 `inbound@`）—— 一是没用（token 靠 catch-all 拿），二是规则顺序可能把邮件截走。
 
 ---
 
@@ -142,6 +167,7 @@ Vercel → 项目 **tempo** → **Settings → Environment Variables**（Product
 
 | 现象 | 先查什么 |
 |---|---|
+| `Routing status` 长期停在 **Syncing** | DNS 传播中，官方口径 5–15 分钟（最长 24h）；查 `dig @1.1.1.1 MX tempocourse.com` 是否出现 `route1/2/3.mx.cloudflare.net` |
 | 完全没反应 | Cloudflare Email Routing 的 MX/SPF 是否生效；catch-all 是否 **Active**；Subaddressing 是否开（第 4 步） |
 | `unknown_address`（审计表） | 密址 token 与 `profiles.inbound_token` 不匹配；或邮件没进 Worker（查 catch-all） |
 | `no_text`（审计表） | Worker 没解出正文 → `npx wrangler tail` 看 `[inbound-worker] MIME 解析失败` |
