@@ -29,7 +29,7 @@
 
 ## 当前进度指针
 
-**当前 task**：**`P0-3-11`（邮件通道·入站）** —— ✅ 代码完成 2026-09-17（入站-only：密址绑定 + 纯入站，出站归 P0-3-14）；**`P0-3-9`（截图档）** 代码完成、真实识别待 Steven 贴 `DASHSCOPE_API_KEY` 后补验；**P0-3-2 已验收**。
+**当前 task**：**`P0-3-11`（邮件通道·入站）** —— ✅ 代码完成 2026-09-17（入站-only：密址绑定 + 纯入站，出站归 P0-3-14）；🟡 **部署 6/8 步**（①–⑥ 完成：zone / onboard / destination / Subaddressing / Worker 已部署 / catch-all 已指向 Worker），剩 ⑦Vercel env + ⑧端到端验收；**`P0-3-9`（截图档）** 代码完成、真实识别待 Steven 贴 `DASHSCOPE_API_KEY` 后补验；**P0-3-2 已验收**。
 - ✅ **O-11 关闭：多模态 provider = Qwen 通义千问**（中国区 DashScope，默认 `qwen-vl-plus-latest`，可用 `LLM_MODEL_VISION` 覆写；需切回 Claude 时设 `LLM_PROVIDER_VISION=claude`）。配套 **ADR-018**：provider **按能力路由** —— 文本仍走 DeepSeek（**现有五板块解析零回归**），视觉走 Qwen。同时解决 **O-08**：两路均中国境内、无数据出境。
 - ✅ 另三项决策：**图片不落库**（浏览器压缩后 base64 直传、即用即弃）｜**范围 = 确认完成 + 新增/改期**（完全复用 3-8b 的 `match` + `PATCH`）｜**零迁移**（不新增列）。
 - 🆕 **新增 `P0-3-14`「主动提醒 / 优先级」**（Steven 2026-09-13 同意立项）—— ADR-017 点名它是"秘书"最核心的护城河，此前**无对应卡**；与 3-11 的出站范围边界见下方执行卡。
@@ -1384,7 +1384,8 @@ Phase 0 列表只有几十条，每行再加一个 tag 只会更密，信息增�
 - **为什么现在做**：当前同步触发是"用户打开 dashboard"（T1）—— **用户不来，数据就不新，所以他必须来**，这是结构性矛盾。邮件入站把触发器换成外部事件。
 - **关键约束**：零 OAuth（转发路径），成本远低于 Gmail API；Gmail 全自动留 Phase 1（restricted scope 需安全评估，周期以月计）。基础设施 = Cloudflare Email Routing Worker（thin forwarder）→ Vercel `POST /api/v1/email/inbound`。
 - **📖 部署手册（【Steven 手动】逐步可勾选）**：`docs/EMAIL_INBOUND_SETUP.md` —— 域名 `tempocourse.com` 已注册 2026-09-17（Cloudflare Registrar）。
-  - **进度（2026-09-17）**：①zone 生效 ✅ ②Email Routing onboard ✅ ③destination 地址验证 ✅ ④Subaddressing 开启 ✅ ｜ 剩余 ⑤部署 Worker ⑥catch-all→Worker ⑦Vercel env ⑧端到端验收（后三步手动，Agent 侧无法代跑 `wrangler login`）。
+  - **进度（2026-09-17）**：①zone 生效 ✅ ②Email Routing onboard ✅ ③destination 地址验证 ✅ ④Subaddressing 开启 ✅ ⑤Worker 已部署 ✅（`Uploaded tempo-inbound-email`，Version `7ac9d632`，secret 已写入）⑥catch-all → Worker 已启用 ✅（`enabled:true` + action `worker: tempo-inbound-email`）｜ 剩余 ⑦Vercel env（`INBOUND_EMAIL_SECRET` + `INBOUND_EMAIL_DOMAIN=tempocourse.com` → Redeploy）⑧端到端验收 —— ⑦ 需 Steven 操作（Agent 侧无 Vercel CLI 凭据）。
+  - **执行方式**：只有 `npx wrangler login` 必须人工（OAuth 要交互式终端）；登录后 Agent 侧可直接代跑 `deploy` / `secret put`，并用同一 OAuth token 打 Cloudflare REST API 配 catch-all。
 
 #### 🎫 P0-3-12 · 全站视觉统一扫尾 ⚪
 
