@@ -498,7 +498,7 @@ export function CourseUpdateFab() {
               onChange={(e) => setText(e.target.value)}
               onPaste={handlePaste}
               rows={4}
-              placeholder="粘贴课程更新（作业、阅读、项目截止等），例如：Homework 7 截止改到 9/20；也可直接 Cmd+V 粘贴截图"
+              placeholder="Hi，有什么 Update 想要告诉 Tempo？"
               disabled={!!image}
               className="mb-2 w-full resize-none rounded-lg border border-input bg-background px-3 py-2 text-sm text-foreground outline-none placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 disabled:opacity-50"
             />

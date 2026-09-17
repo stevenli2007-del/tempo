@@ -193,64 +193,6 @@ export async function loadTasks(
   }
 }
 
-// ---------- 债务条取数（P0-3-7a） ----------
-
-/**
- * `summarizeDebt()`（`lib/tasks/progress.ts`）的取数：**只取 `source = 'canvas'` 且已过期的任务**。
- *
- * ### 为什么不复用 `loadTasks()`
- * 债务条口径是「近 30 天已到期」，需要**下界**；而 `loadTasks` 刻意只有上界。
- * 给它加参数会牵动公开契约 `GET /api/v1/tasks`（`range` 的语义就是"只设上界"，契约 §5），
- * 而且它用 `or(due_date.lte.X, due_date.is.null)` 保住 TBD 行 —— 再叠一个 `.gte('due_date')`
- * 会让 NULL 行**整批消失**（`CodingRules.md` §10.2「`.lte()` 吃掉 NULL 行」的同类坑，
- * 换成 `.gte` 一样踩）。所以另开一个只服务总览页的聚合读取，两边互不牵制。
- *
- * ### 🔴 `.eq('source', 'canvas')` 必须写在这里，不能交给调用方
- * 同一页面上两个消费者对「考试任务」态度**相反**：周历要显示考试，债务条必须排除考试。
- * 过滤写在 SQL 里，就不会出现"下一个人重构取数时顺手统一了，考试被算进欠账"。
- */
-export async function loadDebtTasks(
-  supabase: ServerSupabase,
-  options: {
-    courseIds: string[]
-    /** 时间下界（ISO 串）—— 债务条窗口的左沿。 */
-    since: string
-    /** 时间上界（ISO 串）—— 通常是 now，只取已到期的。 */
-    until: string
-  },
-): Promise<{ tasks: Task[]; error: string | null }> {
-  const { courseIds, since, until } = options
-  if (courseIds.length === 0) {
-    return { tasks: [], error: null }
-  }
-
-  const { names, error: nameError } = await loadCourseNames(supabase, courseIds)
-  if (nameError) {
-    return { tasks: [], error: nameError }
-  }
-
-  const { data, error } = await supabase
-    .from('tasks')
-    .select(TASK_COLUMNS)
-    .in('course_id', courseIds)
-    .eq('is_deleted', false)
-    .eq('source', 'canvas')
-    .not('due_date', 'is', null)
-    .gte('due_date', since)
-    .lte('due_date', until)
-
-  if (error) {
-    return { tasks: [], error: error.message }
-  }
-
-  try {
-    const tasks = ((data ?? []) as TaskRow[]).map((row) => toTask(row, names.get(row.course_id) ?? ''))
-    return { tasks, error: null }
-  } catch (error) {
-    return { tasks: [], error: error instanceof Error ? error.message : String(error) }
-  }
-}
-
 // ---------- 最近的考试（P0-3-7b 补） ----------
 
 /**

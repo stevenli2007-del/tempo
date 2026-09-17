@@ -468,11 +468,11 @@
 `tasks` 表没有 `user_id`，RLS 经 `courses.user_id` 判定（迁移 `20260902100000`），
 而该策略**不看 `is_archived`**，所以归档过滤必须在查询里显式做（`loadActiveCourseIds()`）。
 
-### 5.1 总览可视化的口径（✅ P0-3-7a）
+### 5.1 总览可视化的口径（✅ P0-3-7a；P0-3-16 删债条、加今日任务）
 
 > 这一节写的不是接口，而是**数字怎么算**。执行卡把「先定义进度的分子分母」列为 P0-3-7 的硬前置：
-> 口径没定，既写不出代码，也没法判断算得对不对。代码实现在 `lib/tasks/progress.ts`
-> （纯函数、零 IO，可直接喂假数据跑），取数在 `lib/tasks.loadDebtTasks()`。
+> 口径没定，既写不出代码，也没法判断算得对不对。代码实现在 `lib/tasks/progress.ts`（周历 / 最近的考试）
+> 与 `lib/tasks/today.ts`（今日任务），**纯函数、零 IO**，可直接喂假数据跑。
 > **总览页在服务端直读，不新建端点**（沿用 P0-2-7 的决策：不轮询、不为一个页面开 API）。
 
 #### 为什么不做「进度条」
@@ -483,45 +483,44 @@
 
 所以总览页给的**不是**「完成了多少」，而是「**欠了多少**」。
 
-#### 债务条口径
+#### 今日任务口径（`buildTodayTasks()`，P0-3-16）
 
-| 项 | 定义 |
-|---|---|
-| 数据源 | **只算 `tasks.source = 'canvas'`** —— 在 SQL 层过滤（`loadDebtTasks` 的 `.eq('source','canvas')`） |
-| 时间窗口 | **近 30 天已到期**：`since ≤ due_date ≤ now`，`since = now - 30d`（`debtWindow()`） |
-| 排除 | `due_date IS NULL`（日期待定）｜未到期｜30 天以前的旧账 |
+取代原「已到期作业」债务条（**已于 P0-3-16 删除**：`debt-bar.tsx` / `loadDebtTasks` / `debtWindow` /
+`classifyDebt` / `summarizeDebt` 全部移除）。它回答的不是"我欠了多少"，而是「**今天大概要花多少力气**」：
 
-三个桶**互斥且穷尽**（`classifyDebt()`，顺序即优先级）：
-
-| 桶 | 判据 | 展示 |
+| 组 | 判据 | 权重 |
 |---|---|---|
-| `submitted` 已交 | `status = 'done'` **或** `submission_state ∈ {submitted, graded, pending_review}` | **不画段位**，只以文字出现（"做完的事不是新闻"） |
-| `overdue` 未交 | 其余 —— 只可能是 Canvas **明确说没收到**的 `unsubmitted` / `missing` | 红（`--red`） |
-| `unconfirmed` 待确认 | `submission_state = 'external_unconfirmed'` **或** `= NULL`（Canvas 不追踪完成态） | 琥珀（`--amber`） |
+| **逾期未完成**（红，置顶） | 到期日**已过**且未完成，**且** `submission_state ∈ {unsubmitted, missing}` | 各 1 件 |
+| **今天到期** | 按**学校本地日历日** = 今天 | 各 1 件（100%） |
+| **未来 `horizonDays`（=7）天** | `0 < 剩余天数 ≤ 7` | 各 `1 / 剩余天数`（9/17 看 9/21 到期 = 1/4 = **25%**） |
 
-> 🔴 **为什么排除考试派生 / 手动任务**：它们**没有外部真相**。学生考完试忘了回来勾，
-> 就会被算成"欠账" —— 这正是 ADR-013 要防的诬告。**分母宁可小，不能脏。**
+**今日工作量** = 三组权重之和（一个**加权件数**）—— 越远的事，对今天的压力越小。
+剩余天数按**日历键**相减（`lib/time.ts`），不受时区偏移 / 夏令时影响。
+
+> 🔴 **红组只收 Canvas 明确说没交的**（`unsubmitted` / `missing`）。`submission_state = NULL`
+> （Canvas 不追踪：`on_paper` / `none` / 考试派生）与 `external_unconfirmed`（Gradescope 等 LTI）
+> **不进红组** —— Canvas 不知道你交没交，标红就是诬告（ADR-013）。这类任务归 `P0-3-17` 的「需手动确认」。
 >
-> 🔴 **为什么 `NULL` 归「待确认」而不是「未交」**：`submission_state = NULL` 表示 Canvas
-> 压根不追踪完成态（`not_graded` 考勤 / `on_paper` / `none`）。我们不知道交没交，说"未交"就是诬告；
-> `external_unconfirmed` 同理（P0-3-10 实测出现过 Gradescope 已交、Canvas 报未交）。
+> 🔴 **已完成（`isEffectivelyDone()`）一律不进** —— 与周历 / 待办清单**共用同一个完成判定**。
+> **纯展示、不改写任何状态**（ADR-015：`status` / `submission_state` 只读）。
 >
-> 🔴 **不显示百分比**："6 / 18 件" 是事实，"33%" 会被读成成绩。
+> **取数复用总览清单**（`loadTasks`，窗口 = now + 7d，正好含「逾期 + 今天 + 未来 7 天」）——
+> 因此删掉债务条后，总览页从**四路查询降到两路**（`loadTasks` + `loadUpcomingExams`）。
 
 #### 周历口径（`buildWeekCalendar()`）
 
 | 项 | 定义 |
 |---|---|
 | 跨度 | **滚动 7 天、今天在最左**（不用"本周一–周日"：周日打开会看到一个基本空的日历） |
-| 收哪些任务 | **全部来源**（含考试派生 —— 周历**要**显示考试，与债务条态度相反） |
+| 收哪些任务 | **全部来源**（含考试派生 —— 周历**要**显示考试） |
 | 排除 | 已完成（`isEffectivelyDone()`，与待办清单**共用同一个函数**） |
 | 逾期 | 落在 7 天窗口外且已过期的 → 收成**顶部一整条**（过去的日子没人会往回翻） |
 | 日期待定 | `due_date IS NULL` → 底部单列，**不编日期塞进格子**（`Database.md` 3.9） |
 | 同日内排序 | 按截止时刻升序 |
 | 逾期条排序 | 最近逾期的在最前 |
 
-> ⚠️ **同一页面上两个消费者对「考试任务」的态度相反**：周历要显示考试，债务条必须排除考试。
-> 这不是不一致，是两个不同的问题。**改取数逻辑前先读 `lib/tasks/progress.ts` 的文件头注释。**
+> ⚠️ **周历与「今日任务」都收全部来源、都用 `isEffectivelyDone()`** —— 同一条任务不会
+> 在一个区块算"已完成"、在另一个区块算"待办"。**改取数 / 改完成判定前先读 `lib/tasks/progress.ts` 文件头。**
 
 #### 「最近的考试」条（`buildUpcomingExams()`）
 
@@ -1151,3 +1150,4 @@ Vercel 引擎组装好邮件后，POST `{ to, subject, html, text }` 给 Cloudfl
 | 2026-09-17 | **§11 🔴 修「可提醒范围」漏筛 `submission_state`（真发验收发现，误报率 86%）**（P0-3-14 续三）：Steven 验收真信时发现 `7A Pre-Assessment 02` 在 Tempo 里显示 **已提交（Canvas）**、邮件却标「已逾期 13 天」。**根因**：引擎 SQL 只筛 `status='pending'`，**完全没看 `submission_state`** —— 而 `status` 是用户主权、同步永不写（ADR-015），Canvas 已提交/已评分的任务照样是 `pending`。**实测（真数据只读审计，用真函数 `isEffectivelyDone()`）**：邮件列出的 21 条里 **18 条是 Canvas 已判定完成**（`graded` 21 / `submitted` 2 / `pending_review` 1，全表 64 条 pending 中 24 条属此类），只有 **2 条**是 Canvas 明确说没收到。**修法**：新增 `isRemindable()`（`lib/reminders/build.ts`）= `!isEffectivelyDone()` 且 `!== 'external_unconfirmed'`；**内部调用全站唯一判定**而非重写（dashboard/周历/清单共用 `lib/tasks/progress.ts`）。**三条边界刻意写死**：`submitted`/`graded`/`pending_review` 不提醒；`external_unconfirmed` 不催（ADR-013）；**`null` 照常提醒**（含全部 syllabus 派生考试 —— 因"没外部真相"就不提醒考试是灾难）。修后同一份真实数据：**21 条 → 3 条**（3 条全是真开着的），折叠 43 → 37，总数 64 → 40（= 64 − 24 已判定完成，自洽）。回归 39 → **47** | P0-3-14、ADR-013、ADR-015、ADR-016 R3 |
 | 2026-09-17 | **§11 频控判据从「固定 24h 窗口」改为「用户本地日历日」**（P0-3-14 续二，🔴 真发前拦下的静默 bug）：原实现在 `engine.ts` 判 `Date.now() - last_reminder_at < 24h` → 跳过。**根因**：定时任务固定同一时刻触发（`0 14 * * *`），而 `last_reminder_at` 记的是**上一轮发送完成**时刻（必然略晚于本轮触发时刻）→ 下一轮触发时差值**永远不足 24h** → 当天跳过、次日差值已超 24h 才发 → **实际退化成「隔天一封」**，且日志只有 `reason:'recent'`，面板/审计全看不出异常（实测账：昨 14:00:03 发 → 今 14:00:00 查 = 86,397,000ms < 24h = 跳过）。现改为 `isSameLocalDay(last_reminder_at, now, timezone)`（`build.ts` 纯函数，`en-CA` 出 `YYYY-MM-DD` 比较，时区取 `profiles.timezone`，缺省 `DEFAULT_TIMEZONE`），语义与「每用户每天至多一封」字面一致，且不受 cron 抖动 / 发送耗时漂移影响。`DEFAULT_TIMEZONE` 收口到 `build.ts`（原先 `engine.ts` 里硬编了第二处 `'America/Los_Angeles'`）。回归 34 → **39**（新增 5 条：隔天同一时刻必须放行、同日一律拦、跨 PT 零点算新日、UTC 跨日但本地同日仍拦、按用户时区而非 UTC 判定）| P0-3-14、ADR-016 R3 |
 | 2026-09-17 | **§11 邮件正文口径收敛为「聚焦版」+ 出站全链路生产验证通过**（P0-3-14 续）：① **聚焦版**（Steven 拍板）—— 正文只列「可行动」项（逾期 + 3 天内），其余折叠成「另有 N 项更远的任务（含 M 项日期待定）→ 在 Tempo 查看」；新增结果字段 `shownCount` / `hiddenCount` / `hiddenTbdCount`；根因=首版全量平铺在真实数据上生成 **63 行**、而主题写 20（口径打架 + 洪水式日报，违背 ADR-016 R3 / ADR-017）。② **出站启用**：迁移执行 ✅、Workers Paid **本就已付费**（免升级）、`noreply@tempocourse.com` 验证 ✅（catch-all zone 上靠**临时精确转发规则**把验证信引到已验邮箱，验完删除）、出站 Worker 部署 ✅（`tempo-outbound-email.stevenli2007.workers.dev` + `send_email` 绑定 + Bearer 密钥）、Vercel 三 env ✅。③ **验收判据**：无凭证打 `/reminders/scheduled` → **401（路由已上线）而非 404（代码没上）** —— env 触发的部署不含未 push 的代码，是本次唯一卡点。④ 本地零副作用预览（service role + 真数据 + `preview:true`）：`actionable=true`、主题 20 / 正文 20 / 折叠 43（= 63）。⑤ 已知数据层问题（**不在本卡**）：`Final Exam` / `Unit 1-3 Exam` 各出现两份（exam 派生任务与 syllabus 重复），单列后续卡 | P0-3-14、ADR-016、ADR-017 |
+| 2026-09-17 | **§5.1 删「已到期作业」债务条、新增「今日任务」加权切片**（P0-3-16）：① 删除 `components/overview/debt-bar.tsx` + dashboard 接线 + `lib/tasks.ts` 的 `loadDebtTasks` + `lib/tasks/progress.ts` 的 `debtWindow`/`classifyDebt`/`summarizeDebt` 等死代码（`grep debtWindow` = 0）；② 新增 `lib/tasks/today.ts` 的 `buildTodayTasks()` —— **今天到期 100% + 未来 7 天按 `1/剩余天数` 切片（9/17 看 9/21 = 25%）+ 逾期未完成红组**，三组权重之和即"今日工作量"；③ **红组只收 Canvas 明确说没交的**（`unsubmitted`/`missing`），`null` / `external_unconfirmed` 不进红组（ADR-013）；④ **零新查询**：取数复用总览清单（`loadTasks`，窗口 = now + 7d），总览页从**四路查询降到两路**；⑤ 展示层 `components/overview/today-tasks.tsx`（服务端组件）。回归 `regress:progress` 24 → **27**（删 5 条 debt、加 8 条今日任务） | P0-3-16、ADR-013、ADR-015、ADR-016 |

@@ -2,7 +2,7 @@ import { redirect } from 'next/navigation'
 
 import { Button } from '@/components/ui/button'
 import { DemoControls } from '@/components/courses/demo-controls'
-import { DebtBar } from '@/components/overview/debt-bar'
+import { TodayTasks } from '@/components/overview/today-tasks'
 import { WeekCalendar } from '@/components/overview/week-calendar'
 import { SyncControls } from '@/components/sync/sync-controls'
 import { SyncStatusBar } from '@/components/sync/sync-status-bar'
@@ -16,14 +16,13 @@ import { loadCredentialMeta } from '@/lib/canvas/credentials'
 import type { CanvasCredentialMeta } from '@/types/canvas'
 import { COURSE_COLUMNS, toCourse } from '@/lib/courses'
 import type { CourseRow } from '@/lib/courses'
-import { loadDebtTasks, loadTasks, loadUpcomingExams } from '@/lib/tasks'
+import { loadTasks, loadUpcomingExams } from '@/lib/tasks'
 import { formatDue } from '@/lib/tasks/format'
+import { buildTodayTasks } from '@/lib/tasks/today'
 import {
   buildUpcomingExams,
   buildWeekCalendar,
-  debtWindow,
   isCanvasDone,
-  summarizeDebt,
 } from '@/lib/tasks/progress'
 import { createClient } from '@/lib/supabase/server'
 import {
@@ -180,31 +179,28 @@ export default async function DashboardPage() {
   const reconnectCourse = firstLinkedCourse ?? courses[0]
   const reconnectHref = reconnectCourse ? `/courses/${reconnectCourse.id}` : null
 
-  // 三份任务数据互不依赖，并行发。课程 id 沿用上面已查到的未归档课程，不重复查。
+  // 两份任务数据互不依赖，并行发。课程 id 沿用上面已查到的未归档课程，不重复查。
   //
-  // ① 总览清单（`overview.tasks`，同时喂周历）/ ② 债务条 / ③ 最近的考试。
-  // ① 和 ② **口径不同、刻意不复用**：
-  //    清单（和周历）要考试（syllabus 派生），债务条**必须排除考试** ——
-  //    同一个页面上两个消费者对考试任务的态度相反，见 `lib/tasks/progress.ts` 文件头。
-  // ③ 单独取是因为考试常落在 7 天窗口之外，① 的窗口装不下。
+  // ① 总览清单（`overview.tasks`，同时喂周历与「今日任务」）/ ② 最近的考试池。
+  // ② 单独取是因为考试常落在 7 天窗口之外，① 的窗口装不下。
   //
-  // P0-3-7b：原来的第 ④ 路「卡片近期任务」（`loadUpcomingTasks`）随课程卡一起搬去
-  // `/courses` —— 这一页不再需要它，于是**少发一个查询**。
+  // P0-3-7b：原第 ④ 路「卡片近期任务」（`loadUpcomingTasks`）随课程卡搬去 `/courses`；
+  // P0-3-16：原第 ② 路「债务条」（`loadDebtTasks`）删除 ——「今日任务」直接复用 ①
+  // （窗口 = now + 7d，正好含「逾期 + 今天 + 未来 7 天」），这一页从四路查询降到两路。
   const courseIds = courses.map((course) => course.id)
-  const [overview, debt, examPool] = await Promise.all([
+  const [overview, examPool] = await Promise.all([
     loadTasks(supabase, {
       courseIds,
       until: new Date(now.getTime() + OVERVIEW_RANGE_DAYS * 86_400_000).toISOString(),
       limit: OVERVIEW_LIMIT,
       offset: 0,
     }),
-    loadDebtTasks(supabase, { courseIds, ...debtWindow(now) }),
     loadUpcomingExams(supabase, { courseIds, since: now.toISOString(), pool: EXAM_POOL }),
   ])
   const tasksError = overview.error
 
-  // 口径与可视化模型都在纯函数层算（`lib/tasks/progress.ts`），这里只做接线。
-  const debtSummary = summarizeDebt(debt.tasks, now)
+  // 口径与可视化模型都在纯函数层算（`lib/tasks/*`），这里只做接线。
+  const today = buildTodayTasks(overview.tasks, now, OVERVIEW_RANGE_DAYS)
   const calendar = buildWeekCalendar(overview.tasks, now)
   const exams = buildUpcomingExams(examPool.tasks, now)
 
@@ -266,21 +262,11 @@ export default async function DashboardPage() {
 
         <SyncStatusBar overview={syncOverview} now={now} />
 
-        {/* 欠账统计失败时**藏起卡片而不是显示成空** —— 一个全空的条形图会被读成
-            "没有欠账"，那正是静默的错误数据（CodingRules 7）。 */}
-        {!error && courses.length > 0 && debt.error ? (
-          <div role="alert" className="rounded-lg border border-destructive/40 bg-card p-4">
-            <p className="text-sm font-medium text-destructive">欠账统计加载失败</p>
-            <p className="mt-1 text-sm text-muted-foreground">
-              下面的日历与清单不受影响，但「已到期作业」卡片暂时不显示。{debt.error}
-            </p>
-          </div>
-        ) : null}
-
-        {/* 债务条只统计 Canvas 作业 —— 一门 Canvas 课都没关联时它永远是空的，
-            显示一个空的"没有欠账"只会让人困惑（P0-2-6 的 hasCanvasLink 同源判断）。 */}
-        {!error && courses.length > 0 && hasCanvasLink && !debt.error ? (
-          <DebtBar summary={debtSummary} />
+        {/* 「今日任务」的取数与周历/清单同源（`overview.tasks`）—— 取数失败时**藏起卡片**，
+            而不是显示成"今天没有任务"（一个空的卡会被读成"今天没事"，正是静默的错误数据，
+            CodingRules 7；上方已有一条「任务列表加载失败」的横幅说明原因）。 */}
+        {!error && courses.length > 0 && !tasksError ? (
+          <TodayTasks model={today} />
         ) : null}
 
         {!error && courses.length > 0 ? (

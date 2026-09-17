@@ -1,6 +1,6 @@
 /**
- * P0-3-7 回归：总览可视化的**口径层**（`lib/tasks/progress.ts`）四件事都对 ——
- * 债务条的三个桶、周历的分桶与窗口、最近的考试条的取用与排序，
+ * P0-3-7 回归：总览可视化的**口径层**（`lib/tasks/progress.ts` + `lib/tasks/today.ts`）——
+ * 周历的分桶与窗口、最近的考试条的取用与排序、**今日任务的加权切片**（P0-3-16），
  * 以及 P0-3-15 加的**完成判定与提交态徽标**（`isCanvasDone` / `isEffectivelyDone` /
  * `submissionBadge`）。
  *
@@ -17,11 +17,10 @@
 import {
   buildUpcomingExams,
   buildWeekCalendar,
-  classifyDebt,
   isCanvasDone,
   isEffectivelyDone,
-  summarizeDebt,
 } from '@/lib/tasks/progress'
+import { buildTodayTasks, TODAY_HORIZON_DAYS } from '@/lib/tasks/today'
 import { SUBMISSION_BADGE_CLASS, submissionBadge } from '@/lib/tasks/submission'
 import type { Task, TaskSubmissionState } from '@/types/task'
 
@@ -56,22 +55,25 @@ function check(name: string, ok: boolean, detail = ''): void {
   results.push({ name, ok, detail })
 }
 
-// ---------------------------------------------------------------- 债务条
+// ---------------------------------------------------------------- 夹具
+//
+// 一份夹具同时喂周历与「今日任务」（两者都收全部来源、都用同一个完成判定）——
+// 拆成两份迟早漂开。注释标注每条落在/不进各口径的原因。
 
-const debtTasks: Task[] = [
-  mk({ title: 'A 未交', dueDate: PAST, submissionState: 'unsubmitted' }), // overdue
-  mk({ title: 'B 缺交', dueDate: PAST, submissionState: 'missing' }), // overdue
-  mk({ title: 'C 已评分', dueDate: PAST, submissionState: 'graded' }), // submitted
-  mk({ title: 'D 待查重', dueDate: PAST, submissionState: 'pending_review' }), // submitted
-  mk({ title: 'E 外部平台', dueDate: PAST, submissionState: 'external_unconfirmed' }), // unconfirmed
-  mk({ title: 'F 不追踪', dueDate: PAST, submissionState: null }), // unconfirmed
-  mk({ title: 'G 手勾', dueDate: PAST, status: 'done', submissionState: 'unsubmitted' }), // submitted
-  mk({ title: 'H 考试派生', dueDate: PAST, source: 'syllabus', taskType: 'exam', isDerived: true, submissionState: null }), // 排除（ADR-013）
-  mk({ title: 'I 手动', dueDate: PAST, source: 'manual', submissionState: null }), // 排除
-  mk({ title: 'J 无日期', dueDate: null }), // 排除（不编日期）
-  mk({ title: 'K 未到期', dueDate: TOO_FAR }), // 排除
-  mk({ title: 'L 太旧', dueDate: OLD }), // 排除（30 天窗口外）
-  mk({ title: 'M 今晚到期', dueDate: TONIGHT }), // 排除（还没到期）
+const fixture: Task[] = [
+  mk({ title: 'A 未交', dueDate: PAST, submissionState: 'unsubmitted' }), // 逾期 · Canvas 确认未交
+  mk({ title: 'B 缺交', dueDate: PAST, submissionState: 'missing' }), // 逾期 · Canvas 确认缺交
+  mk({ title: 'C 已评分', dueDate: PAST, submissionState: 'graded' }), // 已完成（Canvas）
+  mk({ title: 'D 待查重', dueDate: PAST, submissionState: 'pending_review' }), // 已完成（Canvas）
+  mk({ title: 'E 外部平台', dueDate: PAST, submissionState: 'external_unconfirmed' }), // 无外部真相 → 不进红组
+  mk({ title: 'F 不追踪', dueDate: PAST, submissionState: null }), // Canvas 不追踪 → 不进红组
+  mk({ title: 'G 手勾', dueDate: PAST, status: 'done', submissionState: 'unsubmitted' }), // 已完成（手勾）
+  mk({ title: 'H 考试派生', dueDate: PAST, source: 'syllabus', taskType: 'exam', isDerived: true, submissionState: null }), // 无外部真相 → 不进红组
+  mk({ title: 'I 手动', dueDate: PAST, source: 'manual', submissionState: null }), // 无外部真相 → 不进红组
+  mk({ title: 'J 无日期', dueDate: null }), // 不进（不编日期）
+  mk({ title: 'K 未到期', dueDate: TOO_FAR }), // 不进周历（窗口外）；进「今日任务」的未来切片
+  mk({ title: 'L 太旧', dueDate: OLD }), // 不进（周历窗与今日视野外）
+  mk({ title: 'M 今晚到期', dueDate: TONIGHT }), // 今天到期
   mk({ title: 'N 课程2未交', dueDate: PAST, courseName: 'MATH 53', courseId: 'c2' }),
   mk({ title: 'O 三天后考试', dueDate: '2026-09-16T23:59:00-07:00', source: 'syllabus', taskType: 'exam', isDerived: true, submissionState: null }),
   mk({ title: 'P 明天到期', dueDate: '2026-09-14T23:59:00-07:00' }),
@@ -79,27 +81,9 @@ const debtTasks: Task[] = [
   mk({ title: 'R 已完成的过期作业', dueDate: PAST, status: 'done', submissionState: 'graded' }),
 ]
 
-check(
-  '债务条三桶互斥穷尽：已交 4 / 未交 3 / 待确认 2（考试、手动、无日期、未到期、30 天外全部排除）',
-  JSON.stringify(summarizeDebt(debtTasks, NOW).overall) ===
-    JSON.stringify({ submitted: 4, overdue: 3, unconfirmed: 2, total: 9 }),
-  JSON.stringify(summarizeDebt(debtTasks, NOW).overall),
-)
-
-const debtCourses = summarizeDebt(debtTasks, NOW).courses
-check(
-  '课程排序按未交降序（CHEM 1A 未交 2 在 MATH 53 未交 1 之前）',
-  debtCourses[0]?.courseName === 'CHEM 1A' && debtCourses[1]?.courseName === 'MATH 53',
-  debtCourses.map((c) => `${c.courseName}:${c.overdue}`).join(' , '),
-)
-
-check('classifyDebt：unsubmitted/missing → 未交', classifyDebt(debtTasks[0]) === 'overdue' && classifyDebt(debtTasks[1]) === 'overdue')
-check('classifyDebt：graded / 手勾 → 已交', classifyDebt(debtTasks[2]) === 'submitted' && classifyDebt(debtTasks[6]) === 'submitted')
-check('classifyDebt：external_unconfirmed / NULL → 待确认（绝不显示"未交"）', classifyDebt(debtTasks[4]) === 'unconfirmed' && classifyDebt(debtTasks[5]) === 'unconfirmed')
-
 // ---------------------------------------------------------------- 周历
 
-const calendar = buildWeekCalendar(debtTasks, NOW)
+const calendar = buildWeekCalendar(fixture, NOW)
 check(
   '周历为滚动 7 天且今天在最左（9/13 周日 → 9/19 周六）',
   calendar.days.length === 7 &&
@@ -138,6 +122,79 @@ check(
   '窗口外未到期的（K，9/20）不进日历 —— 周历只覆盖 7 天',
   !calendar.days.some((d) => d.pills.some((p) => p.title === 'K 未到期')) &&
     !calendar.overdue.some((p) => p.title === 'K 未到期'),
+)
+
+// ---------------------------------------------------------------- 今日任务（P0-3-16）
+
+// 口径：今天到期 100% + 未来按 1/剩余天数 切片 + 逾期未完成（红组，**只收 Canvas 确认未交的**）。
+// 夹具独立于上面的 `fixture`（那份服务周历）—— 两套口径的断言不互相牵扯。
+
+const todayTasks: Task[] = [
+  mk({ title: '逾期未交', dueDate: '2026-09-11T23:59:00-07:00', submissionState: 'unsubmitted' }), // 红
+  mk({ title: '逾期缺交', dueDate: '2026-09-05T23:59:00-07:00', submissionState: 'missing' }), // 红
+  mk({ title: '逾期不追踪', dueDate: '2026-09-11T23:59:00-07:00', submissionState: null }), // 不进红（ADR-013）
+  mk({ title: '逾期外部平台', dueDate: '2026-09-11T23:59:00-07:00', submissionState: 'external_unconfirmed' }), // 不进红
+  mk({ title: '逾期考试', dueDate: '2026-09-11T23:59:00-07:00', source: 'syllabus', taskType: 'exam', isDerived: true, submissionState: null }), // 不进红
+  mk({ title: '逾期已完成', dueDate: '2026-09-11T23:59:00-07:00', status: 'done' }), // 已完成 → 不进
+  mk({ title: '今天到期', dueDate: '2026-09-13T23:59:00-07:00' }), // 0 天 → 100%
+  mk({ title: '明天到期', dueDate: '2026-09-14T23:59:00-07:00' }), // 1 天 → 100%
+  mk({ title: '三天后', dueDate: '2026-09-16T23:59:00-07:00' }), // 3 天 → 33%
+  mk({ title: '四天后', dueDate: '2026-09-17T23:59:00-07:00' }), // 4 天 → 25%
+  mk({ title: '第七天', dueDate: '2026-09-20T23:59:00-07:00' }), // 7 天 → 14%（视野内）
+  mk({ title: '第八天', dueDate: '2026-09-21T23:59:00-07:00' }), // 视野外 → 排除
+  mk({ title: '无日期', dueDate: null }), // 排除
+]
+
+const todayModel = buildTodayTasks(todayTasks, NOW)
+check(
+  '今日任务·分组：红组 = Canvas 确认未交的逾期（2）；今天 = 1；未来 7 天 = 4（按剩余天数升序）',
+  todayModel.overdue.map((i) => i.title).join(',') === '逾期未交,逾期缺交' &&
+    todayModel.dueToday.map((i) => i.title).join(',') === '今天到期' &&
+    todayModel.upcoming.map((i) => i.title).join(',') === '明天到期,三天后,四天后,第七天',
+  `overdue=[${todayModel.overdue.map((i) => i.title)}] due=[${todayModel.dueToday.map((i) => i.title)}] up=[${todayModel.upcoming.map((i) => i.title)}]`,
+)
+check(
+  '🔴 红组只收 Canvas 明确说没交的（null / external_unconfirmed / 考试派生 都不进红组，ADR-013）',
+  todayModel.overdue.every((i) => !['逾期不追踪', '逾期外部平台', '逾期考试'].includes(i.title)) &&
+    todayModel.overdue.length === 2,
+)
+check(
+  '切片：今天/明天 = 100%，3 天 = 33%，4 天 = 25%，7 天 = 14%',
+  todayModel.dueToday[0]?.weightPct === 100 &&
+    todayModel.upcoming.map((i) => i.weightPct).join(',') === '100,33,25,14',
+  todayModel.upcoming.map((i) => `${i.title}:${i.weightPct}%`).join(' '),
+)
+check(
+  '视野外（第八天）与无日期不进任何组',
+  [...todayModel.overdue, ...todayModel.dueToday, ...todayModel.upcoming].every(
+    (i) => i.title !== '第八天' && i.title !== '无日期',
+  ),
+)
+check(
+  '已完成的不进（逾期已完成）',
+  [...todayModel.overdue, ...todayModel.dueToday, ...todayModel.upcoming].every(
+    (i) => i.title !== '逾期已完成',
+  ),
+)
+check(
+  '今日工作量 = Σweight（2 逾期 + 1 今天 + 1 明天 + 1/3 + 1/4 + 1/7）',
+  Math.abs(todayModel.load - (2 + 1 + 1 + 1 / 3 + 1 / 4 + 1 / 7)) < 1e-9,
+  `load=${todayModel.load}`,
+)
+check(
+  'horizonDays 回传正确（默认 7）',
+  todayModel.horizonDays === TODAY_HORIZON_DAYS && TODAY_HORIZON_DAYS === 7,
+)
+
+// 🔴 直接钉验收标准里给的那一例：2026-09-17 看 2026-09-21 到期 = 25%（1/4）。
+const sep17Model = buildTodayTasks(
+  [mk({ title: '验收例', dueDate: '2026-09-21T23:59:00-07:00' })],
+  new Date('2026-09-17T19:00:00Z'), // 2026-09-17 12:00 PDT
+)
+check(
+  '🔴 验收标准：2026-09-17 看 09-21 到期显示 25%',
+  sep17Model.upcoming[0]?.weightPct === 25,
+  `weightPct=${sep17Model.upcoming[0]?.weightPct}`,
 )
 
 // ---------------------------------------------------------------- 最近的考试
