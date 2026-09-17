@@ -71,6 +71,21 @@ export type Task = {
   submissionState: TaskSubmissionState | null
   /** Canvas 提交时刻（ISO 8601）或 null。展示层按学校时区渲染。 */
   submittedAt: string | null
+  /**
+   * Canvas 作业页地址（`tasks.canvas_url`，P0-3-17）。null = 非 Canvas 来源或 Canvas 未给。
+   * 任务名渲染为此外链；**null 时退回纯文本**，不编一个链接出来。
+   */
+  canvasUrl: string | null
+  /**
+   * 该作业满分（`tasks.points_possible`，P0-3-17）。null = Canvas 未设满分（**不是 0 分**）。
+   * 与 `submissionScore` 一起画分数条；任一为 null 时不画（不编进度）。
+   */
+  pointsPossible: number | null
+  /**
+   * 当前用户得分（`tasks.submission_score`，P0-3-17）。null = 尚未评分（**不是 0 分**）。
+   * 与 `pointsPossible` 一起画分数条。
+   */
+  submissionScore: number | null
 }
 
 /**
@@ -85,6 +100,18 @@ export type UpcomingTask = {
   title: string
   /** null = TBD，卡片上同样按 TBD 渲染。 */
   dueDate: string | null
+  /**
+   * 任务来源（P0-3-17）。徽标「需手动确认」只给 **Canvas 来源** 的 null 态，
+   * 所以卡片也必须有它 —— 否则课程卡与总览清单会对同一条任务标出不同的徽标。
+   */
+  source: TaskSource
+  /**
+   * 任务状态（P0-3-17）。
+   * 取数时已经 `.eq('status','pending')` 过滤过，所以这里**当前恒为 `'pending'`**；
+   * 带上它是为了让「能不能标逾期」的判据（`canBeOverdue()`）能直接用，
+   * 而不是在展示层假设"反正都是 pending"—— 那正是判定分叉的起点（P0-3-15 的教训）。
+   */
+  status: TaskStatus
   /** Canvas 提交态（P0-3-10）；null = 不追踪。卡片用于显示「已提交（Canvas）」等。 */
   submissionState: TaskSubmissionState | null
 }

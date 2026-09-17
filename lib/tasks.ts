@@ -1,3 +1,4 @@
+import { toNumberOrNull } from '@/lib/numbers'
 import { createClient } from '@/lib/supabase/server'
 import type {
   Task,
@@ -42,11 +43,15 @@ export type TaskRow = {
   is_derived: boolean
   submission_state: string | null
   submitted_at: string | null
+  canvas_url: string | null
+  /** `numeric` 列在 JSON 里可能退化成字符串 → 过 `toNumberOrNull()` 收窄（P0-3-17）。 */
+  points_possible: number | string | null
+  submission_score: number | string | null
 }
 
 /** 列表与单条查询统一用这份 select，避免各处字段不齐导致形状漂移。 */
 export const TASK_COLUMNS =
-  'id, course_id, title, due_date, task_type, source, status, is_derived, submission_state, submitted_at'
+  'id, course_id, title, due_date, task_type, source, status, is_derived, submission_state, submitted_at, canvas_url, points_possible, submission_score'
 
 const TASK_TYPES = new Set<string>(['assignment', 'exam', 'reading', 'other'])
 const TASK_SOURCES = new Set<string>(['canvas', 'syllabus', 'manual'])
@@ -88,6 +93,11 @@ export function toTask(row: TaskRow, courseName: string): Task {
     isDerived: row.is_derived,
     submissionState: row.submission_state === null ? null : toEnum<TaskSubmissionState>(row.submission_state, TASK_SUBMISSION_STATES, 'submission_state'),
     submittedAt: row.submitted_at,
+    // P0-3-17：三个 Canvas 附带字段。**null 原样保留**（= 未知），
+    // 绝不用 `Number(x) || 0` —— 那会把"尚未评分"显示成"0 分"。
+    canvasUrl: row.canvas_url,
+    pointsPossible: toNumberOrNull(row.points_possible),
+    submissionScore: toNumberOrNull(row.submission_score),
   }
 }
 
@@ -268,7 +278,7 @@ export async function loadUpcomingTasks(
 
   const { data, error } = await supabase
     .from('tasks')
-    .select('id, course_id, title, due_date, submission_state')
+    .select('id, course_id, title, due_date, source, status, submission_state')
     .in('course_id', courseIds)
     .eq('is_deleted', false)
     .eq('status', 'pending')
@@ -280,20 +290,47 @@ export async function loadUpcomingTasks(
   }
 
   // 已按 due_date 升序（null 最后），顺序追加即为「最近的在前」。
-  for (const row of (data ?? []) as {
-    id: string
-    course_id: string
-    title: string
-    due_date: string | null
-    submission_state: string | null
-  }[]) {
-    const list = byCourse.get(row.course_id)
-    if (list) {
-      if (list.length >= perCourse) continue
-      list.push({ id: row.id, title: row.title, dueDate: row.due_date, submissionState: row.submission_state as TaskSubmissionState | null })
-    } else {
-      byCourse.set(row.course_id, [{ id: row.id, title: row.title, dueDate: row.due_date, submissionState: row.submission_state as TaskSubmissionState | null }])
+  //
+  // 枚举收窄（`toEnum`）遇到约束外的取值会**抛错**而不是给兜底值 —— 与 `loadTasks` 同一取舍
+  // （编一个 source/提交态出来就是静默的错误数据）。这里必须接住它转成可见的 `error`，
+  // 否则一次脏数据会让整页 500（而不是只让卡片显示"加载失败"）。
+  try {
+    for (const row of (data ?? []) as {
+      id: string
+      course_id: string
+      title: string
+      due_date: string | null
+      source: string
+      status: string
+      submission_state: string | null
+    }[]) {
+      const view: UpcomingTask = {
+        id: row.id,
+        title: row.title,
+        dueDate: row.due_date,
+        source: toEnum<TaskSource>(row.source, TASK_SOURCES, 'source'),
+        // 查询已经 `.eq('status','pending')`，但这里照样做**真收窄**而不是硬写 'pending' ——
+        // 将来若放开这个过滤，展示层的判据（canBeOverdue）不会跟着静默变错。
+        status: toEnum<TaskStatus>(row.status, TASK_STATUSES, 'status'),
+        submissionState:
+          row.submission_state === null
+            ? null
+            : toEnum<TaskSubmissionState>(
+                row.submission_state,
+                TASK_SUBMISSION_STATES,
+                'submission_state',
+              ),
+      }
+      const list = byCourse.get(row.course_id)
+      if (list) {
+        if (list.length >= perCourse) continue
+        list.push(view)
+      } else {
+        byCourse.set(row.course_id, [view])
+      }
     }
+  } catch (cause) {
+    return { byCourse: new Map(), error: cause instanceof Error ? cause.message : String(cause) }
   }
 
   return { byCourse, error: null }

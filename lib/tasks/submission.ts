@@ -12,17 +12,27 @@
  * - 危险（red）：`missing` —— 同上是没交，但 Canvas 已判「逾期缺交」，更重；
  * - 正向（green）：`submitted` / `pending_review` / `graded` —— **都属于「已完成」**
  *   （`isCanvasDone()`），文案不同只为告诉用户走到哪一步了；
- * - 中性（gray）：`external_unconfirmed` —— 外部平台交的，Canvas 没有可信记录（ADR-013）。
+ * - 中性（gray）：`external_unconfirmed` —— 外部平台交的，Canvas 没有可信记录（ADR-013）；
+ * - 中性（gray）：**`null` 且来源是 Canvas** → 「需手动确认」（P0-3-17，见下）。
  *
- * `null`（Canvas 不追踪完成态，如考试派生 / on_paper / not_graded）**返回 null**：
- * 没有真相就不编一个徽标出来（ADR-015「不确定就标待确认，绝不猜」）。
+ * ### 🔴 P0-3-17 的改动：`null` 从「不标」变成**有条件的**「需手动确认」
+ * 3-15 时 `null` 一律返回 null（不标）—— 因为把"没有真相"渲染成任何一种结论都是编的。
+ * 但 `null` 里混着**两类语义完全不同**的任务（详见 `needsManualConfirmation()` 的注释）：
+ * - **Canvas 来源** → Canvas 明说"我不追踪这条的完成态"（on_paper / none / not_graded）→
+ *   该让用户知道"这事得你自己确认"，标灰「需手动确认」；
+ * - **syllabus / manual 来源**（考试派生、用户自建）→ 与 Canvas 无关，null 只是"该你自己勾"，
+ *   **不标**（给每一场考试都挂个徽标是纯噪声）。
+ *
+ * 所以本函数必须拿到 `task.source` —— **不能再只看 state**。
+ * 这正是 3-15 的教训：判定要收在一个函数里，而不是让每个调用点自己拼。
  *
  * ### 与「勾选框」的分工（P0-3-15 的核心）
  * 徽标 = **Canvas 真相**（是谁也改不了的外部记录）；
  * 勾选框 = **谁判定完成的**（`isCanvasDone()` 为真时不可点，避免点了没反应的静默失败）。
  * 两者一起看，用户才能一眼分清「我勾的」和「Canvas 替我确认的」。
  */
-import type { TaskSubmissionState } from '@/types/task'
+import { needsManualConfirmation } from '@/lib/tasks/progress'
+import type { Task } from '@/types/task'
 
 /** 徽标语气 —— 决定颜色，不决定文案。 */
 export type SubmissionBadgeTone = 'warning' | 'danger' | 'positive' | 'neutral'
@@ -36,13 +46,18 @@ export interface SubmissionBadge {
 }
 
 /**
- * 提交态 → 徽标。`null` 表示**不该标**（Canvas 无真相）。
+ * 提交态 → 徽标。`null` 表示**不该标**（与 Canvas 无关的任务没有提交态可言）。
  *
- * ⚠️ 六种 state 必须穷尽（`switch` 无 default 分支时 TS 会强制）——
+ * ⚠️ 入参是「任务的最小形状」而不是裸 `state` —— 因为 `null` 的含义要看**来源**
+ * （P0-3-17，见文件头）。调用方直接把自己的行对象传进来即可。
+ *
+ * ⚠️ 除了 `null` 外的六种 state 必须穷尽（`switch` 无 default 分支时 TS 会强制）——
  * 将来 `TaskSubmissionState` 加值，这里会编译报错而不是静默不标。
  */
-export function submissionBadge(state: TaskSubmissionState | null): SubmissionBadge | null {
-  switch (state) {
+export function submissionBadge(
+  task: Pick<Task, 'source' | 'submissionState'>,
+): SubmissionBadge | null {
+  switch (task.submissionState) {
     case 'unsubmitted':
       return { label: '未提交', tone: 'warning', title: 'Canvas 记录尚未提交' }
     case 'missing':
@@ -60,7 +75,15 @@ export function submissionBadge(state: TaskSubmissionState | null): SubmissionBa
         title: '外部平台（如 Gradescope）提交的，Canvas 没有可信记录',
       }
     case null:
-      return null
+      // 只有 **Canvas 来源** 的 null 才标（P0-3-17）：那是 Canvas 明说"我不追踪完成态"，
+      // 与"考试派生 / 用户自建任务"的 null 不是一回事（后者干脆不标，见文件头）。
+      return needsManualConfirmation(task)
+        ? {
+            label: '需手动确认',
+            tone: 'neutral',
+            title: 'Canvas 不追踪这类作业的完成状态，需要你自己确认是否已完成',
+          }
+        : null
   }
 }
 

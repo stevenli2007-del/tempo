@@ -31,6 +31,7 @@ export type CalendarInput = Pick<
   | 'title'
   | 'dueDate'
   | 'taskType'
+  | 'source'
   | 'status'
   | 'submissionState'
   | 'isDerived'
@@ -89,6 +90,78 @@ export function isEffectivelyDone(
   return task.status === 'done' || isCanvasDone(task.submissionState)
 }
 
+// ---------------------------------------------------------------- 「需手动确认」
+
+/**
+ * 这条任务我们**判断不了完成态**，需要用户自己确认（P0-3-17）。
+ *
+ * ### 判据只有一条：**Canvas 自己说不追踪**
+ * `source === 'canvas'`（这条是 Canvas 同步进来的）**且** `submissionState === null`。
+ *
+ * `deriveSubmission()` 在这三种情况下落 null：
+ * ① `submission_types` 含 `none` / `not_graded` / `on_paper`（考勤打卡、纸质作业、mentor form）；
+ * ② 没有内联 submission 且不是 `external_tool`；
+ * ③ submission 的 `workflow_state` 是我们不认识的取值。
+ * 三种的共同点：**Canvas 明确表示它这里没有可信的完成信号**。标「已逾期」就是诬告
+ * （ADR-013：Canvas 不知道 ≠ 用户没交 —— `Lecture 1 - Airbags (makeup form)` 正是这类）。
+ *
+ * ### 🔴 为什么必须带 `source === 'canvas'`，而不是只看 `submissionState === null`
+ * `null` 是个**共用取值**，它同时装着另外两类任务：
+ * - `source = 'syllabus'` 的**考试派生任务**（`exam_dates` → tasks）—— Canvas 压根没见过它们，
+ *   这里的 null 不是"Canvas 不追踪"，而是"**与 Canvas 无关**"；
+ * - `source = 'manual'` 的用户自建任务 —— 同上。
+ *
+ * 只看 `submissionState === null` 会把上面两类一起吞进来，后果是**全部考试不再被提醒**
+ * （`isRemindable` 也用它）—— 一学期只有 3-5 场的高风险事项因为"没有外部真相"就静默了，
+ * 这正是 `lib/reminders/build.ts` 文件头专门写了一段警告要避免的事。
+ * 考试与手动任务的 null 表示"**该由用户自己勾**"，而不是"我们不敢判断"。
+ *
+ * ### 用它做什么（三件事，必须同时做，否则又是不一致）
+ * ① 徽标显示灰色「需手动确认」（不是空框、也不是红）；
+ * ② **不标红「已逾期」**（周历逾期条 + 待办清单）；
+ * ③ **不进提醒邮件**（`isRemindable`）。
+ * 三项共用本函数 —— 只做其中一两项就会出现"清单不标红、邮件却催"这类自相矛盾。
+ */
+export function needsManualConfirmation(
+  task: Pick<Task, 'source' | 'submissionState'>,
+): boolean {
+  return task.source === 'canvas' && task.submissionState === null
+}
+
+// ---------------------------------------------------------------- 逾期资格
+
+/**
+ * 这条任务**够格被标「已逾期」**吗？（只判状态轴，日期由调用方自己比。）
+ *
+ * ### 为什么必须是一个独立函数（P0-3-17 顺手修的 P0-3-16 遗留）
+ * 「已逾期」是本项目里**最容易变成诬告**的三个字：它断言"你该交的没交"。
+ * 而它的判据在四个地方各自出现过：周历逾期条、总览页待办清单、课程卡近期任务、
+ * 课程页作业详情。P0-3-16 只改了其中一处（总览页红组），于是当时就留下了
+ * 「周历说逾期、今日任务说没事」的自相矛盾 —— 同一个页面上的两条信息打架。
+ *
+ * 收成一个函数之后，**改口径就是改这里**。
+ *
+ * ### 四种不能标的情况（每一种都有实测或 ADR 依据）
+ * 1. `status === 'done'` —— 用户自己说做完了（用户主权最高，ADR-015）；
+ * 2. `isCanvasDone()` —— Canvas 已收到/已评分；
+ * 3. `external_unconfirmed` —— 外部平台（Gradescope）交的，Canvas 的"未交"只是**推断**，
+ *    实测出现过假阴性（Lab 1: Airbags 已交却报未交，ADR-013）；
+ * 4. `needsManualConfirmation()` —— Canvas 明说它不追踪这条（on_paper / none / not_graded）。
+ *
+ * **刻意保留为真**的：`source='syllabus'` 的考试与手动任务（`null` 态）——
+ * 它们的日期来自**用户自己的** syllabus，说"这个日子过了"是陈述用户自己的记录，
+ * 不是替第三方下结论。只有这类任务才该在过期后继续显眼。
+ */
+export function canBeOverdue(
+  task: Pick<Task, 'status' | 'source' | 'submissionState'>,
+): boolean {
+  if (task.status === 'done') return false
+  if (isCanvasDone(task.submissionState)) return false
+  if (task.submissionState === 'external_unconfirmed') return false
+  if (needsManualConfirmation(task)) return false
+  return true
+}
+
 // ---------------------------------------------------------------- 周历口径
 
 export interface CalendarPill {
@@ -116,7 +189,11 @@ export interface CalendarDay {
 export interface WeekCalendarModel {
   /** 滚动 7 天，**今天在最左**。 */
   days: CalendarDay[]
-  /** 已过期且仍未完成的 —— 收成顶部一整条，不散落在过去的格子里。 */
+  /**
+   * 已过期且仍未完成的 —— 收成顶部一整条，不散落在过去的格子里。
+   * **只收够格标逾期的**（`canBeOverdue()`，P0-3-17）：Canvas 已判定完成、
+   * 外部平台无记录、Canvas 明说不追踪的三类都不进来 —— 那些在待办清单与课程页里仍看得见。
+   */
   overdue: CalendarPill[]
   /** 没有截止日期的（考试 TBD 等）—— 底部单列，**不编日期塞进格子**。 */
   undated: CalendarPill[]
@@ -192,6 +269,13 @@ export function buildWeekCalendar(tasks: CalendarInput[], now: Date): WeekCalend
       else perDay.set(day.key, [{ pill, dueMs }])
     } else if (dueMs < nowMs) {
       // 落在 7 天窗口之外、且已过期 → 顶部逾期条。
+      //
+      // 🔴 P0-3-17：「够不够格标逾期」收在 `canBeOverdue()` 一处（原先这里收**全部来源**，
+      //    于是 `makeup form` 这类 Canvas 明说不追踪的任务被标「已逾期 16 天」，
+      //    与总览页红组的口径打架 —— P0-3-16 留下的不一致，本卡修掉）。
+      //    不够格的任务在**下方待办清单**与**课程页作业详情**里仍然看得见
+      //    （只是标灰色的「需手动确认」），所以这不是"把它藏起来"，而是"不给它贴假结论"。
+      if (!canBeOverdue(task)) continue
       overdue.push({ pill, dueMs })
     }
     // 落在窗口之外、且未到期 → 不进周历（周历只覆盖 7 天，这是刻意的）。

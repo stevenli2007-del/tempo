@@ -9,7 +9,7 @@ import { courseColorKey, courseColorVar } from '@/lib/courses/course-color'
 import type { CourseSyncLine } from '@/lib/sync/status'
 import { SUBMISSION_BADGE_CLASS, submissionBadge } from '@/lib/tasks/submission'
 import type { Course } from '@/types/course'
-import type { TaskSubmissionState } from '@/types/task'
+import type { TaskSource, TaskSubmissionState } from '@/types/task'
 import type { Syllabus } from '@/types/syllabus'
 
 /**
@@ -35,6 +35,11 @@ export interface UpcomingTaskView {
   /** null = 日期待定（TBD）。 */
   dueLabel: string | null
   isOverdue: boolean
+  /**
+   * 任务来源（P0-3-17）。徽标「需手动确认」只给 **Canvas 来源** 的 null 态，
+   * 所以这里必须带 `source` —— 与总览页清单传的是同一个形状。
+   */
+  source: TaskSource
   /** Canvas 提交态（P0-3-10）；null = 不追踪。卡片显示「已评分」等轻量徽标。 */
   submissionState: TaskSubmissionState | null
 }
@@ -69,7 +74,8 @@ function UpcomingTasks({ tasks }: { tasks: UpcomingTaskView[] }) {
       {tasks.map((task) => {
         // 徽标口径与总览页任务行**共用一处**（`lib/tasks/submission.ts`，P0-3-15）——
         // 各写一份 switch 迟早出现"同一份作业两页写着不同的状态"。
-        const badge = submissionBadge(task.submissionState)
+        // P0-3-17：入参改为整行（`null` 的含义取决于 `source`）。
+        const badge = submissionBadge(task)
         return (
           <li key={task.id} className="flex items-baseline gap-2 text-xs">
             <span className="truncate text-foreground/80">{task.title}</span>

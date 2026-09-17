@@ -1,3 +1,4 @@
+import { toNumberOrNull } from '@/lib/numbers'
 import type { CanvasAssignment } from '@/types/canvas'
 
 /**
@@ -35,10 +36,16 @@ type CanvasApiAssignment = {
   published?: boolean
   workflow_state?: string | null
   submission_types?: unknown
+  /** 作业页地址（P0-3-17：任务名外链跳 Canvas）。实测全量存在。 */
+  html_url?: string | null
+  /** 满分。实时探针实测为数字；字符串形式的也接受（Canvas 偶有字符串化）。 */
+  points_possible?: number | string | null
   /** `include[]=submission` 时返回的内联提交对象（当前用户）。 */
   submission?: {
     workflow_state?: string | null
     submitted_at?: string | null
+    /** 当前用户得分（P0-3-17：每作业分数条）。null = 尚未评分。 */
+    score?: number | string | null
     late?: boolean
     missing?: boolean
   } | null
@@ -101,6 +108,8 @@ export function toCanvasAssignments(raw: unknown): CanvasAssignment[] {
       submission = {
         workflowState: typeof s.workflow_state === 'string' ? s.workflow_state : null,
         submittedAt: typeof s.submitted_at === 'string' ? s.submitted_at : null,
+        // P0-3-17：分数与提交态同源，白送。
+        score: toNumberOrNull(s.score),
         late: typeof s.late === 'boolean' ? s.late : false,
         missing: typeof s.missing === 'boolean' ? s.missing : false,
       }
@@ -109,6 +118,9 @@ export function toCanvasAssignments(raw: unknown): CanvasAssignment[] {
     result.push({
       externalId,
       title: typeof item.name === 'string' && item.name.trim() !== '' ? item.name : '未命名作业',
+      // 空串当"没有"处理 —— 空 href 会渲染成一个点了不动的链接。
+      htmlUrl: typeof item.html_url === 'string' && item.html_url.trim() !== '' ? item.html_url : null,
+      pointsPossible: toNumberOrNull(item.points_possible),
       dueAt: typeof item.due_at === 'string' ? item.due_at : null,
       externalUpdatedAt: typeof item.updated_at === 'string' ? item.updated_at : null,
       submissionTypes,

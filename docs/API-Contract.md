@@ -430,12 +430,24 @@
       "taskType": "assignment",
       "source": "canvas",
       "status": "pending",
-      "isDerived": false
+      "isDerived": false,
+      // Canvas 真相轴（ADR-015：同步写它、永不写 status）
+      "submissionState": "graded",             // null = Canvas 不追踪完成态
+      "submittedAt": "2026-09-20T18:02:11-07:00",
+      // P0-3-17 新增三个 Canvas 附带字段（都取自**已有的**那一个 assignments 请求）
+      "canvasUrl": "https://bcourses.berkeley.edu/courses/1555045/assignments/9140338",
+      "pointsPossible": 20,                    // null = Canvas 未设满分（**不是 0 分**）
+      "submissionScore": 16.75                 // null = 尚未评分（**不是 0 分**）
     }
   ],
   "meta": { "total": 23 }
 }
 ```
+
+> 🔴 **`pointsPossible` / `submissionScore` 的 `null` 绝不能用 `0` 代替**
+> （P0-3-17）。`null` = 未知，`0` = 真的是 0 分 —— 两者含义相反（`Database.md` §3.9 的同一原则，
+> 收窄实现见 `lib/numbers.ts`：`0` 原样通过，其余无法解析的才降级为 null）。
+> 展示层按「两者都有值才画分数条」处理（`components/courses/assignment-detail.tsx`）。
 
 **查询参数**
 
@@ -468,7 +480,7 @@
 `tasks` 表没有 `user_id`，RLS 经 `courses.user_id` 判定（迁移 `20260902100000`），
 而该策略**不看 `is_archived`**，所以归档过滤必须在查询里显式做（`loadActiveCourseIds()`）。
 
-### 5.1 总览可视化的口径（✅ P0-3-7a；P0-3-16 删债条、加今日任务）
+### 5.1 总览可视化的口径（✅ P0-3-7a；P0-3-16 删债条、加今日任务；P0-3-17 统一「逾期资格」）
 
 > 这一节写的不是接口，而是**数字怎么算**。执行卡把「先定义进度的分子分母」列为 P0-3-7 的硬前置：
 > 口径没定，既写不出代码，也没法判断算得对不对。代码实现在 `lib/tasks/progress.ts`（周历 / 最近的考试）
@@ -499,13 +511,38 @@
 
 > 🔴 **红组只收 Canvas 明确说没交的**（`unsubmitted` / `missing`）。`submission_state = NULL`
 > （Canvas 不追踪：`on_paper` / `none` / 考试派生）与 `external_unconfirmed`（Gradescope 等 LTI）
-> **不进红组** —— Canvas 不知道你交没交，标红就是诬告（ADR-013）。这类任务归 `P0-3-17` 的「需手动确认」。
+> **不进红组** —— Canvas 不知道你交没交，标红就是诬告（ADR-013）。判据见下方「逾期资格」。
 >
 > 🔴 **已完成（`isEffectivelyDone()`）一律不进** —— 与周历 / 待办清单**共用同一个完成判定**。
 > **纯展示、不改写任何状态**（ADR-015：`status` / `submission_state` 只读）。
 >
 > **取数复用总览清单**（`loadTasks`，窗口 = now + 7d，正好含「逾期 + 今天 + 未来 7 天」）——
 > 因此删掉债务条后，总览页从**四路查询降到两路**（`loadTasks` + `loadUpcomingExams`）。
+
+#### 🔴 逾期资格（`canBeOverdue()`，P0-3-17）
+
+「已逾期」是本项目里**最容易变成诬告**的三个字 —— 它断言"你该交的没交"。
+所以判据收在**一个函数**里，四个展示位置（周历逾期条 / 总览页待办清单 / 课程卡近期任务 /
+课程页作业详情）全部调用它，**不许各写一份**。
+
+| 情况 | 能否标「已逾期」 | 依据 |
+|---|---|---|
+| `status = 'done'`（用户手勾） | ❌ | 用户主权最高（ADR-015） |
+| `submission_state ∈ {submitted, pending_review, graded}` | ❌ | Canvas 已判定完成（`isCanvasDone()`） |
+| `submission_state = 'external_unconfirmed'` | ❌ | 外部平台的"未交"只是**推断**，实测出现过假阴性（ADR-013） |
+| `source='canvas'` 且 `submission_state = NULL` | ❌ | **Canvas 明说它不追踪这条**（on_paper / none / not_graded）→ 显灰色「需手动确认」 |
+| `source='syllabus'`（考试派生）或 `'manual'` 且 `submission_state = NULL` | ✅ | 日期来自**用户自己的** syllabus，说"这个日子过了"是陈述他自己的记录，不是替第三方下结论 |
+| `unsubmitted` / `missing` | ✅ | Canvas **明确说**没收到 —— 这正是要催的那一类 |
+
+> ⚠️ 上表第 4 行与第 5 行**必须分开**：`submission_state = NULL` 是个**共用取值**，
+> 它同时装着"Canvas 不追踪"和"与 Canvas 无关"两种截然不同的语义。
+> 只看 `NULL` 会把考试一起排掉（→ 全部考试不再被提醒，见 §11）。
+> 判据 = `needsManualConfirmation(task)` = `source === 'canvas' && submissionState === null`。
+
+**P0-3-17 修掉的既有不一致**：周历顶部的「已逾期 N 项」条原先收**全部来源**，
+于是 `Lecture 1 - Airbags (makeup form)` 这类 Canvas 明说不追踪的任务被标「已逾期 16 天」，
+而同一页的「今日任务」红组却当它没事 —— 两条信息在同一个页面上打架。
+现在两处共用 `canBeOverdue()`。
 
 #### 周历口径（`buildWeekCalendar()`）
 
@@ -514,13 +551,14 @@
 | 跨度 | **滚动 7 天、今天在最左**（不用"本周一–周日"：周日打开会看到一个基本空的日历） |
 | 收哪些任务 | **全部来源**（含考试派生 —— 周历**要**显示考试） |
 | 排除 | 已完成（`isEffectivelyDone()`，与待办清单**共用同一个函数**） |
-| 逾期 | 落在 7 天窗口外且已过期的 → 收成**顶部一整条**（过去的日子没人会往回翻） |
+| 逾期 | 落在 7 天窗口外且已过期的 → 收成**顶部一整条**（过去的日子没人会往回翻）。**只收够格标逾期的**（`canBeOverdue()` —— 排掉已完成 / 外部平台 / Canvas 明说不追踪，P0-3-17） |
 | 日期待定 | `due_date IS NULL` → 底部单列，**不编日期塞进格子**（`Database.md` 3.9） |
 | 同日内排序 | 按截止时刻升序 |
 | 逾期条排序 | 最近逾期的在最前 |
 
-> ⚠️ **周历与「今日任务」都收全部来源、都用 `isEffectivelyDone()`** —— 同一条任务不会
-> 在一个区块算"已完成"、在另一个区块算"待办"。**改取数 / 改完成判定前先读 `lib/tasks/progress.ts` 文件头。**
+> ⚠️ **周历与「今日任务」都收全部来源、都用 `isEffectivelyDone()` 与 `canBeOverdue()`** ——
+> 同一条任务不会在一个区块算"已完成"、在另一个区块算"待办 / 已逾期"。
+> **改取数 / 改完成判定 / 改逾期判据前先读 `lib/tasks/progress.ts` 文件头。**
 
 #### 「最近的考试」条（`buildUpcomingExams()`）
 
@@ -546,8 +584,14 @@
 
 #### 明确不做
 
-❌ 饼图 ｜ ❌ 课程完成度 % ｜ ❌ 学期总进度环 / 仪表盘 ｜ ❌ streak / 连续天数（ADR-016 R5）
-｜ ❌「你已完成 47 项」虚荣大数字（与"少打开 Canvas"无关）｜ ❌ 庆祝动画（激励排在最后，M3 不做）
+❌ 课程完成度 % ｜ ❌ 学期总进度环 / 仪表盘 ｜ ❌ streak / 连续天数（ADR-016 R5）
+｜ ❌「你已完成 47 项」虚荣大数字（与"少打开 Canvas"无关）｜ ❌ 庆祝动画（激励排在最后，M3 不做）。
+
+> ⚠️ **「饼图」不属于这一条**（P0-3-17 澄清）。这里说的 ❌ 饼图针对**总览页的进度可视化**
+> （"我完成了百分之多少"）。`P0-3-17` 在**课程详情页**加的成绩构成饼图是另一回事：
+> 它画的是 **syllabus 原文写的**各部分占比（`grade_components.weight_percent`），
+> 是一个**既成事实的呈现**，不是我们替用户算出来的进度 —— 没有"分母自己长大"的问题。
+> 数据源也不是 Canvas 的 `assignment_groups.group_weight`（尚未同步；课程**加权总分**归 Phase 1 `P0-3-22`）。
 
 ### `PATCH /api/v1/tasks/:id`
 
@@ -1089,16 +1133,25 @@ ADR-017 点名的"秘书"护城河：**Tempo 找人，不是人找 Tempo**。当
 - 结果字段：`shownCount`（正文条数）/ `hiddenCount`（折叠数）/ `hiddenTbdCount`（折叠中含 TBD 的数）/ `totalCount`（= shown + hidden）。
 - 排序不变：逾期 → 3 天内 → 更远 → TBD（`sortByDueDateAsc`）。
 
-### 🔴 可提醒范围（「绝不误报」判据，2026-09-17 真发验收后修）
+### 🔴 可提醒范围（「绝不误报」判据，2026-09-17 真发验收后修；P0-3-17 补第 3 行）
 进邮件的每一条都要过 `isRemindable()`（`lib/reminders/build.ts`）：
 
-| `submission_state` | 提醒？ | 理由 |
-|---|---|---|
-| `submitted` / `graded` / `pending_review` | ❌ | Canvas 外部真相说已完成；`status` 仍 `pending` 只是因为同步永不写它（ADR-015） |
-| `external_unconfirmed` | ❌ | 外部平台（Gradescope 等）无可信记录，当"没交"是诬告（ADR-013） |
-| `null` | ✅ | Canvas 不追踪（on_paper/not_graded）**含全部 syllabus 派生考试与手动任务**；`null ≠ 不确定` |
-| `unsubmitted` / `missing` | ✅ | Canvas 明确说没收到 —— 唯一能理直气壮催的一类 |
-| `status='done'`（任意 submission_state） | ❌ | 用户主权优先（ADR-015） |
+| 来源 | `submission_state` | 提醒？ | 理由 |
+|---|---|---|---|
+| 任意 | `submitted` / `graded` / `pending_review` | ❌ | Canvas 外部真相说已完成；`status` 仍 `pending` 只是因为同步永不写它（ADR-015） |
+| 任意 | `external_unconfirmed` | ❌ | 外部平台（Gradescope 等）无可信记录，当"没交"是诬告（ADR-013） |
+| **`canvas`** | **`null`** | **❌** | **Canvas 明说它不追踪这条**（on_paper / none / not_graded）→ 邮件里那句「已逾期 N 天」是我们替 Canvas 编的判断（P0-3-17） |
+| `syllabus` / `manual` | `null` | ✅ | **考试派生与手动任务**：与 Canvas 无关；日期来自用户自己的 syllabus。`null ≠ 不确定` |
+| 任意 | `unsubmitted` / `missing` | ✅ | Canvas 明确说没收到 —— 唯一能理直气壮催的一类 |
+| 任意 | 任意，但 `status='done'` | ❌ | 用户主权优先（ADR-015） |
+
+> 🔴 **第 3 行与第 4 行必须分开**（P0-3-17）。`submission_state = NULL` 是**共用取值**，
+> 同时装着"Canvas 不追踪"与"与 Canvas 无关"两种语义 —— 判据是
+> `needsManualConfirmation(task)` = `source === 'canvas' && submissionState === null`。
+> **只看 `NULL` 会把全部 syllabus 考试一起排掉**（一学期只有 3-5 场的高风险事项静默消失），
+> 这是本卡最需要防的一种"顺手统一"。回归里两侧都有断言钉着（`regress:reminders` + `regress:progress`）。
+>
+> 实测依据：`Lecture 1 - Airbags (makeup form)`（due 2026-09-01）被连续催了半个月。
 
 - **只筛 `status='pending'` 是不够的**：首版就这么写，真发的那封信 21 条里 **18 条是 Canvas 已判定完成**却标着「已逾期 14 天」，**误报率 86%**。判定必须**复用** `isEffectivelyDone()`（`lib/tasks/progress.ts`，全站唯一），别重写。
 - 影响：`totalCount` 与折叠计数都按这层筛后的集合算。
@@ -1151,3 +1204,4 @@ Vercel 引擎组装好邮件后，POST `{ to, subject, html, text }` 给 Cloudfl
 | 2026-09-17 | **§11 频控判据从「固定 24h 窗口」改为「用户本地日历日」**（P0-3-14 续二，🔴 真发前拦下的静默 bug）：原实现在 `engine.ts` 判 `Date.now() - last_reminder_at < 24h` → 跳过。**根因**：定时任务固定同一时刻触发（`0 14 * * *`），而 `last_reminder_at` 记的是**上一轮发送完成**时刻（必然略晚于本轮触发时刻）→ 下一轮触发时差值**永远不足 24h** → 当天跳过、次日差值已超 24h 才发 → **实际退化成「隔天一封」**，且日志只有 `reason:'recent'`，面板/审计全看不出异常（实测账：昨 14:00:03 发 → 今 14:00:00 查 = 86,397,000ms < 24h = 跳过）。现改为 `isSameLocalDay(last_reminder_at, now, timezone)`（`build.ts` 纯函数，`en-CA` 出 `YYYY-MM-DD` 比较，时区取 `profiles.timezone`，缺省 `DEFAULT_TIMEZONE`），语义与「每用户每天至多一封」字面一致，且不受 cron 抖动 / 发送耗时漂移影响。`DEFAULT_TIMEZONE` 收口到 `build.ts`（原先 `engine.ts` 里硬编了第二处 `'America/Los_Angeles'`）。回归 34 → **39**（新增 5 条：隔天同一时刻必须放行、同日一律拦、跨 PT 零点算新日、UTC 跨日但本地同日仍拦、按用户时区而非 UTC 判定）| P0-3-14、ADR-016 R3 |
 | 2026-09-17 | **§11 邮件正文口径收敛为「聚焦版」+ 出站全链路生产验证通过**（P0-3-14 续）：① **聚焦版**（Steven 拍板）—— 正文只列「可行动」项（逾期 + 3 天内），其余折叠成「另有 N 项更远的任务（含 M 项日期待定）→ 在 Tempo 查看」；新增结果字段 `shownCount` / `hiddenCount` / `hiddenTbdCount`；根因=首版全量平铺在真实数据上生成 **63 行**、而主题写 20（口径打架 + 洪水式日报，违背 ADR-016 R3 / ADR-017）。② **出站启用**：迁移执行 ✅、Workers Paid **本就已付费**（免升级）、`noreply@tempocourse.com` 验证 ✅（catch-all zone 上靠**临时精确转发规则**把验证信引到已验邮箱，验完删除）、出站 Worker 部署 ✅（`tempo-outbound-email.stevenli2007.workers.dev` + `send_email` 绑定 + Bearer 密钥）、Vercel 三 env ✅。③ **验收判据**：无凭证打 `/reminders/scheduled` → **401（路由已上线）而非 404（代码没上）** —— env 触发的部署不含未 push 的代码，是本次唯一卡点。④ 本地零副作用预览（service role + 真数据 + `preview:true`）：`actionable=true`、主题 20 / 正文 20 / 折叠 43（= 63）。⑤ 已知数据层问题（**不在本卡**）：`Final Exam` / `Unit 1-3 Exam` 各出现两份（exam 派生任务与 syllabus 重复），单列后续卡 | P0-3-14、ADR-016、ADR-017 |
 | 2026-09-17 | **§5.1 删「已到期作业」债务条、新增「今日任务」加权切片**（P0-3-16）：① 删除 `components/overview/debt-bar.tsx` + dashboard 接线 + `lib/tasks.ts` 的 `loadDebtTasks` + `lib/tasks/progress.ts` 的 `debtWindow`/`classifyDebt`/`summarizeDebt` 等死代码（`grep debtWindow` = 0）；② 新增 `lib/tasks/today.ts` 的 `buildTodayTasks()` —— **今天到期 100% + 未来 7 天按 `1/剩余天数` 切片（9/17 看 9/21 = 25%）+ 逾期未完成红组**，三组权重之和即"今日工作量"；③ **红组只收 Canvas 明确说没交的**（`unsubmitted`/`missing`），`null` / `external_unconfirmed` 不进红组（ADR-013）；④ **零新查询**：取数复用总览清单（`loadTasks`，窗口 = now + 7d），总览页从**四路查询降到两路**；⑤ 展示层 `components/overview/today-tasks.tsx`（服务端组件）。回归 `regress:progress` 24 → **27**（删 5 条 debt、加 8 条今日任务） | P0-3-16、ADR-013、ADR-015、ADR-016 |
+| 2026-09-17 | **§5 任务新增三个 Canvas 附带字段 + §5.1 统一「逾期资格」+ §11 补可提醒例外**（P0-3-17）：① `tasks` 加列 `canvas_url` / `points_possible` / `submission_score`（迁移 `20260917140000`，**字段全部来自已有的那一个 `?include[]=submission` 请求，零额外 Canvas 调用**；`pointsPossible`/`submissionScore` 的 `null` **绝不用 0 替代**，收窄实现 `lib/numbers.ts`）；② 「能不能标逾期」收成**一个** `canBeOverdue()`（`lib/tasks/progress.ts`）—— 排掉"手勾已完成 / Canvas 已判定完成 / 外部平台无可信记录 / Canvas 明说不追踪"四类，周历逾期条 + 总览页清单 + 课程卡近期任务 + 课程页作业详情**四处共用**；**顺手修掉 P0-3-16 留下的不一致**（周历逾期条原收全部来源，把 `makeup form` 标成「已逾期 16 天」，与同页「今日任务」红组打架）；③ 新增 `needsManualConfirmation()` = `source='canvas' && submission_state IS NULL` → 灰色徽标「需手动确认」；④ §11 可提醒范围补第 3 行：**Canvas 来源的 NULL 不提醒**，但 **syllabus/manual 的 NULL（含全部考试）照常提醒** —— 两侧都有回归断言钉着；⑤ §5.1「明确不做」澄清 ❌ 饼图只针对总览页进度可视化，课程详情页的成绩构成饼图（数据源 = syllabus `grade_components.weight_percent`）不在禁止之列 | P0-3-17、ADR-013、ADR-015 |

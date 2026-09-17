@@ -58,14 +58,30 @@ export type CanvasCourse = {
 /**
  * Canvas 作业（P0-2-5 同步的输入形状，`GET /api/v1/courses/:id/assignments` 的映射结果）。
  *
- * 刻意**不含** description / points_possible / submission 状态等字段 ——
- * Security-Privacy 的最小权限要求与 Sync-Strategy §14（只同步作业标题与截止日期）：
- * 多拿一个字段就多一处合规义务，而 Phase 0 的界面一个都用不上。
+ * 刻意**不含** description / 花名册 / 教师信息等字段 ——
+ * Security-Privacy 的最小权限要求：多拿一个字段就多一处合规义务。
+ *
+ * ### P0-3-17 扩了四个字段（都不增加请求数）
+ * `htmlUrl` / `pointsPossible` / `submission.score` 全是**同一个 `include[]=submission`
+ * 请求已经在返回体里的**内容（实测确认），扩映射不增加任何 Canvas 调用
+ * —— 三级熔断（20 请求 / 60 秒 / 单课 3 页）不受影响。
+ * 用途：`htmlUrl` → 任务名外链跳 Canvas；`score` + `pointsPossible` → 每作业分数条。
+ *
+ * ⚠️ `pointsPossible` 与 `submission.score` 都可能为 null，且**含义不同**：
+ * 前者 null = Canvas 没设满分；后者 null = 尚未评分。**都不是 0**，
+ * 展示层按「有值才画进度条」处理（Database.md §3.9：禁止用假值填充未知）。
  */
 export type CanvasAssignment = {
   /** 源侧作业 ID（字符串），落库为 `tasks.source_id`，是去重的唯一依据。 */
   externalId: string
   title: string
+  /**
+   * Canvas 作业页地址（`html_url`）。实测**全量存在**（P0-3-17 只读探针）。
+   * 缺失时为 null —— 任务名就退回纯文本，不编一个链接出来。
+   */
+  htmlUrl: string | null
+  /** 该作业满分（`points_possible`）；null = Canvas 未设满分（**不是 0**）。 */
+  pointsPossible: number | null
   /**
    * 截止时刻（ISO 8601）；`null` = Canvas 上没设截止日期。
    *
@@ -95,6 +111,11 @@ export type CanvasSubmission = {
   workflowState: string | null
   /** ISO 8601 或 null（未提交）。 */
   submittedAt: string | null
+  /**
+   * 当前用户得分（`submission.score`，P0-3-17）。null = 尚未评分（**不是 0 分**）。
+   * 与 `CanvasAssignment.pointsPossible` 一起画分数条。
+   */
+  score: number | null
   /** Canvas 判定迟到。 */
   late: boolean
   /** Canvas 判定缺交（逾期且未交）。 */

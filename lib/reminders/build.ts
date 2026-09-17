@@ -1,5 +1,5 @@
-import type { TaskStatus, TaskSubmissionState, TaskType } from '@/types/task'
-import { isEffectivelyDone } from '@/lib/tasks/progress'
+import type { TaskSource, TaskStatus, TaskSubmissionState, TaskType } from '@/types/task'
+import { isEffectivelyDone, needsManualConfirmation } from '@/lib/tasks/progress'
 
 /**
  * 提醒邮件的「内容渲染层」（P0-3-14）。
@@ -42,9 +42,23 @@ import { isEffectivelyDone } from '@/lib/tasks/progress'
  * 也包含**全部 syllabus 派生考试与手动任务**。考试是一学期只有 3-5 次的高风险事项，
  * 因为"没有外部真相"就不提醒是灾难性的。`null ≠ 不确定`，只表示"这事得靠用户自己勾"。
  * （`progress.ts` 文件头警告过"两个消费者对考试任务态度相反"，这就是那类陷阱。）
+ *
+ * ### 🔴 P0-3-17 补的例外：**Canvas 明说不追踪的**不提醒（`needsManualConfirmation`）
+ * 上面那句"`null` 要提醒"说的是**考试与手动任务**——它们与 Canvas 无关，
+ * null 只表示"用户自己勾"。但 `null` 里还有第三类：**Canvas 同步进来的、
+ * `submission_types` 为 `none` / `on_paper` / `not_graded` 的作业** ——
+ * Canvas 明确告诉你"我没有这条的完成信号"。
+ *
+ * 对这类任务，邮件里的「已逾期 N 天」是**我们替 Canvas 编的判断**（ADR-013 的诬告），
+ * 实测就是 `Lecture 1 - Airbags (makeup form)`（due 9/1）被催了半个月。所以排除。
+ *
+ * 判据收在 `needsManualConfirmation()` 一处（`lib/tasks/progress.ts`），
+ * 与「徽标」「不标红」共用 —— 三处各写一份必然漂开。
+ * **注意判据带 `source === 'canvas'`**：只看 `submissionState === null` 会把考试一起吞掉。
  */
 /** `isRemindable` 的最小入参形状（用结构类型而不是整个 `Task`，回归脚本可喂最小对象）。 */
 export type RemindableInput = {
+  source: TaskSource
   status: TaskStatus
   submissionState: TaskSubmissionState | null
 }
@@ -52,6 +66,8 @@ export type RemindableInput = {
 export function isRemindable(task: RemindableInput): boolean {
   if (isEffectivelyDone(task)) return false
   if (task.submissionState === 'external_unconfirmed') return false
+  // Canvas 明说不追踪完成态的（on_paper / none / not_graded 一类）不催（P0-3-17）。
+  if (needsManualConfirmation(task)) return false
   return true
 }
 

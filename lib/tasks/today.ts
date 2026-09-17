@@ -34,7 +34,15 @@ export const TODAY_HORIZON_DAYS = 7
 
 export type TodayInput = Pick<
   Task,
-  'id' | 'courseId' | 'courseName' | 'title' | 'dueDate' | 'taskType' | 'status' | 'submissionState'
+  | 'id'
+  | 'courseId'
+  | 'courseName'
+  | 'title'
+  | 'dueDate'
+  | 'taskType'
+  | 'status'
+  | 'submissionState'
+  | 'canvasUrl'
 >
 
 export interface TodayItem {
@@ -51,6 +59,11 @@ export interface TodayItem {
   /** 展示用整数百分比（100 / 50 / 33 / 25 …）。 */
   weightPct: number
   isExam: boolean
+  /**
+   * Canvas 作业页地址（P0-3-17）。有值时任务名是外链；null 时退回跳课程页。
+   * 与总览清单、课程页作业详情**同一套口径**（点任务名 = 去源头看）。
+   */
+  canvasUrl: string | null
 }
 
 export interface TodayModel {
@@ -106,6 +119,7 @@ export function buildTodayTasks(
       weight,
       weightPct: Math.round(weight * 100),
       isExam: isExamTask(task),
+      canvasUrl: task.canvasUrl,
     }
 
     if (daysUntil < 0) {

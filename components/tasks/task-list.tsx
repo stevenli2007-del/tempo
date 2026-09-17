@@ -7,7 +7,7 @@ import { useState } from 'react'
 import { courseColorVar, courseColorKey } from '@/lib/courses/course-color'
 import { isCanvasDone, isEffectivelyDone } from '@/lib/tasks/progress'
 import { SUBMISSION_BADGE_CLASS, submissionBadge } from '@/lib/tasks/submission'
-import type { TaskStatus, TaskSubmissionState } from '@/types/task'
+import type { TaskSource, TaskStatus, TaskSubmissionState } from '@/types/task'
 
 /**
  * 跨课程近期任务列表（P0-1-9，PRD F5）。
@@ -41,12 +41,23 @@ export interface TaskListItem {
   /** 已完成的任务不算逾期。 */
   isOverdue: boolean
   status: TaskStatus
+  /**
+   * 任务来源（P0-3-17）。徽标的「需手动确认」只给 **Canvas 来源** 的 null 态
+   * （Canvas 明说不追踪 vs 考试派生/自建任务的 null 是两回事）——
+   * 所以行数据必须带 `source`，口径收在 `submissionBadge()` 一处。
+   */
+  source: TaskSource
   /** 派生任务（考试）不可在此编辑内容，但**允许**标记完成 —— 完成状态是用户自己的。 */
   isDerived: boolean
   /** Canvas 提交态（P0-3-10）；null = 不追踪。 */
   submissionState: TaskSubmissionState | null
   /** Canvas 提交时刻（ISO）或 null。 */
   submittedAt: string | null
+  /**
+   * Canvas 作业页地址（P0-3-17）。有值时任务名渲染成此外链；
+   * null（非 Canvas 来源 / Canvas 未给）时退回跳课程页 —— 不编一个链接出来。
+   */
+  canvasUrl: string | null
 }
 
 interface TaskListProps {
@@ -81,7 +92,8 @@ function TaskRow({ item, busy, onToggle }: TaskRowProps) {
   // 之前这里只看 status，于是 Canvas 已判定完成的任务虽然被分进了「已完成」盒，
   // 却渲染成空勾选框 + 无删除线 —— 用户看到的是一条"待办"。
   const effectivelyDone = isEffectivelyDone(item)
-  const badge = submissionBadge(item.submissionState)
+  // 徽标入参是整行（P0-3-17）：`null` 的含义取决于 `source`，不能只传 state。
+  const badge = submissionBadge(item)
 
   // 🔴 P0-3-15：Canvas 已判定完成时，勾选框**不可点**。
   // 此时 toggle 无论往哪个方向写 `status`，`isEffectivelyDone()` 都仍然为真 ——
@@ -121,15 +133,39 @@ function TaskRow({ item, busy, onToggle }: TaskRowProps) {
 
       <div className="min-w-0 flex-1">
         <div className="flex flex-wrap items-baseline gap-x-2">
+          {/* 🔴 P0-3-17：点任务名 = 去源头看（Canvas 作业页），与"点勾切换完成"是两个动作。
+              Canvas 有 `html_url` 时用外链；没有（考试派生 / 手动任务 / Canvas 未给）
+              则退回原来的"进课程详情页"—— 绝不把一个跳不到的地方画成链接。
+
+              课程页入口因此从"标题"挪到右侧的**课程名**上（见下），
+              否则 Canvas 来源的任务在总览页就再也没有进课程页的路。 */}
+          {item.canvasUrl ? (
+            <a
+              href={item.canvasUrl}
+              target="_blank"
+              rel="noreferrer"
+              title={`在 Canvas 打开「${item.title}」`}
+              className={`truncate text-sm font-medium underline-offset-4 hover:underline ${
+                effectivelyDone ? 'text-muted-foreground line-through' : 'text-foreground'
+              }`}
+            >
+              {item.title}
+            </a>
+          ) : (
+            <Link
+              href={`/courses/${item.courseId}`}
+              className={`truncate text-sm font-medium underline-offset-4 hover:underline ${
+                effectivelyDone ? 'text-muted-foreground line-through' : 'text-foreground'
+              }`}
+            >
+              {item.title}
+            </Link>
+          )}
           <Link
             href={`/courses/${item.courseId}`}
-            className={`truncate text-sm font-medium underline-offset-4 hover:underline ${
-              effectivelyDone ? 'text-muted-foreground line-through' : 'text-foreground'
-            }`}
+            title={`查看「${item.courseName}」课程详情`}
+            className="inline-flex shrink-0 items-center gap-1.5 text-xs text-muted-foreground underline-offset-4 hover:underline"
           >
-            {item.title}
-          </Link>
-          <span className="inline-flex shrink-0 items-center gap-1.5 text-xs text-muted-foreground">
             {/* 课程色点（P0-3-6 配套）：同 courseId 永远同色，与课程卡一致，
                 一眼区分任务归属；色值随主题切换。 */}
             <span
@@ -138,7 +174,7 @@ function TaskRow({ item, busy, onToggle }: TaskRowProps) {
               aria-hidden
             />
             {item.courseName}
-          </span>
+          </Link>
           {/* 提交态徽标：每个任务名后都有（Canvas 不追踪时 `submissionBadge()` 返回 null，不标）。 */}
           {badge ? (
             <span

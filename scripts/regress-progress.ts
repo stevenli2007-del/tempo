@@ -17,10 +17,13 @@
 import {
   buildUpcomingExams,
   buildWeekCalendar,
+  canBeOverdue,
   isCanvasDone,
   isEffectivelyDone,
+  needsManualConfirmation,
 } from '@/lib/tasks/progress'
 import { buildTodayTasks, TODAY_HORIZON_DAYS } from '@/lib/tasks/today'
+import { isRemindable } from '@/lib/reminders/build'
 import { SUBMISSION_BADGE_CLASS, submissionBadge } from '@/lib/tasks/submission'
 import type { Task, TaskSubmissionState } from '@/types/task'
 
@@ -46,6 +49,11 @@ function mk(over: Partial<Task>): Task {
     isDerived: false,
     submissionState: 'unsubmitted',
     submittedAt: null,
+    // P0-3-17 新增的三个字段。默认全 null（= "Canvas 没给"），
+    // 需要它们的用例显式覆盖 —— 默认值必须是"没有"，绝不能是 0（0 是"真的是 0 分"）。
+    canvasUrl: null,
+    pointsPossible: null,
+    submissionScore: null,
     ...over,
   }
 }
@@ -66,10 +74,10 @@ const fixture: Task[] = [
   mk({ title: 'C 已评分', dueDate: PAST, submissionState: 'graded' }), // 已完成（Canvas）
   mk({ title: 'D 待查重', dueDate: PAST, submissionState: 'pending_review' }), // 已完成（Canvas）
   mk({ title: 'E 外部平台', dueDate: PAST, submissionState: 'external_unconfirmed' }), // 无外部真相 → 不进红组
-  mk({ title: 'F 不追踪', dueDate: PAST, submissionState: null }), // Canvas 不追踪 → 不进红组
+  mk({ title: 'F 不追踪', dueDate: PAST, submissionState: null }), // Canvas 明说不追踪 → 不进逾期条（P0-3-17）
   mk({ title: 'G 手勾', dueDate: PAST, status: 'done', submissionState: 'unsubmitted' }), // 已完成（手勾）
-  mk({ title: 'H 考试派生', dueDate: PAST, source: 'syllabus', taskType: 'exam', isDerived: true, submissionState: null }), // 无外部真相 → 不进红组
-  mk({ title: 'I 手动', dueDate: PAST, source: 'manual', submissionState: null }), // 无外部真相 → 不进红组
+  mk({ title: 'H 考试派生', dueDate: PAST, source: 'syllabus', taskType: 'exam', isDerived: true, submissionState: null }), // 与 Canvas 无关 → 仍算逾期
+  mk({ title: 'I 手动', dueDate: PAST, source: 'manual', submissionState: null }), // 与 Canvas 无关 → 仍算逾期
   mk({ title: 'J 无日期', dueDate: null }), // 不进（不编日期）
   mk({ title: 'K 未到期', dueDate: TOO_FAR }), // 不进周历（窗口外）；进「今日任务」的未来切片
   mk({ title: 'L 太旧', dueDate: OLD }), // 不进（周历窗与今日视野外）
@@ -105,10 +113,19 @@ check(
     calendar.days[3]?.pills.find((p) => p.title === 'P 明天到期') === undefined,
 )
 check(
-  '逾期的收在顶部整条，不散落在过去的格子里（A/B/E/F/H/I/N/L，按最近优先）',
-  calendar.overdue.length === 8 &&
+  '逾期的收在顶部整条，不散落在过去的格子里（A/B/H/I/N/L，按最近优先）',
+  calendar.overdue.length === 6 &&
     !calendar.overdue.some((p) => p.title.startsWith('G') || p.title.startsWith('R')) &&
     calendar.overdue.every((p) => !calendar.days.some((d) => d.pills.some((x) => x.id === p.id))),
+  calendar.overdue.map((p) => p.title).join(' , '),
+)
+check(
+  '🔴 P0-3-17：逾期条只收「够格标逾期」的 —— E（外部平台）与 F（Canvas 明说不追踪）都排掉',
+  !calendar.overdue.some((p) => p.title.startsWith('E ') || p.title.startsWith('F ')) &&
+    // 但考试派生（H）与手动任务（I）**保留** —— 它们的日期来自用户自己的 syllabus，
+    // 说"这个日子过了"是陈述用户自己的记录，不是替第三方下结论。
+    calendar.overdue.some((p) => p.title.startsWith('H ')) &&
+    calendar.overdue.some((p) => p.title.startsWith('I ')),
   calendar.overdue.map((p) => p.title).join(' , '),
 )
 check('无截止日期的收进「日期待定」，不编日期塞进格子', calendar.undated.length === 1 && calendar.undated[0].title === 'J 无日期')
@@ -260,33 +277,103 @@ check(
   !isCanvasDone(null) && !isEffectivelyDone({ status: 'pending', submissionState: null }),
 )
 
-// 徽标：六态各有文案 + 色调，null 不标。**文案与颜色一起钉** —— 只改色也是回归。
-const badgeCases: [TaskSubmissionState | null, string | null, string | null][] = [
-  ['unsubmitted', '未提交', 'warning'],
-  ['missing', '缺交', 'danger'],
-  ['submitted', '已提交', 'positive'],
-  ['pending_review', '待查重', 'positive'],
-  ['graded', '已评分', 'positive'],
-  ['external_unconfirmed', '待确认', 'neutral'],
-  [null, null, null],
+// 徽标：六态各有文案 + 色调；null 的语义取决于**来源**（P0-3-17）。**文案与颜色一起钉** —— 只改色也是回归。
+type BadgeCase = [source: Task['source'], state: TaskSubmissionState | null, label: string | null, tone: string | null]
+const badgeCases: BadgeCase[] = [
+  ['canvas', 'unsubmitted', '未提交', 'warning'],
+  ['canvas', 'missing', '缺交', 'danger'],
+  ['canvas', 'submitted', '已提交', 'positive'],
+  ['canvas', 'pending_review', '待查重', 'positive'],
+  ['canvas', 'graded', '已评分', 'positive'],
+  ['canvas', 'external_unconfirmed', '待确认', 'neutral'],
+  // 🔴 P0-3-17：Canvas 明说不追踪完成态 → 「需手动确认」
+  ['canvas', null, '需手动确认', 'neutral'],
+  // 与 Canvas 无关的 null（考试派生 / 用户自建）→ **不标**（给每场考试挂徽标是纯噪声）
+  ['syllabus', null, null, null],
+  ['manual', null, null, null],
 ]
 check(
-  'submissionBadge：六态文案与色调逐一对齐，null 不标',
-  badgeCases.every(([state, label, tone]) => {
-    const b = submissionBadge(state)
+  'submissionBadge：六态文案与色调逐一对齐；canvas+null 标「需手动确认」，syllabus/manual+null 不标',
+  badgeCases.every(([source, state, label, tone]) => {
+    const b = submissionBadge({ source, submissionState: state })
     return label === null ? b === null : b?.label === label && b?.tone === tone
   }),
-  badgeCases.map(([s, l]) => `${s ?? 'null'}→${l ?? '（不标）'}`).join(' '),
+  badgeCases.map(([s, st, l]) => `${s}+${st ?? 'null'}→${l ?? '（不标）'}`).join(' '),
 )
 check(
   'submissionBadge：每个徽标都带得出悬停解释（只有两个字说不清来源）',
-  badgeCases.every(([state]) => state === null || (submissionBadge(state)?.title.length ?? 0) > 0),
+  badgeCases.every(
+    ([source, state]) =>
+      state === null && source !== 'canvas' ||
+      (submissionBadge({ source, submissionState: state })?.title.length ?? 0) > 0,
+  ),
 )
 check(
   'SUBMISSION_BADGE_CLASS：四种语气都有文字色工具类（缺一个会渲染成默认前景色）',
   (['warning', 'danger', 'positive', 'neutral'] as const).every((t) =>
     SUBMISSION_BADGE_CLASS[t].startsWith('text-'),
   ),
+)
+
+// ---------------------------------------------------------------- 需手动确认 / 逾期资格（P0-3-17）
+
+// 这两个判据是 P0-3-17 的核心：它们决定"哪些任务不该被标红、不该被催"。
+// 判错的两个后果都是静默的 —— 要么诬告用户（把 makeup form 标成逾期），
+// 要么吞掉真提醒（把考试一起排掉）。所以两侧都钉。
+
+check(
+  '🔴 needsManualConfirmation：只有 canvas 来源的 null 才算（syllabus/manual 的 null 不算）',
+  needsManualConfirmation({ source: 'canvas', submissionState: null }) &&
+    !needsManualConfirmation({ source: 'syllabus', submissionState: null }) &&
+    !needsManualConfirmation({ source: 'manual', submissionState: null }) &&
+    !needsManualConfirmation({ source: 'canvas', submissionState: 'unsubmitted' }) &&
+    !needsManualConfirmation({ source: 'canvas', submissionState: 'graded' }),
+)
+
+check(
+  '🔴 canBeOverdue：手勾 / Canvas 已判定完成 / 外部平台 / Canvas 明说不追踪 —— 四类都不标逾期',
+  !canBeOverdue({ status: 'done', source: 'canvas', submissionState: 'unsubmitted' }) &&
+    !canBeOverdue({ status: 'pending', source: 'canvas', submissionState: 'graded' }) &&
+    !canBeOverdue({ status: 'pending', source: 'canvas', submissionState: 'external_unconfirmed' }) &&
+    !canBeOverdue({ status: 'pending', source: 'canvas', submissionState: null }),
+)
+check(
+  '🔴 canBeOverdue：Canvas 明确说没交的（unsubmitted / missing）够格；考试派生与手动任务也够格',
+  canBeOverdue({ status: 'pending', source: 'canvas', submissionState: 'unsubmitted' }) &&
+    canBeOverdue({ status: 'pending', source: 'canvas', submissionState: 'missing' }) &&
+    canBeOverdue({ status: 'pending', source: 'syllabus', submissionState: null }) &&
+    canBeOverdue({ status: 'pending', source: 'manual', submissionState: null }),
+)
+
+// 提醒范围（`isRemindable`，P0-3-14 立的口径 + P0-3-17 补的例外）。
+check(
+  '🔴 isRemindable：Canvas 明说不追踪的不催（makeup form 这类，P0-3-17 修复）',
+  !isRemindable({ source: 'canvas', status: 'pending', submissionState: null }),
+)
+check(
+  '🔴 isRemindable：**考试派生与手动任务的 null 照样提醒** —— 防"顺手统一"吞掉全部考试',
+  isRemindable({ source: 'syllabus', status: 'pending', submissionState: null }) &&
+    isRemindable({ source: 'manual', status: 'pending', submissionState: null }),
+)
+check(
+  'isRemindable：已完成 / 外部平台 / Canvas 明说不追踪 三类都不催，其余照催',
+  !isRemindable({ source: 'canvas', status: 'pending', submissionState: 'graded' }) &&
+    !isRemindable({ source: 'canvas', status: 'done', submissionState: 'unsubmitted' }) &&
+    !isRemindable({ source: 'canvas', status: 'pending', submissionState: 'external_unconfirmed' }) &&
+    isRemindable({ source: 'canvas', status: 'pending', submissionState: 'unsubmitted' }) &&
+    isRemindable({ source: 'canvas', status: 'pending', submissionState: 'missing' }),
+)
+
+// `canvasUrl` 必须**原样透传**到「今日任务」的行模型（P0-3-17 的"点任务名跳 Canvas"）。
+const linkModel = buildTodayTasks(
+  [mk({ title: '有外链', dueDate: '2026-09-14T23:59:00-07:00', canvasUrl: 'https://example.test/a/1' })],
+  NOW,
+)
+check(
+  '今日任务：canvasUrl 原样透传（null 时不编链接）',
+  linkModel.upcoming[0]?.canvasUrl === 'https://example.test/a/1' &&
+    todayModel.dueToday[0]?.canvasUrl === null,
+  `${linkModel.upcoming[0]?.canvasUrl} / ${todayModel.dueToday[0]?.canvasUrl}`,
 )
 
 // ---------------------------------------------------------------- 汇总

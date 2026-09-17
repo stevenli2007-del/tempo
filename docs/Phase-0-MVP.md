@@ -29,7 +29,7 @@
 
 ## 当前进度指针
 
-**当前 task**：**`P0-3-16`（Dashboard 精修：提示语 + 删「已到期作业」债条 + 加「今日任务」加权切片）** —— 🔵 **代码完成 2026-09-17，待 Steven 验收**（下一张 = **`P0-3-17` 课程详情重排**）。⚠️ 本指针此前误指 `P0-3-12` —— 2026-09-17 16:0x Steven 把 `3-16 / 3-17 / 3-18 / 3-19 / 3-20 / 3-23` **上移进 M3**，`3-12` 视觉扫尾**重排到所有 UI 改动之后**（见下方排序纪律）。上一张 **`P0-3-15`（完成态统一 + 提交态徽标）** ✅ **Steven 验收通过 2026-09-17**（原话"验收通过，效果非常好"；commit `cfc34ef` 已 push + Vercel success）—— 修 `TaskList`「分组用合并判定、行内渲染只看 `status`」的**渲染层判定分叉**（83 条里 **40 条**画错）+ Canvas 已判定完成时勾选框改**静态灰勾不可点** + 任务名后**六态徽标**；**`P0-3-14`（主动提醒 / 优先级）** ✅ **验收通过 2026-09-17**（出站全链路已上线 + 真发已收：迁移 ①/Workers Paid ② 本就已付费/发件地址验证 ③/出站 Worker ④/Vercel env ⑤ 全部就绪；生产真发 `usersReminded:1` + 立刻重打被频控拦下；正文口径收敛为**聚焦版**；验收发现的「可提醒范围误报 86%（漏筛 `submission_state`）」已修）；**`P0-3-11`（邮件通道·入站）** ✅ 代码完成 + **真人真邮件端到端验收通过 2026-09-17**（入站-only：密址绑定 + 纯入站，出站归 P0-3-14）；✅ **部署 8/8 步**（①–⑦ 配置全部生效，⑧ 真人转发真 Gradescope 回执验证 `MX→catch-all→Worker→Vercel` 全链路通过）；**`P0-3-9`（截图档）** 代码完成、真实识别待 Steven 贴 `DASHSCOPE_API_KEY` 后补验；**P0-3-2 已验收**。
+**当前 task**：**`P0-3-17`（课程详情重排 + 抓取信息落地）** —— 🔵 **代码完成 2026-09-17，待 Steven 验收**（⚠️ **先跑迁移** `supabase/migrations/20260917140000_tasks_canvas_url_score.sql` 才能 push/部署，否则任务查询会 42703 全挂 —— 见卡面）。**上一张 `P0-3-16`（Dashboard 精修：提示语 + 删「已到期作业」债条 + 加「今日任务」加权切片）** ✅ **代码完成 + 已 push + Vercel success 2026-09-17**（commit `60f0923`；`/dashboard` 原「已到期作业」卡已消失、换成「今日任务」加权切片卡）。⚠️ 进度指针此前误指 `P0-3-12` —— 2026-09-17 16:0x Steven 把 `3-16 / 3-17 / 3-18 / 3-19 / 3-20 / 3-23` **上移进 M3**，`3-12` 视觉扫尾**重排到所有 UI 改动之后**（见下方排序纪律）。上一张 **`P0-3-15`（完成态统一 + 提交态徽标）** ✅ **Steven 验收通过 2026-09-17**（原话"验收通过，效果非常好"；commit `cfc34ef` 已 push + Vercel success）—— 修 `TaskList`「分组用合并判定、行内渲染只看 `status`」的**渲染层判定分叉**（83 条里 **40 条**画错）+ Canvas 已判定完成时勾选框改**静态灰勾不可点** + 任务名后**六态徽标**；**`P0-3-14`（主动提醒 / 优先级）** ✅ **验收通过 2026-09-17**（出站全链路已上线 + 真发已收：迁移 ①/Workers Paid ② 本就已付费/发件地址验证 ③/出站 Worker ④/Vercel env ⑤ 全部就绪；生产真发 `usersReminded:1` + 立刻重打被频控拦下；正文口径收敛为**聚焦版**；验收发现的「可提醒范围误报 86%（漏筛 `submission_state`）」已修）；**`P0-3-11`（邮件通道·入站）** ✅ 代码完成 + **真人真邮件端到端验收通过 2026-09-17**（入站-only：密址绑定 + 纯入站，出站归 P0-3-14）；✅ **部署 8/8 步**（①–⑦ 配置全部生效，⑧ 真人转发真 Gradescope 回执验证 `MX→catch-all→Worker→Vercel` 全链路通过）；**`P0-3-9`（截图档）** 代码完成、真实识别待 Steven 贴 `DASHSCOPE_API_KEY` 后补验；**P0-3-2 已验收**。
 - ✅ **O-11 关闭：多模态 provider = Qwen 通义千问**（中国区 DashScope，默认 `qwen-vl-plus-latest`，可用 `LLM_MODEL_VISION` 覆写；需切回 Claude 时设 `LLM_PROVIDER_VISION=claude`）。配套 **ADR-018**：provider **按能力路由** —— 文本仍走 DeepSeek（**现有五板块解析零回归**），视觉走 Qwen。同时解决 **O-08**：两路均中国境内、无数据出境。
 - ✅ 另三项决策：**图片不落库**（浏览器压缩后 base64 直传、即用即弃）｜**范围 = 确认完成 + 新增/改期**（完全复用 3-8b 的 `match` + `PATCH`）｜**零迁移**（不新增列）。
 - **`P0-3-14`「主动提醒 / 优先级」**（Steven 2026-09-13 同意立项，2026-09-17 开工 → 同日验收通过）—— ✅ **验收通过 2026-09-17**（三路由 + 出站 Worker + 迁移 + Vercel env 全部就绪，生产真发已收，验收发现的误报已修并随本次 dashboard 验收一并通过）。三项拍板：**渠道 = 邮件**（Web Push 排除）/ **优先级 = 截止临近排序**（不碰 Phase 2 权重）/ **正文口径 = 聚焦版**（只列「可行动」项 = 逾期 + 3 天内，其余折叠成一行计数 —— 首版全量平铺生成 63 行而主题写 20，口径打架且属洪水式日报）；ADR-017 点名它是"秘书"最核心的护城河，此前**无对应卡**；与 3-11 的出站范围边界见下方执行卡。
@@ -1121,7 +1121,7 @@ Phase 0 列表只有几十条，每行再加一个 tag 只会更密，信息增�
 | **P0-3-14** | **主动提醒 / 优先级**：出站推送（提醒时机 + 优先级建议 + 频控）—— **ADR-017 点名的"秘书"核心护城河**（此前无卡） | Bud | P0-3-11 | 见下方执行卡（三项拍板：渠道=邮件 / 优先级=截止临近排序 / 正文=聚焦版） | ✅ **验收通过 2026-09-17**（第 25 张卡）：迁移①/Paid②/发件地址③/Worker④/env⑤/**真发⑥**（生产 `usersReminded:1`，Steven 已收到）；**验收发现「可提醒范围」漏筛 `submission_state`（误报 18/21）已修**并随本次复验通过 |
 | **P0-3-15** | **完成态统一 + 提交态徽标**：修 `TaskList`「分组用合并判定、行内渲染只看 `status`」的分叉；Canvas 已判定完成 → 勾选框改为**静态灰勾（不可点）**；任务名后加**六态徽标**（未提交 / 缺交 / 已提交 / 待查重 / 已评分 / 待确认） | Bud | P0-3-14 | ① dashboard 里 Canvas 已判完成的作业不再画空勾选框；② 每条有提交态的任务后都有对应徽标 | ✅ **验收通过 2026-09-17**（第 26 张卡，原话"验收通过，效果非常好"）：`isCanvasDone()` 收口三处副本；真数据 40/83 条受影响；回归 +7 条；commit `cfc34ef` 已 push + 部署 success |
 | **P0-3-16** | **Dashboard 精修**：① 对话框 placeholder 改「Hi，有什么 Update 想要告诉 Tempo？」② 删「已到期作业」区块（debt-bar + dashboard 接线 + 死代码清理 + 回归）③ 加「今日任务」= 今日到期 100% + 未来任务按 `1/剩余天数` 切片 + 逾期未完成并入顶部红组 | Bud | P0-3-15 | ① 提示语替换 ② 欠账卡消失且无残留死代码（grep `debtWindow` = 0）③ 今日任务按天切片正确 | 🔵 **代码完成 2026-09-17，待 Steven 验收**（`tsc`/`eslint`/`build` 全绿；`regress:progress` 27/27；`grep debtWindow` = 0；含 9/17→9/21 = 25% 用例） |
-| **P0-3-17** | **课程详情重排 + 抓取信息落地**：① 单列 `max-w-3xl` → 一屏看全 ② `null`(Canvas 不追踪)任务显灰「需手动确认」、移出逾期红+提醒 ③ 点任务名跳 Canvas(`html_url`，加列+映射) ④ 成绩构成→pie chart ⑤ 每作业 `score/points_possible` bar，折叠进「作业详情」 | Bud | P0-3-10、P0-3-15 | ① 详情页不滚动即看全 ② `none` 类不标红 ③ 点标题外链 Canvas ④ 饼图渲染 ⑤ 每作业有分数条 | ⚪ |
+| **P0-3-17** | **课程详情重排 + 抓取信息落地**：① 单列 `max-w-3xl` → 一屏看全 ② `null`(Canvas 不追踪)任务显灰「需手动确认」、移出逾期红+提醒 ③ 点任务名跳 Canvas(`html_url`，加列+映射) ④ 成绩构成→pie chart ⑤ 每作业 `score/points_possible` bar，折叠进「作业详情」 | Bud | P0-3-10、P0-3-15 | ① 详情页不滚动即看全 ② `none` 类不标红 ③ 点标题外链 Canvas ④ 饼图渲染 ⑤ 每作业有分数条 | 🔵 代码完成 2026-09-17，**待 Steven 跑迁移 + 验收** |
 | **P0-3-18** | **消息栏**：侧栏新增入口 + **全屏对话页**（现有浮窗对话框的全屏版）；系统消息（如「Canvas 扫到的新 syllabus 与你上传的不同，是否覆盖？」）与用户自己的更新**同一条对话流**；每条提案带「确认 / 忽略」 | Bud | P0-3-17 | ① 侧栏「消息栏」点进全屏对话 ② 系统提案可确认/忽略 ③ 忽略不写、确认才写（ADR-015） | ⚪ |
 | **P0-3-19** | **资料索引（Canvas 文件元数据）**：同步抓 `/files`+`/folders` **元数据** → `course_files` 表 → 课程页「资料」区按 Canvas 文件夹分组 + 外链回 Canvas；**只存目录不下载内容** | Bud | P0-3-18 | 资料按 Canvas 结构分组展示；外链回 Canvas；403 受限文件跳过不挂 sync | ⚪ |
 | **P0-3-20** | **大纲漂移检测**：同步时**按需只抓 syllabus 文件** → 抽文本 → 与已确认五板块 + `exam_dates` diff → 差异**提案进 `P0-3-18` 消息栏**（**不自动覆盖**） | Bud | P0-3-18、P0-3-19 | 抓到 syllabus 变化 → 出差异提案 → 确认才写 | ⚪ |
@@ -1420,7 +1420,7 @@ Phase 0 列表只有几十条，每行再加一个 tag 只会更密，信息增�
   > ⚠️ **连带发现（不在本卡，报给 Steven 决策）**：周历顶部的「已逾期 N 项」条（`buildWeekCalendar` 的 `overdue`，收**全部来源**）目前仍把 `null` 类任务算作"已逾期" —— 与本次红组口径**不一致**，建议并入 **P0-3-17**（它本就负责「`null` 移出逾期红」）。
 - **验收路径（可点）**：`/dashboard` → 原「已到期作业」卡**消失**，其位置改为「**今日任务**」卡：右上有「今日工作量 ≈ N 件」；三种分组「逾期未完成（红）/ 今天到期（100%）/ 未来 7 天（25% 等）」；点任一行进对应课程页。
 
-#### 🎫 P0-3-17 · 课程详情重排 + 抓取信息落地 ⚪
+#### 🎫 P0-3-17 · 课程详情重排 + 抓取信息落地 🔵 代码完成 2026-09-17（待跑迁移 + 验收）
 
 - **做什么**（五件，都在课程详情页 `/courses/[id]`）：
   1. **一屏看全**：单列 `max-w-3xl` 重排为「概览 → 作业详情（折叠）→ 成绩构成 → 资料（Phase 1 占位）」分区，去掉强制滚动。
@@ -1431,6 +1431,66 @@ Phase 0 列表只有几十条，每行再加一个 tag 只会更密，信息增�
 - **依赖**：P0-3-10、P0-3-15。
 - **验收标准**：① 详情页不滚动即看全；② `none` 类（如 Lecture 1 Airbags makeup）不标红、显「需手动确认」；③ 点任务名开 Canvas 作业页；④ 饼图按权重渲染；⑤ 每作业有分数条。
 - **🔴 边界**：课程加权**总分**本卡不做（Canvas `enrollments.grades` 对本人返回 null，且各课口径不一）→ 归 Phase 1 `P0-3-22`。
+
+##### 🔴【Steven 手动】先跑迁移，再 push
+
+```sql
+-- 文件：supabase/migrations/20260917140000_tasks_canvas_url_score.sql
+-- 走 Supabase Dashboard → SQL Editor 粘贴执行（本卡唯一手动步骤）
+alter table public.tasks
+  add column if not exists canvas_url text,
+  add column if not exists points_possible numeric(10, 2),
+  add column if not exists submission_score numeric(10, 2);
+```
+
+**判据**：`select canvas_url, points_possible, submission_score from tasks limit 1;` 不报 42703。
+**⚠️ 必须先跑再部署**：这三列进了 `TASK_COLUMNS`（任务列表与单条查询共用），列不存在时 PostgREST 报
+`42703 undefined_column` → 总览页与课程页的任务查询**全部**失败。所以本轮 commit **停在本地**，等 SQL 执行完再 push。
+
+##### 实现记录（2026-09-17，Bud）
+
+1. **① 一屏看全**：`app/(routes)/courses/[id]/page.tsx` 从单列 `max-w-3xl` → `max-w-[1100px]`，
+   分区改为「概览（宽屏三栏：Canvas 关联 / 成绩构成 / …）→ 作业详情（`<details>` 折叠）→ 资料（Phase 1 占位）→ 课程板块」。
+   作业数据**单独取**（`loadTasks({ until: null })`）而非塞进 `loadCourseDetail` —— 后者被 `GET /api/v1/courses/:id` 共用，加字段等于改对外契约。
+2. **② 需手动确认**：新增 `needsManualConfirmation(task)` = **`source === 'canvas' && submissionState === null`**
+   （`lib/tasks/progress.ts`）。⚠️ **判据必须带 `source`**：`null` 是共用取值，只判 `null` 会把
+   syllabus 派生考试与手动任务一起吞掉 → **全部考试不再被提醒**。三处共用它：灰色徽标「需手动确认」、
+   不标红、不进提醒。回归两侧都钉了断言。
+3. **🔴 顺手修掉 P0-3-16 的连带发现**：「能不能标逾期」原先在四处各写一份（周历逾期条 / 总览页清单 /
+   课程卡 / 课程页），P0-3-16 只改了总览页 → 留下「周历说 makeup form 逾期 16 天、今日任务却说没事」的
+   同页矛盾。现在收成**一个** `canBeOverdue()`（排掉手勾完成 / Canvas 已判定完成 / 外部平台无可信记录 /
+   Canvas 明说不追踪四类），四处共用。
+4. **③ 点任务名跳 Canvas**：`tasks` 加列 `canvas_url`；`lib/canvas/assignments.ts` 映射 `html_url`
+   （实测全量存在）；任务名渲染为外链（`target="_blank"`），**无值时退回原行为**（总览退回课程页 / 课程页退回纯文本）。
+   总览页把「进课程页」的入口从标题挪到**课程名**上，否则 Canvas 任务在总览页再无进课程页的路。
+5. **④ 成绩构成饼图**：新增 `components/courses/grade-pie.tsx`，**纯 SVG、零新依赖**（`stroke-dasharray` +
+   `pathLength=100` 画环）。数据源 = **syllabus 解析的 `grade_components.weight_percent`**（已在 `loadCourseDetail` 里，零新查询）
+   —— 不是 Canvas `assignment_groups.group_weight`（尚未同步，加权总分归 Phase 1 `P0-3-22`，执行卡表亦写"纯前端 + 加 1 字段"）。
+   权重**不足 100% 时留灰色「未标注」缺口**、`weightPercent === null` 的项标「未标占比」—— 都不替 syllabus 摊数字。
+   颜色走内联 `var(--chart-1..5)` 而非 Tailwind `fill-chart-N`（规避 3-15 的"类名写了但没生成"坑）。
+6. **⑤ 每作业分数条**：`CanvasSubmission.score` + 作业对象 `points_possible` 扩映射（**同一个请求白送，零额外调用**），
+   落 `tasks.submission_score` / `points_possible`；新增 `lib/numbers.ts`（`toNumberOrNull` / `sameNumber`）统一收窄口径 ——
+   **`null` 与 `0` 严格区分**（`null` = 未评分/未设满分，`0` = 真的是 0 分），两者都有值才画条。
+7. **零额外 Canvas 请求**：三个新字段全来自已有的 `?include[]=submission`，三级熔断不受影响（同步铁律 1 的封闭字段集已更新）。
+8. **自测**：`regress:progress` 27 → **35**（新增 needsManualConfirmation / canBeOverdue / isRemindable 两侧 / canvasUrl 透传；
+   改动周历逾期条断言 8 → 6 条并标注原因）；`regress:reminders` **47/47**、`regress` / `regress:vision` / `regress:inbound` 全绿；
+   `tsc --noEmit` 0 error；`eslint` 0 error（2 条既存 warning 未动）；`NODE_OPTIONS= npm run build` 通过；
+   产物 CSS 已验 `--chart-1: var(--purple)` 与 `.bg-surface2` 存在。
+
+##### ⚠️ 本卡两个"超出字面要求"的判断（Steven 可否决）
+
+1. **课程板块默认收起**：原来 `SectionEditor` 传了 `defaultOpen`（五板块默认展开），新布局去掉了该 prop
+   （默认收起），为的是兑现①"不滚动即看全"。要恢复就是一行的改动。
+2. **总览清单里「课程名」改成了链接**：因为③把标题改跳 Canvas，课程页入口会没有着落，所以挪到课程名上。
+
+##### 验收路径（可点）
+
+跑完上面那条 SQL →（Bud push + 等 Vercel）→ 打开任一 **Canvas 关联过的课**详情页：
+① 首屏（不滚动）能看到「Canvas 关联 / 成绩构成饼图」两块；
+② 展开「作业详情」→ 每行有状态徽标；有分数的行右侧**分数条**（`16.75 / 20` + 百分比）；
+③ 点任一作业**标题** → 新标签打开 Canvas 作业页；
+④ 找 `Lecture 1 - Airbags (makeup form)`：徽标应显示灰色**「需手动确认」**、日期**不红**；
+⑤ 回 `/dashboard`：周历顶部逾期条条数应**变少**（makeup form 这类不再被算逾期）。
 
 #### 🎫 P0-3-18 · 消息栏（侧栏入口 + 全屏对话页） ⚪
 
@@ -1611,3 +1671,4 @@ P0-0 基础设施
 | 2026-09-17 | **P0-3-14 + P0-3-15 双双验收通过 ✅（当天收口）**：Steven 浏览器复验原话**"验收通过，效果非常好"**，并明确今天任务到此为止。① 本日实际完成 **两张卡**：`P0-3-14` 主动提醒/优先级（第 25 张，出站邮件全链路 + 真发已收 + 频控「隔天一封」静默 bug 修复 + 提醒范围漏筛 `submission_state` 导致 86% 误报的修复）、`P0-3-15` 完成态统一 + 提交态徽标（第 26 张，渲染层判定分叉 + 静默灰勾 + 六态徽标）。② 交付 commit 链：`389e472` → `0aede18` → `72b59d8` → `1e81378` → `382510a` → `5fa1cce` → `cfc34ef`，**全部已 push 且 Vercel 部署 success**。③ **三条跨项目教训**已升格进 `CodingRules.md` §10.1 第 21 条与用户级记忆：**「限流窗口 ≥ 调度周期必然在边界翻车」**／**「同一判定在同一组件出现两次、写法不同 = 分组对渲染错」**／**「自定义颜色令牌写了类名 ≠ 生成了类，去产物 CSS grep」** | P0-3-14、P0-3-15、CodingRules §10.1 |
 | 2026-09-17 | **卡位调整：`3-16/3-17/3-18/3-19/3-20/3-23` 上移进 M3；`3-12` 视觉扫尾重排到最后（M3 = 21 张卡）**：Steven 从「3-12 之前追加 7 条 refine」出发拍板路线图 —— 原留 Phase 1 的 `P0-3-18`（消息栏）/`3-19`（资料索引）/`3-20`（大纲漂移）/`3-23`（practice test 类型 A）**上移进 M3**；`P0-3-21`（study routine）/`3-22`（课程加权百分比）留 Phase 1。**`3-12` 从「3-15 之后」重排到「所有 UI 改动之后」**（否则扫完又得重扫）。**M3 最终执行链**：`3-16 → 3-17 → 3-18 → 3-19 → 3-20 → 3-23 → 3-12 → 3-13`。`3-18` 的 `messages` 建表 SQL = **【Steven 手动】走 Supabase SQL Editor**（Bud 只给 SQL + RLS 判据 + 只读探针）。设计 SoT = `docs/Phase-1-Design.md`（顶部用途已改写） | Steven 拍板 2026-09-17、`Phase-1-Design.md` |
 | 2026-09-17 | **P0-3-16 Dashboard 精修 代码完成 🔵（第 27 张卡，M3 新执行链第一张）**：① 对话框 placeholder 改「Hi，有什么 Update 想要告诉 Tempo？」。② **删「已到期作业」债务条** —— 删 `components/overview/debt-bar.tsx` + dashboard 接线 + `lib/tasks.ts:loadDebtTasks` + `lib/tasks/progress.ts` 的 debt 段（`DEBT_WINDOW_DAYS`/`debtWindow`/`DebtInput`/`classifyDebt`/`summarizeDebt` 等全删）；`isEffectivelyDone` 签名改 `Pick<Task,…>`；**源码内 `grep debtWindow` = 0**。③ **新增「今日任务」加权切片卡** —— `lib/tasks/today.ts` 的 `buildTodayTasks()`（今天到期 100% + 未来 7 天按 `1/剩余天数` 切片 + 逾期红组；三组权重和 = "今日工作量"）+ `components/overview/today-tasks.tsx`（服务端组件）。**红组只收 Canvas 明确说没交的**（`unsubmitted`/`missing`），`null`/`external_unconfirmed` 不进红组（ADR-013）。④ **零新查询**：取数复用 `overview.tasks`，总览页从四路查询降到两路。⑤ 回归 `regress:progress` 24 → **27**（删 5 条 debt、加 8 条今日任务，含直接钉「2026-09-17 看 09-21 = 25%」）；`tsc` 0 / `eslint` 0 / `next build` 过。文档同步 `API-Contract.md §5.1`（债条口径 → 今日任务口径）+ §12 变更记录。**⚠️ 连带发现（报 Steven，不在本卡）**：周历顶部「已逾期 N 项」条目前仍把 `null` 类任务算"已逾期"，与本卡红组口径不一致，建议并入 `P0-3-17` | P0-3-16、ADR-013、ADR-015、ADR-016 |
+| 2026-09-17 | **P0-3-17 课程详情重排 + 抓取信息落地 代码完成 🔵（第 28 张卡，M3 第二张）**：① 详情页 `max-w-3xl` 单列 → `max-w-[1100px]` 分区（概览三栏 / 作业详情折叠 / 资料占位 / 课程板块）；作业数据单独取，**不动 `GET /api/v1/courses/:id` 契约**。② 新增 `needsManualConfirmation()` = **`source='canvas' && submission_state IS NULL`**（判据必须带 source，否则吞掉全部考试）→ 灰色徽标「需手动确认」+ 不标红 + 不进提醒。③ 🔴 **顺手修掉 P0-3-16 的连带发现**：新增 `canBeOverdue()` 统一"逾期资格"，四处展示位共用（原周历逾期条收全部来源，与总览页红组打架）。④ `tasks` 加列 `canvas_url`（+ `points_possible` / `submission_score`），任务名外链跳 Canvas。⑤ 新增 `components/courses/grade-pie.tsx`（**纯 SVG 零依赖**，数据源 = syllabus `grade_components.weight_percent`，权重不足 100% 留灰色缺口）。⑥ 新增 `lib/numbers.ts`（`null ≠ 0` 的收窄口径）。⑦ 零额外 Canvas 请求（三字段来自已有的 `include[]=submission`）。回归 27→**35**；`tsc`/`eslint`/`build` 全绿；产物 CSS 已验 `--chart-1` 与 `.bg-surface2`。**🔴【Steven 手动】先跑迁移 `20260917140000` 再部署**（列不存在会 42703 全挂）。两个可否决判断：课程板块默认收起（兑现"一屏看全"）、总览清单课程名改链接（补回课程页入口） | P0-3-17、ADR-013、ADR-015 |

@@ -16,29 +16,58 @@ import type { TodayItem, TodayModel } from '@/lib/tasks/today'
  * - 未来：`N%`（= `1 / 剩余天数`，越远越轻）。
  */
 
+/**
+ * 一行任务。**两个链接分开**（P0-3-17）：
+ * - **课程名** → 课程详情页（看这门课的全部信息）；
+ * - **任务名** → Canvas 作业页（`canvasUrl` 有值时），否则退回课程详情页。
+ *
+ * ⚠️ 不能像 P0-3-16 那样"整行包一个 `<Link>`"再往里塞 Canvas 外链 ——
+ * HTML 不允许 `<a>` 嵌套 `<a>`（React 会按 hydration 报错/浏览器会拆开标签）。
+ * 所以外层是普通 `li`，两个链接各自承担一个动作。
+ */
 function Row({ item, trailing }: { item: TodayItem; trailing: string }) {
+  const courseHref = `/courses/${item.courseId}`
+  const titleClass = 'truncate text-ink underline-offset-4 hover:underline'
+
   return (
-    <li>
+    <li className="flex items-center gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-surface2">
+      <span
+        className="h-2 w-2 shrink-0 rounded-full"
+        style={{ backgroundColor: courseColorVar(courseColorKey(item.courseId)) }}
+        aria-hidden
+      />
       <Link
-        href={`/courses/${item.courseId}`}
-        title={`${item.courseName} · ${item.title} · ${item.dueLabel}`}
-        className="flex items-center gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-surface2"
+        href={courseHref}
+        title={`查看「${item.courseName}」课程详情`}
+        className="w-24 shrink-0 truncate text-[11px] text-ink-faint underline-offset-4 hover:underline"
       >
-        <span
-          className="h-2 w-2 shrink-0 rounded-full"
-          style={{ backgroundColor: courseColorVar(courseColorKey(item.courseId)) }}
-          aria-hidden
-        />
-        <span className="w-24 shrink-0 truncate text-[11px] text-ink-faint">{item.courseName}</span>
-        <span className="min-w-0 flex-1 truncate text-ink">
+        {item.courseName}
+      </Link>
+      {item.canvasUrl ? (
+        <a
+          href={item.canvasUrl}
+          target="_blank"
+          rel="noreferrer"
+          title={`在 Canvas 打开「${item.title}」`}
+          className={`min-w-0 flex-1 ${titleClass}`}
+        >
           {item.isExam ? <span className="mr-1 font-semibold text-lime-dark">考</span> : null}
           {item.title}
-        </span>
-        <span className="shrink-0 text-[11px] text-ink-faint">{item.dueLabel}</span>
-        <span className="w-16 shrink-0 text-right text-[11px] tabular-nums text-ink-muted">
-          {trailing}
-        </span>
-      </Link>
+        </a>
+      ) : (
+        <Link
+          href={courseHref}
+          title={`${item.courseName} · ${item.title} · ${item.dueLabel}`}
+          className={`min-w-0 flex-1 ${titleClass}`}
+        >
+          {item.isExam ? <span className="mr-1 font-semibold text-lime-dark">考</span> : null}
+          {item.title}
+        </Link>
+      )}
+      <span className="shrink-0 text-[11px] text-ink-faint">{item.dueLabel}</span>
+      <span className="w-16 shrink-0 text-right text-[11px] tabular-nums text-ink-muted">
+        {trailing}
+      </span>
     </li>
   )
 }
@@ -119,7 +148,8 @@ export function TodayTasks({ model }: { model: TodayModel }) {
       )}
 
       <p className="mt-4 text-xs text-ink-faint">
-        考试与手动任务没有外部真相，不标「逾期」；点任一条进入课程页。
+        考试与手动任务没有外部真相，不标「逾期」；点<strong className="font-medium">课名</strong>
+        进课程页，点<strong className="font-medium">任务名</strong>去 Canvas。
       </p>
     </div>
   )
