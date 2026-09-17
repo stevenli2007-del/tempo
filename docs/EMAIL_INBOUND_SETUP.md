@@ -377,6 +377,78 @@ npx wrangler tail          # 看 Worker 实时日志
 
 ---
 
+## 出站启用（P0-3-14 · 主动提醒）
+
+P0-3-14 的「主动发邮件提醒」代码已全部就绪（Vercel 引擎 + 3 条路由 + Cloudflare 出站 Worker + 迁移 + 回归脚本）。但**出站发送依赖 Cloudflare Email Sending**，需要 Workers Paid 计划 + 已验证发件地址，这部分**只能由 Steven 手动操作**（Agent 不会擅自改 Cloudflare 计费）。
+
+> 与入站的区别：入站走 catch-all → Worker（`email` handler）；出站是独立的 `workers/outbound-email`（只有一个 `fetch` handler），两者部署单元分离，互不干扰。入站密址 `inbound+<token>@tempocourse.com` 与出站退订 token `reminder_unsub_token` 也是两套独立 token。
+
+### Steven 手动清单
+
+1. **执行迁移**（Supabase Dashboard → SQL Editor，粘贴并运行）
+   `supabase/migrations/20260917130000_reminders.sql`
+   —— 新增 `profiles.reminder_enabled` / `last_reminder_at` / `reminder_unsub_token` + 唯一部分索引。
+
+2. **升级 Cloudflare 到 Workers Paid 计划**
+   —— Email Sending Beta 要求付费计划才能发往外部域名（如 `berkeley.edu`）。免费计划只能 `fetch` 不能真正外发。
+
+3. **验证发件地址 `noreply@tempocourse.com`**
+   —— Cloudflare Email Service 要求 `from` 是「已验证的目标地址」。
+   ⚠️ **P0-3-11 的 catch-all 会吞掉验证邮件**：验证前先临时停用 catch-all 规则（或加一条精确 `noreply@tempocourse.com → 目标地址` 规则且排在 catch-all 之前），收到验证邮件并点击确认后再恢复 catch-all。
+
+4. **给出站 Worker 配密钥**
+   ```
+   cd workers/outbound-email
+   wrangler secret put OUTBOUND_EMAIL_SECRET     # 与 Vercel 里的同一串
+   ```
+   —— `FROM_ADDRESS` 已在 `wrangler.toml` 里写成 `noreply@tempocourse.com`，无需 secret。
+
+5. **部署出站 Worker**
+   ```
+   cd workers/outbound-email
+   wrangler deploy
+   ```
+   —— 部署后 Worker 才有版本可挂 secret（与入站同样的「login → deploy → secret put」顺序）。
+
+6. **在 Vercel 设置 3 个环境变量**（Project → Settings → Environment Variables）
+   | 变量 | 值 | 说明 |
+   |---|---|---|
+   | `OUTBOUND_EMAIL_WORKER_URL` | `https://tempo-outbound-email.<subdomain>.workers.dev` | 出站 Worker 的 URL |
+   | `OUTBOUND_EMAIL_SECRET` | 与第 4 步同一串 | Bearer 令牌 |
+   | `APP_BASE_URL` | `https://tempo-six-neon.vercel.app` | 退订链接域名（缺省走 `VERCEL_URL`） |
+
+   ⚠️ **一轮加多个变量会触发多次部署（"一半生效"中间态）**——加完后手动 Redeploy 一次更稳。判据用端点，别信面板状态。
+
+7. **验证链路（先预览，再真发）**
+   - 预览（不真正发信，不更新 `last_reminder_at`）：
+     ```
+     POST /api/v1/reminders/send?preview=1
+     ```
+     带用户登录态，返回 `{ preview:true, subject, html, text, actionable, ... }`。
+   - 真发一封：`POST /api/v1/reminders/send`（同登录态）。
+   - 定时任务探针：`GET /api/v1/reminders/scheduled` 带 `CRON_SECRET` → `200` + 聚合报告（无 PII）。
+   - 退订页：`GET /api/v1/reminders/unsubscribe?t=<token>` 返回确认页。
+
+### 失败降级（已写进代码，无需手动处理）
+- `OUTBOUND_EMAIL_*` 未配置 → `send.ts` 返回 `{ok:false, error:'not_configured'}`，**不报错、不 500**。
+- 发送异常（Worker 502 / 网络） → 引擎捕获后跳过该用户，继续下一位；定时任务永不因单用户失败而中断。
+- 每日频控：每位用户每天最多一封（`profiles.last_reminder_at` 24h 闸门），未命中则不发。
+
+### 代码位置索引（出站）
+| 层 | 文件 |
+|---|---|
+| 引擎（service role） | `lib/reminders/engine.ts` |
+| 纯函数：排序/可行动判定/渲染 | `lib/reminders/build.ts` |
+| 发送（出站 Worker 客户端） | `lib/reminders/send.ts` |
+| 退订 token（纯函数） | `lib/reminders/token.ts` |
+| 用户预览/真发路由 | `app/api/v1/reminders/send/route.ts` |
+| 定时任务路由 | `app/api/v1/reminders/scheduled/route.ts` |
+| 公开退订路由 | `app/api/v1/reminders/unsubscribe/route.ts` |
+| 出站 Worker | `workers/outbound-email/src/index.ts` + `wrangler.toml` |
+| 迁移 | `supabase/migrations/20260917130000_reminders.sql`（**待 Steven 执行**） |
+| 回归 | `npm run regress:reminders`（23/23 ✅） |
+| 定时触发 | `vercel.json` 新增 `0 14 * * *`（UTC 14:00 ≈ PT 07:00） |
+
 ## 附 A. 三个不变量（为什么代码这么写，别改回去）
 
 1. **只认 `to` 里的密址 token，绝不读 `From`** —— `From` 可伪造，用它会变成"任何人冒充 Gradescope 就能改你的任务"。

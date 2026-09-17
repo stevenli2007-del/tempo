@@ -1,0 +1,14 @@
+name = "tempo-outbound-email"
+main = "src/index.ts"
+compatibility_date = "2025-09-01"
+
+# 出站发件：Cloudflare Email Service 的 send_email 绑定（Beta，需 Workers Paid 计划）。
+# 发往外部地址（如 berkeley.edu）走 Email Sending；from 必须是本 zone 已验证的目标地址。
+[[send_email]]
+name = "EMAIL"
+
+[vars]
+FROM_ADDRESS = "noreply@tempocourse.com"
+
+# OUTBOUND_EMAIL_SECRET 是 Vercel ↔ Worker 的共享密钥，用 wrangler secret（不在仓库里）：
+#   npx wrangler secret put OUTBOUND_EMAIL_SECRET
