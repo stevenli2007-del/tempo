@@ -445,7 +445,9 @@ Steven 说「完成 P0-1-5b 就收手」，Bud 交付 5b 后收到含糊的「Pl
 | Cloudflare 入站四个开通门槛 | ① 建任何规则前必须**先有已验证的「目标地址」**（哪怕邮件进的是 Worker）；② 密址带 `+`（`inbound+<token>@`）**必须开 Subaddressing**，否则 `+detail` 不保留在 `message.to`；③ 每用户动态地址**只能用 catch-all**（固定 local part 兜不住）；④ 面板入口已挪到 `Compute > Email Service > Email Routing` | `EMAIL_INBOUND_SETUP.md` §2–§6 |
 | Worker devDep 与 wrangler 的 peer 范围冲突 | `@cloudflare/workers-types` 必须落在 wrangler 的 peer 范围内（wrangler 4.134 → `^5.x`）。钉 `^4` 会让 `npm install` **ERESOLVE 直接失败 → 部署卡死**，且**只在安装时报错**，极易误判成网络问题。离线自检：`npx wrangler deploy --dry-run --outdir /tmp/x`（不需要登录） | `EMAIL_INBOUND_SETUP.md` §5、`workers/inbound-email/package.json` |
 | 入站邮件**不认 `From`** 绑定身份 | `From` 可伪造 —— 用它会退化成「任何人冒充 Gradescope 就能改你的任务」。只认收件地址里的**密址 token**（hex 全小写）。配套：webhook **永远返回 2xx**（含内部错误），否则邮件网关重试风暴 / 退信循环；失败落审计表而非抛 500 | `Decisions.md` **ADR-019**、`EMAIL_INBOUND_SETUP.md` 附 A |
+| `wrangler secret put` **必须在 `deploy` 之后** | secret 是给**已存在的 Worker** 追加一个新版本；Worker 不存在时直接 `not found`。正确顺序：`login → deploy → secret put`。另：**Agent 侧跑不了 `wrangler login`** —— OAuth 回调要交互式终端，非交互环境直接报 `Not logged in ... the environment is non-interactive`，此步只能由人工在本地终端执行（或改用 `CLOUDFLARE_API_TOKEN` 环境变量） | `EMAIL_INBOUND_SETUP.md` §5 |
+| 管道喂 secret 时**末尾不能带换行** | 交互式粘贴 secret 极易在末尾混进 `\n` → Worker 发 `Bearer <密钥>\n` → Vercel 逐字比对失败 **401**，而面板里看不出任何区别。用 `printf '%s' '<secret>' \| npx wrangler secret put NAME`（`printf` 而非 `echo`，`echo` 会补换行） | `EMAIL_INBOUND_SETUP.md` §5 |
 
 ---
 
-*创建：2026-09-01 ｜ 最近更新：2026-09-13（§10.1 第 17 条「上游不知道 ≠ 未完成」+ 第 18 条「日期禁止硬编码 UTC」+ 第 19 条「CSS 变量同名覆盖静默污染」；§10.2 新增六行坑索引：Canvas 日期差一天 / assignment 里没有完成信息 / 上游"不知道"≠未完成 / Next 路由文件夹禁用 `_` 前缀 / 主题脚本 `<html>` hydration / `tsx` 独立脚本不加载 `.env.local`）*
+*创建：2026-09-01 ｜ 最近更新：2026-09-17（§10.2 新增两行坑索引：`wrangler secret put` 须在 deploy 之后 + Agent 侧无法交互式 OAuth / 管道喂 secret 末尾禁带换行。此前 2026-09-13 更新含 §10.1 第 17–19 条与六行坑索引）*

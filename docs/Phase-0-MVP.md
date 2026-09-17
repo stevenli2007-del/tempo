@@ -1383,7 +1383,8 @@ Phase 0 列表只有几十条，每行再加一个 tag 只会更密，信息增�
   - **不发「地址已就绪」验证回信**（那是出站，归 P0-3-14，ADR-019 砍）。
 - **为什么现在做**：当前同步触发是"用户打开 dashboard"（T1）—— **用户不来，数据就不新，所以他必须来**，这是结构性矛盾。邮件入站把触发器换成外部事件。
 - **关键约束**：零 OAuth（转发路径），成本远低于 Gmail API；Gmail 全自动留 Phase 1（restricted scope 需安全评估，周期以月计）。基础设施 = Cloudflare Email Routing Worker（thin forwarder）→ Vercel `POST /api/v1/email/inbound`。
-- **📖 部署手册（【Steven 手动】逐步可勾选）**：`docs/EMAIL_INBOUND_SETUP.md` —— 域名 `tempocourse.com` 已注册 2026-09-17（Cloudflare Registrar）；剩余为 Cloudflare Email Routing 开通 + Worker 部署 + Vercel env，共 7 步。
+- **📖 部署手册（【Steven 手动】逐步可勾选）**：`docs/EMAIL_INBOUND_SETUP.md` —— 域名 `tempocourse.com` 已注册 2026-09-17（Cloudflare Registrar）。
+  - **进度（2026-09-17）**：①zone 生效 ✅ ②Email Routing onboard ✅ ③destination 地址验证 ✅ ④Subaddressing 开启 ✅ ｜ 剩余 ⑤部署 Worker ⑥catch-all→Worker ⑦Vercel env ⑧端到端验收（后三步手动，Agent 侧无法代跑 `wrangler login`）。
 
 #### 🎫 P0-3-12 · 全站视觉统一扫尾 ⚪
 

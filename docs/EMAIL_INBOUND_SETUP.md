@@ -5,6 +5,8 @@
 > **域名**：`tempocourse.com`（2026-09-17 于 Cloudflare Registrar 注册）。
 > **设计依据**：`docs/Decisions.md` ADR-019（密址绑定 + 纯入站）、`docs/Phase-0-MVP.md` P0-3-11。
 
+**进度速查**（2026-09-17）：①zone ✅ ②onboard ✅ ③destination ✅ ④subaddressing ✅ ｜ ⑤deploy Worker ⬜ ⑥catch-all ⬜ ⑦Vercel env ⬜ ⑧验收 ⬜
+
 ---
 
 ## 0. 链路全貌（先看这张图，再动手）
@@ -51,7 +53,7 @@ dig @1.1.1.1 NS tempocourse.com +short
 
 ---
 
-## 2. 🔄【进行中 2026-09-17 11:28】开启 Email Routing（onboard domain）
+## 2. ✅【已完成 2026-09-17】开启 Email Routing（onboard domain）
 
 > **实测状态（Steven 截图）**：已进入 `Compute → Email Service → Email Routing · tempocourse.com`，**Onboard Domain 已完成**。
 > 面板 Configuration summary 读数：`Domains: 1`、`DNS records: Locked`、**`Routing status: Syncing`**、`Routing rules: 0`、`Destination addresses: 0`。
@@ -112,32 +114,60 @@ https://dash.cloudflare.com/?to=/:account/email-service/routing
 
 ---
 
-## 4. 【手动】🔴 打开 Subaddressing（`+` 子地址）—— 最容易漏的一步
+## 4. ✅【已完成 2026-09-17 11:44】打开 Subaddressing（`+` 子地址）—— 最容易漏的一步
 
-- [ ] 就在本页切到 **Settings** 标签 → 找到 **Subaddressing**（`+` addressing / plus addressing）→ **打开**。
+- [x] 切到 **Settings** 标签 → **Subaddressing** → **Enable subaddressing** 已拨到**开启**（蓝色）。✅ Steven 截图确认。
+- [x] 同页 **DNS records** 复核：`MX` 三条均 `Locked`（Cloudflare 托管），与第 2 步一致 —— 说明 zone 侧收信链路已就位。
 
 > **为什么必须开**：我们的密址形态是 `inbound+<token>@tempocourse.com`。官方说明只有**开启后**，`+detail` 部分才会**保留在 `message.to` 里**供 Worker 读取。不开的话 token 有被规则匹配"吃掉"的风险 → Worker 拿不到 token → 入站静默失败。
 > 参考：Cloudflare Docs「Email routing rules and addresses」→ Subaddressing（RFC 5233）。
+> ⚠️ 此开关是**zone 级**的（每个域名单独设）。若日后加第二个域名，要重新开一次。
 
 ---
 
 ## 5. 【手动】部署 Worker
 
-> 🔴 **顺序铁律：本步必须先于第 6 步。** 第 6 步的下拉里只能选「已部署的 Worker」——先配规则会选不到 `tempo-inbound-email`。
+> 🔴 **顺序铁律 1：本步必须先于第 6 步。** 第 6 步的下拉里只能选「已部署的 Worker」——先配规则会选不到 `tempo-inbound-email`。
+> 🔴 **顺序铁律 2：`deploy` 必须先于 `secret put`。** `wrangler secret put` 是给**已存在的 Worker** 加一份新版本，Worker 不存在会报 `not found`。
+> 🔴 **必须在你自己的终端里跑**（Agent 侧实测：wrangler 的 OAuth 回调需要交互式终端，非交互环境下 `wrangler whoami` 直接报 `Not logged in ... the environment is non-interactive`）。
+
+在 **Terminal.app / iTerm** 里整段粘贴：
 
 ```bash
 cd /Users/youchengli/Desktop/Tempo/workers/inbound-email
-npm install                                   # 装 postal-mime + wrangler
-npx wrangler login                            # 浏览器 OAuth 登录 Cloudflare
-npx wrangler secret put INBOUND_EMAIL_SECRET  # 粘贴密钥（与 Vercel 同一份）
-npx wrangler deploy
+npm install          # 已装过，重跑无害
+npx wrangler login   # ① 浏览器弹出 → Allow
+npx wrangler deploy  # ② 看到 Uploaded tempo-inbound-email 即成功
+printf '%s' '3a20f3881080772020836eb6d61965d091a15783aef2f760385e4dca8276f828' \
+  | npx wrangler secret put INBOUND_EMAIL_SECRET   # ③ 管道喂入，不出现交互提示
 ```
 
-- [ ] 部署成功，终端输出 `Uploaded tempo-inbound-email` 之类的字样；Cloudflare → **Workers & Pages** 里出现 **`tempo-inbound-email`**。
+> ⚠️ `printf '%s'`（**不带换行**）很关键 —— 交互式粘贴容易在末尾混进一个换行，导致 Worker 发的是 `Bearer <密钥>\n`，Vercel 端比对失败 → 401。
+> ⚠️ 若日后想换密钥：改完 Worker 的 secret **必须**回第 7 步把 Vercel 的同名变量改成同一份，再 Redeploy。两边**逐字相同**才算数（`wrangler secret list` 只能看名字、看不到值）。
+
+- [ ] 终端输出含 `Uploaded tempo-inbound-email`；Cloudflare → **Workers & Pages** 里出现 **`tempo-inbound-email`**。
 - [ ] 部署后回到 Email Routing 页，**`Destination Workers`** 标签 / 第 6 步的动作下拉里应能看到它。
 - 不需要改 `wrangler.toml`：`name = "tempo-inbound-email"`，`INBOUND_WEBHOOK_URL` 默认已指向 `https://tempo-six-neon.vercel.app/api/v1/email/inbound`。
 - **本地已验证**（2026-09-17）：`npm install` ✅、`postal-mime@2.7.6` 的 `PostalMime.parse` 返回 `{text, html}` ✅、`wrangler deploy --dry-run` 打包成功（109 KiB，`INBOUND_WEBHOOK_URL` 绑定正常）✅。
   - ⚠️ 若 `wrangler login` 后报「multiple accounts」，选账号邮箱为 `stevenli2007@berkeley.edu` 的那个。
+  - ⚠️ 若 `wrangler login` 卡在等浏览器回调：wrangler 会检测代理（实测输出 `Proxy environment variables detected`）。国内网络**保留** Clash/VPN 代理即可，别 `unset`——否则连不上 dash.cloudflare.com。兜底方案见下。
+
+<details>
+<summary>兜底：不想走浏览器 OAuth（用 API Token）</summary>
+
+Cloudflare → **My Profile → API Tokens → Create Token**，用模板 **Edit Cloudflare Workers**，权限需含
+`Account → Workers Scripts → Edit`。拿到 token 后：
+
+```bash
+cd /Users/youchengli/Desktop/Tempo/workers/inbound-email
+export CLOUDFLARE_API_TOKEN='<粘贴 token>'
+npx wrangler deploy
+printf '%s' '<同一份密钥>' | npx wrangler secret put INBOUND_EMAIL_SECRET
+unset CLOUDFLARE_API_TOKEN
+```
+
+（token 只放环境变量里，**不要**写进 `wrangler.toml` 或提交。）
+</details>
 
 ---
 
