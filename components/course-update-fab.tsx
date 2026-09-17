@@ -21,7 +21,7 @@
  *   `source='manual'` 可勾选更新；其余只展示并给出「去哪儿改」的提示。
  */
 
-import { useEffect, useRef, useState } from "react"
+import { useRef, useState } from "react"
 import { useRouter } from "next/navigation"
 
 import { Button } from "@/components/ui/button"
@@ -100,16 +100,16 @@ export function CourseUpdateFab() {
   // Canvas / 考试等只读候选默认折叠，避免淹没可编辑的手动任务（P0-3-8b follow-up）。
   const [openReadonly, setOpenReadonly] = useState<Record<number, boolean>>({})
 
-  // 打开时拉一次课程列表（已拉过就不再拉）。
-  useEffect(() => {
-    if (!open || courses.length > 0) return
+  // 打开时拉一次课程列表（已拉过就不再拉）。改用「打开」事件触发，避免 effect 内同步 setState（react-hooks/set-state-in-effect）。
+  function loadCourses() {
+    if (courses.length > 0) return
     setLoadingCourses(true)
     fetch("/api/v1/courses")
       .then((r) => r.json())
       .then((d) => setCourses(d.data ?? []))
       .catch(() => setError("课程列表加载失败"))
       .finally(() => setLoadingCourses(false))
-  }, [open, courses.length])
+  }
 
   /** 清空一次输入的中间态（成功的 summary 单独保留，用于短暂回显）。 */
   function resetInput() {
@@ -448,6 +448,7 @@ export function CourseUpdateFab() {
         title="更新课程"
         onClick={() => {
           setOpen(true)
+          loadCourses()
           resetInput()
           setSummary(null)
         }}

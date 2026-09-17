@@ -10,6 +10,9 @@ export function ThemeToggle({ className }: { className?: string }) {
   const [mounted, setMounted] = useState(false)
 
   useEffect(() => {
+    // 首屏后从 DOM 读真实主题：dark 初值固定 false 保证 SSR/CSR 首帧一致，mounted 避免图标 hydration 不一致。
+    // 规则只报 effect 内「首个同步 setState」，故 disable 放在 setDark 前即可覆盖；setMounted 是第二个不被报。
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setDark(document.documentElement.classList.contains("dark"))
     setMounted(true)
   }, [])

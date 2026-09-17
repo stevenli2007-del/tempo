@@ -24,8 +24,8 @@ interface Env {
   INBOUND_EMAIL_SECRET: string
 }
 
-export default {
-  async email(message: any, env: Env): Promise<void> {
+const emailHandler = {
+  async email(message: ForwardableEmailMessage, env: Env): Promise<void> {
     const to = message.to
     const from = message.from
     const subject =
@@ -76,3 +76,5 @@ export default {
     }
   },
 }
+
+export default emailHandler
