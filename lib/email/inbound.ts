@@ -72,11 +72,13 @@ export async function handleInboundEmail(input: InboundInput): Promise<InboundOu
   const courseIds = ((courseRows ?? []) as { id: string }[]).map((r) => r.id)
 
   // 3) 全部候选任务（跨课程，匹配时自然归到正确的那条）。
+  // 带上 `status`：完全相等可能命中多条同名任务（真实数据里 `Homework 7` 就有两条），
+  // 决策层要靠它挑出"还没完成的那条"，见 plan.ts。
   let candidates: TaskCandidate[] = []
   if (courseIds.length > 0) {
     const { data: taskRows } = await admin
       .from('tasks')
-      .select('id, title, due_date, task_type, source, is_derived')
+      .select('id, title, due_date, task_type, source, is_derived, status')
       .in('course_id', courseIds)
       .eq('is_deleted', false)
     candidates = ((taskRows ?? []) as Array<{
@@ -86,6 +88,7 @@ export async function handleInboundEmail(input: InboundInput): Promise<InboundOu
       task_type: string
       source: string
       is_derived: boolean
+      status: string
     }>).map((r) => ({
       id: r.id,
       title: r.title,
@@ -93,6 +96,7 @@ export async function handleInboundEmail(input: InboundInput): Promise<InboundOu
       taskType: r.task_type as TaskCandidate['taskType'],
       source: r.source as TaskCandidate['source'],
       isDerived: r.is_derived,
+      status: r.status as TaskCandidate['status'],
     }))
   }
 
@@ -143,7 +147,7 @@ export async function handleInboundEmail(input: InboundInput): Promise<InboundOu
       eventType,
       actionTaken: 'mark_done',
       matchedTaskId: decision.taskId,
-      detail: { title: parsed.data.taskTitle, score: decision.score },
+      detail: { title: parsed.data.taskTitle, matchedTitle: decision.matchedTitle, matchMode: 'exact' },
     })
     return { status: 'processed', action: 'mark_done', taskId: decision.taskId, event: eventType }
   }

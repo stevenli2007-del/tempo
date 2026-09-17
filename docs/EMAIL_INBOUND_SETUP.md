@@ -287,12 +287,32 @@ query="Homework 6: 1D Kinematics" → 0.9091 Homework 01 - 1D Kinematics ／ (Ho
 2. **同分并列没有确定性 tie-break** —— `matchTasks` 只按 score 降序 `sort`，同分时保留候选数组原序（= DB 返回顺序，未指定）。生产那天 `Homework 9999` 落到 `Homework 2` 而非同分的 `Homework 6`，就是这个原因。**"可复现"是 match.ts 头部写明的设计目标，这里破了。**
 3. **提到两个线索反而更差**：`Homework 6: 1D Kinematics` 把 `Homework 01 - 1D Kinematics` 顶到第一，正确目标 `Homework 6` 掉出候选。
 
-**建议的最小改法**（不动共享的 `match.ts`，只收本卡的 `plan.ts`）：
-- 在 `plan.ts` 另立 `INBOUND_MATCH_THRESHOLD = 0.9`（或要求 `normalizeTitle` **完全相等**才自动落写），`matchTasks` 显式传该阈值；
-- 同分时按 `due_date` 等确定性字段 tie-break，或在分数并列时**放弃落写**、只记审计；
-- 补 `scripts/regress-inbound-email.ts` 用例把上面三条钉住。
+**✅ 已采纳并实现（2026-09-17，Steven 决策 = "归一化后完全相等"）**
 
-> **是否采纳由 Steven 定**（属产品取舍：宁可少标 vs 绝不标错）。**不阻塞 8.2 验收** —— 真 Gradescope 回执的标题与任务名高度一致（实测同分场景才会出问题）。
+实现方式 —— **不动共享的 `lib/tasks/match.ts`**（对话框仍享召回优先），只收本卡的 `lib/email/plan.ts`：
+
+| 改动 | 内容 |
+|---|---|
+| `lib/email/plan.ts` | 不再调 `matchTasks(…, {threshold})`，改判 `normalizeTitle(email 标题) === normalizeTitle(任务标题)`；移除 `MATCH_THRESHOLD` 依赖 |
+| `types/task.ts` | `TaskCandidate` 新增**可选** `status?: TaskStatus`（对话框不传；入站靠它区分同名任务） |
+| `lib/email/inbound.ts` | 候选查询 `select` 加 `status`；`mark_done` 审计改写 `{ title, matchedTitle, matchMode: 'exact' }`（原来记的是模糊 `score`） |
+| `scripts/regress-inbound-email.ts` | **14 → 23** 条用例，新增 9 条把边界钉死 |
+
+**同名多条（歧义）的处置** —— 真实数据里 `Homework 7` 就有两条，所以必须定规则：
+
+| 情形 | 决策 | 理由 |
+|---|---|---|
+| 完全相等且只剩 **1 条未完成** | `mark_done` | 已完成的同名项写 `done` 是空操作，不参与竞争 |
+| 完全相等但 **全部已完成** | `none` / `already_done` | 无事可做，**不必**随便挑一条来写 |
+| 完全相等且仍有 **多条未完成** | `none` / `ambiguous_title`（审计里列出候选 id） | 宁可少标，绝不猜 |
+| 候选不带 `status`（旧调用方） | 唯一命中才落写，多条即歧义 | fail safe，绝不退回"按返回顺序挑" |
+
+**回归结果**：`npm run regress:inbound` → **23 通过 / 0 失败**；`npx tsc --noEmit` 退出码 0。
+新增用例含三条原本会误命中的真实反例：`Homework 9999`、`Homework 5`（同分）、`Homework 6: 1D Kinematics` —— 现在**全部** `no_match`。
+同时保留等价性用例：`HW 6` / `homework   6` 仍能正确命中 `Homework 6`（`normalizeTitle` 吸收大小写/全角/标点/空白/缩写）。
+
+> 📌 **已知代价**：邮件里的标题必须与任务名**归一化后一致**才自动标完成。若 Gradescope 发的名字与 bCourses 作业名有实质差异（如多了 `(Ch. 3)` 这类后缀），会 `no_match` —— 此时只记审计、不落写，用户手点。**这是刻意的取舍：宁可少标，绝不标错。**
+> 📌 本改动**不阻塞 8.2 验收**（真 Gradescope 回执的标题通常与任务名一致）。
 
 ---
 

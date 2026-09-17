@@ -1387,7 +1387,7 @@ Phase 0 列表只有几十条，每行再加一个 tag 只会更密，信息增�
   - **进度（2026-09-17 12:00 PDT）**：①zone 生效 ✅ ②Email Routing onboard ✅ ③destination 地址验证 ✅ ④Subaddressing 开启 ✅ ⑤Worker 已部署 ✅（当前 Version `40192c25`，secret 已写入）⑥catch-all → Worker 已启用 ✅ ⑦Vercel env ✅（两条均已在 Production 生效，实测断言见下）｜ **剩余 ⑧端到端验收（只差真人转发一封真邮件）**
   - **⑦ 已实测**：`POST /api/v1/email/inbound`+正确 Bearer → `200 unknown_address`（SECRET 生效）；带真实登录态 `GET /api/v1/email/address` → 返回密址（DOMAIN 生效）。密址 = `inbound+3a4fd781b46a647be0421d8a9ef70a60984e@tempocourse.com`。
   - **应用链路已端到端跑通**（Agent 用真 token 打生产 webhook）：鉴权 → token 定位用户 → 课程/候选 → DeepSeek 解析 → 决策 → 落写 + 审计全绿；唯一未验的是 `MX → catch-all → Worker` 这段真投递。
-  - 🔴 **待决策：邮件自动落写路径的匹配阈值**（`plan.ts` 现复用 `MATCH_THRESHOLD=0.6`）。实测 `Homework 9999` 以 0.84 命中 `Homework 9`、同分 0.89 无确定性 tie-break —— 对话框场景可接受，**无人确认的自动写不可接受**。建议 `plan.ts` 另立 ≈0.9 阈值 + 确定性 tie-break。详见 `EMAIL_INBOUND_SETUP.md` §8.3。**不阻塞 ⑧。**
+  - ✅ **邮件自动落写路径的匹配阈值已收紧（2026-09-17）**：`plan.ts` 不再复用对话框的 `MATCH_THRESHOLD=0.6`，改为**归一化后完全相等**才落写；同名多条时"只剩一条未完成才写 / 全完成则 `already_done` / 多条未完成则 `ambiguous_title` 放弃"。回归 14→23 条，`tsc --noEmit` 与 `next build` 均通过。详见 `EMAIL_INBOUND_SETUP.md` §8.3。
   - **执行方式**：只有 `npx wrangler login` 必须人工（OAuth 要交互式终端）；登录后 Agent 侧可直接代跑 `deploy` / `secret put`，并用同一 OAuth token 打 Cloudflare REST API 配 catch-all。
 
 #### 🎫 P0-3-12 · 全站视觉统一扫尾 ⚪
