@@ -3,6 +3,7 @@ import { redirect } from 'next/navigation'
 import { Button } from '@/components/ui/button'
 import { DangerZone } from '@/components/settings/danger-zone'
 import { loadDataSummary } from '@/lib/account/data-summary'
+import { getOrCreateInboundAddress } from '@/lib/email/address'
 import { signOut } from '@/lib/auth/actions'
 import { createClient } from '@/lib/supabase/server'
 import { AppShell } from '@/components/shell/app-shell'
@@ -44,6 +45,17 @@ export default async function SettingsPage() {
 
   const email = user.email ?? '（未设置邮箱）'
   const summary = await loadDataSummary(supabase, user.id)
+
+  // 邮件入站专属地址（P0-3-11）。域名未配置时入站功能暂不可用，页面照常渲染。
+  let inboundAddress: string | null = null
+  const inboundDomain = process.env.INBOUND_EMAIL_DOMAIN
+  if (inboundDomain) {
+    try {
+      inboundAddress = await getOrCreateInboundAddress(supabase, user.id, inboundDomain)
+    } catch (error) {
+      console.error('[settings] 生成入站地址失败:', error)
+    }
+  }
 
   return (
     <AppShell title="设置与隐私">
@@ -113,6 +125,26 @@ export default async function SettingsPage() {
             </p>
             <p>
               想把这些一次性清掉，用下面的「删除账号及全部数据」。
+            </p>
+          </div>
+        </section>
+
+        <section className="space-y-3">
+          <h2 className="text-sm font-medium text-muted-foreground">邮件入站</h2>
+          <div className="space-y-2 rounded-lg border border-border p-4 text-sm text-muted-foreground">
+            <p>
+              把 Gradescope 提交回执、课程通知、Piazza 等邮件<strong className="text-foreground">转发</strong>到下面的专属地址，
+              Tempo 会自动把其中「已提交」的作业标记为完成（仅此一项，不自动新建任务、也不自动改期）。
+            </p>
+            {inboundAddress ? (
+              <p className="rounded bg-muted px-3 py-2 font-mono text-xs text-foreground break-all">
+                {inboundAddress}
+              </p>
+            ) : (
+              <p className="text-foreground">服务端尚未配置收件域名（INBOUND_EMAIL_DOMAIN），入站功能暂不可用。</p>
+            )}
+            <p>
+              🔒 这是你个人的密址（含随机 token），他人无法用它往你的账户写入；请勿分享。
             </p>
           </div>
         </section>

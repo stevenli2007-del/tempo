@@ -163,8 +163,12 @@ type LLMResult<T> =
 | `DASHSCOPE_API_KEY` | — | vision | `LLM_PROVIDER_VISION=qwen` 时**必填**（默认视觉 provider，启用截图档需配置） |
 | `ANTHROPIC_API_KEY` | — | vision | 仅当 `LLM_PROVIDER_VISION=claude` 时**必填**（可选兜底） |
 | `LLM_TIMEOUT_MS` | `120000` | 共用 | 必须是正整数毫秒 |
+| `INBOUND_EMAIL_SECRET` | — | 邮件入站 | `POST /api/v1/email/inbound` 的 Bearer 密钥（与 `CRON_SECRET` 同款恒定时间 + fail closed）；**绝不能加 `NEXT_PUBLIC_` 前缀** |
+| `INBOUND_EMAIL_DOMAIN` | — | 邮件入站 | 收件域名（不含协议/子域前缀），如 `tempo.app`；用户密址形如 `inbound+<token>@<此域>` |
 
 > ⚠️ **Vercel 上新增/修改环境变量后必须手动 Redeploy**，已完成的 build 不会带新变量（P0-0-6 踩过）。
+>
+> **邮件入站（P0-3-11，[ADR-019](./Decisions.md#adr-019)）**：服务端只需上面两个变量；薄转发层 `workers/inbound-email/`（Cloudflare Email Worker，独立部署单元、有自己 `package.json`，**不进 Next 构建**）负责把邮件 POST 给 Vercel 路由。文本解析复用 DeepSeek（中国，O-08 已解决）。
 
 **⚠️ `llm_runs.model` 记的是「实际服务的模型」而不是「请求时填的模型」（2026-09-02 实测）**
 `deepseek-chat` 这类别名会静默指向不同底座 —— 本次实测请求 `deepseek-chat`，响应里回来的

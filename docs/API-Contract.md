@@ -666,6 +666,34 @@
 - `q` 为空 → 返回 `[]`（不是错误）。`limit` 默认 5、上限 20。
 - 同名任务返回按 `score` 降序的多个候选，由**用户消歧**（0 命中 → 新增；有命中 → 列举选择）。
 
+### `POST /api/v1/email/inbound` — 邮件入站 webhook（P0-3-11，**落写仅 `status='done'`**）
+
+由 Cloudflare Email Routing Worker 转发调用（见 [ADR-019](./Decisions.md#adr-019)）：发往 `inbound+<token>@<域>` 的邮件 → Worker POST `{ to, from, subject, textBody }` 到本端点。
+
+```jsonc
+// request —— Cloudflare Worker 转发，Bearer INBOUND_EMAIL_SECRET 鉴权
+{ "to": "inbound+<token>@tempo.app", "from": "no-reply@gradescope.com",
+  "subject": "Submission Confirmation", "textBody": "Your submission for Homework 6 was received." }
+// response 200 —— 永远 2xx（避免邮件网关重试/退信循环）；结果如实回传
+{ "data": { "status": "processed", "action": "mark_done", "taskId": "…", "event": "submitted" } }
+```
+
+- **鉴权**：与定时端点同款恒定时间 + fail closed（`authorizeCronRequest`，`INBOUND_EMAIL_SECRET`）。
+- **用户识别只用密址 token**：从 `to` 解出 `<token>` → 查 `profiles.inbound_token`。**绝不**用 `from` 识别（可伪造）。token 不存在 → `unknown_address`，邮件被静默接受并丢弃。
+- **解析走文本档 DeepSeek（中国，符合 O-08）** `purpose='email_inbound_parse'`。失败 → 仅记审计日志，不落写。
+- **🔴 落写纪律**：识别到「已提交」且确定性匹配到现有任务时 `PATCH status='done'`；**绝不自动新建任务、绝不自动改 dueDate**；**绝不写 `submission_state` / `submitted_at`**（ADR-015）。其它事件（改期 / 新作业 / 无关）只入 `email_inbound_events` 审计日志。
+- 每次入站都写 `email_inbound_events`（含 `from` / `subject` / 事件 / 动作），`user_id` 可空（未知地址也能记）。
+
+### `GET /api/v1/email/address` — 当前用户的入站密址（P0-3-11）
+
+```jsonc
+// response 200
+{ "data": { "address": "inbound+<token>@tempo.app" } }
+```
+
+- 走用户会话（RLS），非内部端点。token 首次访问时**懒生成**并写回 `profiles.inbound_token`，之后稳定不变。
+- 设置页据此展示该地址与转发说明。
+
 ---
 
 ## 6. Canvas 连接与同步
@@ -1042,6 +1070,8 @@
 | DELETE | `/api/v1/account/data?scope=canvas` | 清 Canvas 数据（凭据 + 导入任务） | ✅ P0-3-2 |
 | DELETE | `/api/v1/account` | 删除账号及全部数据（含 Storage） | ✅ P0-3-2 |
 | POST/DELETE | `/api/v1/demo[/seed]` | Demo Workspace | P0-1-10 |
+| POST | `/api/v1/email/inbound` | 邮件入站 webhook（Cloudflare Worker 转发，INBOUND_EMAIL_SECRET） | ✅ P0-3-11 |
+| GET | `/api/v1/email/address` | 当前用户的邮件入站密址 | ✅ P0-3-11 |
 
 ---
 

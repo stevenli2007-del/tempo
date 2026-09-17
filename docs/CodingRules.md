@@ -82,7 +82,9 @@ Canvas token、LLM API Key、Supabase 密钥、加密密钥——**只允许存�
   /auth              → 认证 Server Actions（signIn / signUp / signOut，见 P0-0-3）
   /api               → API Route 响应辅助（统一错误结构 / x-request-id 回传，见 API-Contract.md 1.3、1.5）
   /llm               → LLM provider 抽象层（可插拔，见 TechStack.md）
+  /email             → 邮件入站编排（token 解析 / LLM 解析 / 决策 / 编排，P0-3-11）
 /types               → TS 类型定义（与 Database.md 保持一致）
+/workers            → 边缘部署单元（Cloudflare Worker 等），各自有独立 package.json，**不进 Next 构建**（如 `workers/inbound-email/`）
 ```
 
 新增顶层目录需在此登记，不随意新建。

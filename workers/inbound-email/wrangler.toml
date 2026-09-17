@@ -1,0 +1,12 @@
+name = "tempo-inbound-email"
+main = "src/index.ts"
+compatibility_date = "2025-09-01"
+
+# 部署时按 wrangler 提示登录 Cloudflare；account_id 留空也可交互式填。
+# 本 Worker 不发信，只把邮件 POST 给 Vercel 路由，故无需 Email Routing 的转发目标配置。
+
+[vars]
+INBOUND_WEBHOOK_URL = "https://tempo-six-neon.vercel.app/api/v1/email/inbound"
+
+# INBOUND_EMAIL_SECRET 是密钥，用 wrangler secret（不在仓库里）：
+#   npx wrangler secret put INBOUND_EMAIL_SECRET
