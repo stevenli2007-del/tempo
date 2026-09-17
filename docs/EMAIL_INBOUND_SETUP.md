@@ -438,14 +438,14 @@ P0-3-14 的「主动发邮件提醒」代码已全部就绪（Vercel 引擎 + 3 
      POST /api/v1/reminders/send?preview=1
      ```
      带用户登录态，返回 `{ data: { sent:false, reason:'preview', email:{subject,html,text,actionable,shownCount,hiddenCount,totalCount} } }`。
-   - **真发一封**：`POST /api/v1/reminders/send`（同登录态）—— 会写入 `last_reminder_at`，24h 内定时任务不再发。
+   - **真发一封**：`POST /api/v1/reminders/send`（同登录态）—— 会写入 `last_reminder_at`，**用户本地「今天」内**定时任务不再发（跨本地零点即恢复）。
    - 定时任务探针：`GET /api/v1/reminders/scheduled` 带 `CRON_SECRET` → `200` + 聚合报告（无 PII）。
    - 退订页：`GET /api/v1/reminders/unsubscribe?t=<token>` 返回确认页并关掉提醒。
 
 ### 失败降级（已写进代码，无需手动处理）
 - `OUTBOUND_EMAIL_*` 未配置 → `send.ts` 返回 `{ok:false, error:'not_configured'}`，**不报错、不 500**。
 - 发送异常（Worker 502 / 网络） → 引擎捕获后跳过该用户，继续下一位；定时任务永不因单用户失败而中断。
-- 每日频控：每位用户每天最多一封（`profiles.last_reminder_at` 24h 闸门），未命中则不发。
+- 每日频控：每位用户**每（本地）天**最多一封（判据 = `profiles.last_reminder_at` 是否落在用户时区的「今天」，`isSameLocalDay()`），已发过则不发。⚠️ 别改回固定 24h 窗口 —— 见 §11 变更记录里的「隔天一封」根因。
 
 ### 代码位置索引（出站）
 | 层 | 文件 |

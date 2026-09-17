@@ -3,7 +3,7 @@ import { TASK_COLUMNS, toTask } from '@/lib/tasks'
 import type { Task } from '@/types/task'
 import type { createClient } from '@/lib/supabase/server'
 import { generateUnsubToken } from './token'
-import { buildReminderEmail } from './build'
+import { DEFAULT_TIMEZONE, buildReminderEmail, isSameLocalDay } from './build'
 import { sendReminderEmail } from './send'
 
 /**
@@ -16,15 +16,12 @@ import { sendReminderEmail } from './send'
  *
  * ### 三条产品纪律（ADR-016 / ADR-017）
  * 1. **准确优先于频繁**：只发"有逾期或即将到期任务"的邮件；否则不发，也不更新时间戳。
- * 2. **频控**：每用户每天至多一封（last_reminder_at 距现在 < 24h 直接跳过）。
+ * 2. **频控**：每用户**每（本地）天**至多一封（`last_reminder_at` 落在用户时区的「今天」直接跳过）。
  * 3. **绝不误报**：邮件只列 `status='pending'` 的任务，已完成的永远不出现。
  */
 
 /** service role 客户端类型（与 `lib/tasks.ts` 的 ServerSupabase 同款 —— admin 客户端被 cast 成它）。 */
 type AdminSupabase = Awaited<ReturnType<typeof createClient>>
-
-/** 一天毫秒数（频控窗口）。 */
-const DAY_MS = 86_400_000
 
 /** 整批定时提醒的总时间预算（毫秒）。Vercel 函数上限 300s，留 60s 余量。 */
 const TOTAL_TIME_BUDGET_MS = 240_000
@@ -89,11 +86,16 @@ export async function buildAndSendReminder(
     return { userId, sent: false, reason: 'no_tasks' }
   }
 
-  // 2) 闸门：关闭 / 24h 内已发（preview 与 force 都跳过）。
+  // 2) 闸门：关闭 / 「用户本地今天」已发过（preview 与 force 都跳过）。
+  const timezone = profile.timezone ?? DEFAULT_TIMEZONE
   if (!force && profile.reminder_enabled === false) {
     return { userId, sent: false, reason: 'disabled' }
   }
-  if (!force && profile.last_reminder_at && Date.now() - Date.parse(profile.last_reminder_at) < DAY_MS) {
+  if (
+    !force &&
+    profile.last_reminder_at &&
+    isSameLocalDay(new Date(profile.last_reminder_at), new Date(), timezone)
+  ) {
     return { userId, sent: false, reason: 'recent' }
   }
 
@@ -158,7 +160,7 @@ export async function buildAndSendReminder(
   // 7) 组装邮件（聚焦版：正文只列可行动项，其余折叠成计数）。
   const built = buildReminderEmail({
     tasks,
-    timezone: profile.timezone ?? 'America/Los_Angeles',
+    timezone,
     now: new Date(),
     unsubscribeUrl,
     viewUrl,

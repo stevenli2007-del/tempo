@@ -20,6 +20,9 @@ import type { TaskType } from '@/types/task'
 /** 「截止临近」窗口：due date 距现在 ≤ 该天数（含逾期）的任务算「即将到期 / 可行动」。 */
 export const DUE_SOON_DAYS = 3
 
+/** 默认用户时区（`profiles.timezone` 缺省值）。渲染日期与「今天」判定共用，避免两处各写一遍。 */
+export const DEFAULT_TIMEZONE = 'America/Los_Angeles'
+
 /** 一天毫秒数（避免魔法数字散落）。 */
 const DAY_MS = 86_400_000
 
@@ -109,6 +112,31 @@ export function computeActionable(
 function isActionableTask(task: ReminderTaskView, now: Date): boolean {
   if (task.dueDate === null) return false
   return daysUntil(task.dueDate, now) <= DUE_SOON_DAYS
+}
+
+/** 用户本地日历日（`en-CA` 的输出恰好是 `YYYY-MM-DD`，可直接做相等比较）。 */
+function localDayKey(at: Date, timezone: string): string {
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: timezone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(at)
+}
+
+/**
+ * 是否处在同一个「用户本地日历日」—— 频控判据（「每用户每天至多一封」）。
+ *
+ * ### 🔴 为什么不能用固定 24h 窗口（2026-09-17 实测踩到的静默 bug）
+ * 定时任务固定在每天同一时刻触发（`vercel.json` 的 `0 14 * * *`），而 `last_reminder_at`
+ * 记录的是**上一轮发送完成**的时刻 —— 必然略晚于上一轮的触发时刻。于是：
+ * 昨 14:00:03 发送 → 今 14:00:00 检查，差值 86,397,000ms **小于** 24h → 判为「今天已发过」
+ * → 跳过。**明天**再检查时差值已 > 24h → 发送。结果是「**隔天一封**」，而且完全静默
+ * （日志只有 `reason: 'recent'`，看起来一切正常）。按「本地日历日」判定才是这句话的字面语义，
+ * 也不受 cron 抖动 / 发送耗时漂移影响。
+ */
+export function isSameLocalDay(a: Date, b: Date, timezone: string): boolean {
+  return localDayKey(a, timezone) === localDayKey(b, timezone)
 }
 
 /** 时区感知的日期格式化（只到「日期 + 星期」，不给时分，避免误导到具体钟点）。 */

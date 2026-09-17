@@ -1,7 +1,7 @@
 /**
  * P0-3-14 提醒「内容渲染层」纯函数回归（零副作用，不连库、不连 Worker）。
  *
- * 测的是「截止临近排序」「可行动判定」「邮件组装」—— 与 `lib/reminders/build.ts` 同口径。
+ * 测的是「截止临近排序」「可行动判定」「邮件组装」「频控（本地日历日）」—— 与 `lib/reminders/build.ts` 同口径。
  * 这是**唯一一类**「代码照样过、但口径被悄悄放宽」的 bug：排序退化会让 TBD 排到前面、
  * 可行动判定放宽会让没到期的事也天天发信（与 ADR-016 R3「准确优先于频繁」直接冲突）。
  *
@@ -9,7 +9,7 @@
  * 改 build.ts 时务必同步这里（顶部注释已写明）。
  */
 
-import { buildReminderEmail, computeActionable, sortByDueDateAsc } from '@/lib/reminders/build'
+import { buildReminderEmail, computeActionable, isSameLocalDay, sortByDueDateAsc } from '@/lib/reminders/build'
 
 let passed = 0
 let failed = 0
@@ -30,6 +30,36 @@ const overdue = { courseName: 'CHEM 1A', title: 'Homework 1', dueDate: '2026-09-
 const dueSoon = { courseName: 'MATH 53', title: 'Homework 7', dueDate: '2026-09-18T23:59:00Z', taskType: 'assignment' as const }
 const farFuture = { courseName: 'PHYSICS 7A', title: 'Problem Set 3', dueDate: '2026-12-01T23:59:00Z', taskType: 'assignment' as const }
 const tbd = { courseName: 'CHEM 1A', title: 'Lab Report', dueDate: null, taskType: 'assignment' as const }
+
+// ---------- 频控：本地日历日（「每用户每天至多一封」） ----------
+
+const TZ = 'America/Los_Angeles'
+
+{
+  // 反例（2026-09-17 实测踩到的静默 bug）：固定 24h 窗口下「昨 14:00:03 发 → 今 14:00:00 查」，
+  // 差值 86,397,000ms < 24h → 被误判「今天已发过」→ 跳过 → 退化成隔天一封。日历日判据必须放行。
+  assert(
+    isSameLocalDay(new Date('2026-09-17T14:00:03Z'), new Date('2026-09-18T14:00:00Z'), TZ) === false,
+    '频控：隔天同一时刻不算同一天（修「隔天一封」）',
+  )
+  assert(
+    isSameLocalDay(new Date('2026-09-17T14:00:00Z'), new Date('2026-09-17T20:00:00Z'), TZ) === true,
+    '频控：同一天内一律拦（每天至多一封）',
+  )
+  assert(
+    isSameLocalDay(new Date('2026-09-18T06:59:00Z'), new Date('2026-09-18T07:00:00Z'), TZ) === false,
+    '频控：跨 PT 零点算新的一天',
+  )
+  assert(
+    isSameLocalDay(new Date('2026-09-17T23:00:00Z'), new Date('2026-09-18T01:00:00Z'), TZ) === true,
+    '频控：UTC 跨日但本地同日仍拦',
+  )
+  assert(
+    isSameLocalDay(new Date('2026-09-18T02:00:00Z'), new Date('2026-09-18T13:00:00Z'), 'UTC') === true &&
+      isSameLocalDay(new Date('2026-09-18T02:00:00Z'), new Date('2026-09-18T13:00:00Z'), TZ) === false,
+    '频控：按用户时区判定（非 UTC 硬编码）',
+  )
+}
 
 // ---------- 排序：截止临近（TBD 排最后） ----------
 
