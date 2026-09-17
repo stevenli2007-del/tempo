@@ -34,24 +34,35 @@ node -e "console.log(require('node:crypto').randomBytes(32).toString('hex'))"
 
 ---
 
-## 1. 【手动】等域名 zone 生效
+## 1. ✅【已完成 2026-09-17 10:43】域名 zone 已生效
 
-- [ ] Cloudflare Dashboard → **Domains → Overview → `tempocourse.com`**，状态为 **Active**。
-  - Registrar 直接买的域名通常几分钟内自动建好 zone，无需手填 NS。
-- [ ] 本地验证（应返回 `*.ns.cloudflare.com`，也可能出现 `pending` 的旧 NS）：
+- [x] Cloudflare Dashboard → **Domains → Overview → `tempocourse.com`**，状态 **Active** ✅（Steven 截图确认，Plan Free）。
+- [x] NS 委派已全球生效，**Cloudflare 成为权威 DNS**。三条独立实测证据：
+  - `dig @1.1.1.1 NS tempocourse.com` → `kai.ns.cloudflare.com` / `sunny.ns.cloudflare.com`
+  - `.com` 注册局权威（`a.gtld-servers.net`）已将该域名委派给上述两只 NS（TTL 172800）
+  - 注册局 RDAP 登记 NS = `KAI/SUNNY.NS.CLOUDFLARE.COM`（status `client transfer prohibited` = 注册商转移锁，正常）
 
 ```bash
-dig +short NS tempocourse.com
+# 自查命令（权威口径，绕开本地缓存）
+dig @1.1.1.1 NS tempocourse.com +short
 ```
 
-> ⚠️ 注册后短时间内 `dig` 报 `NXDOMAIN` **是正常的**（2026-09-17 10:34 实测仍为 NXDOMAIN），等几分钟到几小时。**NS 没生效前，第 2 步的 Email Routing 打不开。**
+> ⚠️ **判据提醒**：本地默认解析器（不写 `@1.1.1.1`）可能因缓存仍返回空 —— **空 ≠ 未生效**。实测注册后约 9 分钟（10:34 → 10:43）即通。**NS 未生效前，第 2 步的 Email Routing 打不开。**
 
 ---
 
 ## 2. 【手动】开启 Email Routing（onboard domain）
 
-- [ ] Dashboard 路径（2026-06 后的新面板）：**Compute → Email Service → Email Routing**。
-  - 若面板里找不到，试旧路径：**Email → Email Routing**（同一功能，入口位置改过）。
+- [ ] **官方直达链接（推荐，免翻面板）** —— 由 Cloudflare 官方文档给出，`?to=/:account/...` 会自动落到你当前 account 的对应功能页：
+
+```
+https://dash.cloudflare.com/?to=/:account/email-service/routing
+```
+
+- [ ] 手动路径（2026-06 后新面板）：**Compute → Email Service → Email Routing**。
+  - ⚠️ 旧的 **Email → Email Routing** **已废弃** —— zone 侧边栏的 `Email` 分组下**只有** DMARC Management / Email Security，**不含** Email Routing（2026-09-17 实测）。
+  - 找不到时用面板顶部 **⌘K 搜索**框敲 `Email Routing`。
+  - ⚠️ 不要手动拼 account 级 URL（如 `dash.cloudflare.com/<account_id>/email/routing`）会 404 —— 用上面的 `?to=` 形式。
 - [ ] 点 **Onboard Domain** → 选 `tempocourse.com`。
 - [ ] 复核 Cloudflare 自动要加的 DNS 记录 → **Done**：
   - `MX` → `route1.mx.cloudflare.net` 等（收信入口）
