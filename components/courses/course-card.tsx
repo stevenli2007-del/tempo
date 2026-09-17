@@ -7,6 +7,7 @@ import { useState } from 'react'
 import { syllabusStatusText } from '@/components/courses/syllabus-status'
 import { courseColorKey, courseColorVar } from '@/lib/courses/course-color'
 import type { CourseSyncLine } from '@/lib/sync/status'
+import { SUBMISSION_BADGE_CLASS, submissionBadge } from '@/lib/tasks/submission'
 import type { Course } from '@/types/course'
 import type { TaskSubmissionState } from '@/types/task'
 import type { Syllabus } from '@/types/syllabus'
@@ -34,7 +35,7 @@ export interface UpcomingTaskView {
   /** null = 日期待定（TBD）。 */
   dueLabel: string | null
   isOverdue: boolean
-  /** Canvas 提交态（P0-3-10）；null = 不追踪。卡片显示「已提交（Canvas）」等轻量标注。 */
+  /** Canvas 提交态（P0-3-10）；null = 不追踪。卡片显示「已评分」等轻量徽标。 */
   submissionState: TaskSubmissionState | null
 }
 
@@ -60,24 +61,14 @@ interface CourseCardProps {
   syncLine?: CourseSyncLine | null
 }
 
-/** 卡片上的轻量提交态标注（P0-3-10）。返回文案，null = 不标。 */
-function submissionBadge(state: TaskSubmissionState | null): string | null {
-  switch (state) {
-    case 'submitted':
-    case 'graded':
-    case 'pending_review':
-      return '已提交（Canvas）'
-    case 'external_unconfirmed':
-      return '待确认（外部平台）'
-    default:
-      return null
-  }
-}
+/** 卡片上的轻量提交态标注（P0-3-10）—— 口径已搬到 `lib/tasks/submission.ts`（P0-3-15）。 */
 
 function UpcomingTasks({ tasks }: { tasks: UpcomingTaskView[] }) {
   return (
     <ul className="mt-2 space-y-1">
       {tasks.map((task) => {
+        // 徽标口径与总览页任务行**共用一处**（`lib/tasks/submission.ts`，P0-3-15）——
+        // 各写一份 switch 迟早出现"同一份作业两页写着不同的状态"。
         const badge = submissionBadge(task.submissionState)
         return (
           <li key={task.id} className="flex items-baseline gap-2 text-xs">
@@ -86,7 +77,14 @@ function UpcomingTasks({ tasks }: { tasks: UpcomingTaskView[] }) {
               className={`shrink-0 ${task.isOverdue ? 'text-destructive' : 'text-muted-foreground'}`}
             >
               {task.dueLabel ?? '日期待定'}
-              {badge ? ` · ${badge}` : ''}
+              {badge ? (
+                <>
+                  {' · '}
+                  <span className={SUBMISSION_BADGE_CLASS[badge.tone]} title={badge.title}>
+                    {badge.label}
+                  </span>
+                </>
+              ) : null}
             </span>
           </li>
         )

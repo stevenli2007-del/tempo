@@ -593,7 +593,7 @@ P0-3-14 落地后重新评估「改期 / 新作业」是否要升级为落写；
 
 - **状态**：已接受
 - **日期**：2026-09-13
-- **影响**：`Database.md` §3.9 / §4.1、`API-Contract.md` §5、`Phase-0-MVP.md` P0-3-10
+- **影响**：`Database.md` §3.9 / §4.1、`API-Contract.md` §5、`Phase-0-MVP.md` P0-3-10 / **P0-3-15（展示层合并口径，2026-09-17 补充）**
 
 **背景**
 
@@ -640,6 +640,17 @@ Steven 报 #7：R4A 的 I.4 讨论作业**已经交了**（Canvas 显示 Not Yet
 **复审条件**
 
 引入多数据源冲突识别（Phase 1）时，需定义"Canvas 真相 vs 用户手勾 vs 邮件解析"三者的仲裁顺序。
+
+**补充（P0-3-15，2026-09-17）：展示层怎么合 —— 三条口径**
+
+ADR-015 定了「两轴分列」，但**没定展示层怎么合**。Steven 2026-09-17 截图抓到一处实现分叉（`TaskList` 的分组用合并判定、行内渲染却只看 `status === 'done'`），于是把它固化成三条：
+
+1. **判定只有一个来源**：`isEffectivelyDone()` = `status === 'done'` **或** `isCanvasDone(submission_state)`。`isCanvasDone()` 单独导出，供「这条是 Canvas 判的」这类派生视图复用 —— 原先这个三值 OR 在**三处各写一份**（`progress.ts` / `dashboard/page.tsx` / `course-list.ts`）。
+2. **Canvas 已判定完成时，勾选框不可点。** 因为此时往**任何方向**写 `status` 都改变不了 `isEffectivelyDone()` 为真的事实 —— 任务仍在「已完成」区、勾仍在，用户只会看到"点了没反应"，正是 ADR-016 R3 要防的那类静默失败。画法：**灰色实心勾**（区别于手勾的品牌色实心勾），由徽标说明来源。
+   **用户主权只在 Canvas 没有真相时才需要表达**（`null` / `unsubmitted` / `missing` / 外部平台）—— 这也是「同步永不写 `status`」的另一面：既然同步不写，渲染层也不该假装用户写过。
+3. **徽标反映 Canvas 真相，与"谁判定完成"正交** —— 六态各有文案与色调（未提交 `unsubmitted` / 缺交 `missing` / 已提交 `submitted` / 待查重 `pending_review` / 已评分 `graded` / 待确认 `external_unconfirmed`），`null` 不标。口径收在 `lib/tasks/submission.ts`，总览页任务行与课程卡**共用一份**。
+
+**影响（补充）**：`lib/tasks/progress.ts`（新增 `isCanvasDone`）、`lib/tasks/submission.ts`（新文件）、`components/tasks/task-list.tsx`、`components/courses/course-card.tsx`、`app/(routes)/dashboard/page.tsx`、`lib/courses/course-list.ts`；回归 `scripts/regress-progress.ts` 17 → 24 条；`CodingRules.md` §10.1 第 21 条。
 
 ---
 

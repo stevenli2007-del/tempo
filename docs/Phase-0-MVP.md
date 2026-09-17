@@ -29,7 +29,7 @@
 
 ## 当前进度指针
 
-**当前 task**：**`P0-3-14`（主动提醒 / 优先级）** —— ✅ **出站全链路已上线 2026-09-17**（迁移 ①/Workers Paid ② 本就已付费/发件地址验证 ③/出站 Worker ④/Vercel env ⑤ 全部就绪；三路由生产零副作用探针通过；正文口径收敛为**聚焦版**），**待 Steven 真发一封验收**；**`P0-3-11`（邮件通道·入站）** ✅ 代码完成 + **真人真邮件端到端验收通过 2026-09-17**（入站-only：密址绑定 + 纯入站，出站归 P0-3-14）；✅ **部署 8/8 步**（①–⑦ 配置全部生效，⑧ 真人转发真 Gradescope 回执验证 `MX→catch-all→Worker→Vercel` 全链路通过）；**`P0-3-9`（截图档）** 代码完成、真实识别待 Steven 贴 `DASHSCOPE_API_KEY` 后补验；**P0-3-2 已验收**。
+**当前 task**：**`P0-3-15`（完成态统一 + 提交态徽标）** —— ✅ **代码完成 2026-09-17**（修 `TaskList`「分组用合并判定、行内渲染只看 `status`」的分叉 + Canvas 已判定完成时勾选框改**静态灰勾不可点** + 任务名后**六态徽标**），**待 Steven 浏览器复验**；**`P0-3-14`（主动提醒 / 优先级）** ✅ **出站全链路已上线 + 真发已收 2026-09-17**（迁移 ①/Workers Paid ② 本就已付费/发件地址验证 ③/出站 Worker ④/Vercel env ⑤ 全部就绪；生产真发 `usersReminded:1` + 立刻重打被频控拦下；正文口径收敛为**聚焦版**；验收发现的「可提醒范围误报 86%（漏筛 `submission_state`）」已修）；**`P0-3-11`（邮件通道·入站）** ✅ 代码完成 + **真人真邮件端到端验收通过 2026-09-17**（入站-only：密址绑定 + 纯入站，出站归 P0-3-14）；✅ **部署 8/8 步**（①–⑦ 配置全部生效，⑧ 真人转发真 Gradescope 回执验证 `MX→catch-all→Worker→Vercel` 全链路通过）；**`P0-3-9`（截图档）** 代码完成、真实识别待 Steven 贴 `DASHSCOPE_API_KEY` 后补验；**P0-3-2 已验收**。
 - ✅ **O-11 关闭：多模态 provider = Qwen 通义千问**（中国区 DashScope，默认 `qwen-vl-plus-latest`，可用 `LLM_MODEL_VISION` 覆写；需切回 Claude 时设 `LLM_PROVIDER_VISION=claude`）。配套 **ADR-018**：provider **按能力路由** —— 文本仍走 DeepSeek（**现有五板块解析零回归**），视觉走 Qwen。同时解决 **O-08**：两路均中国境内、无数据出境。
 - ✅ 另三项决策：**图片不落库**（浏览器压缩后 base64 直传、即用即弃）｜**范围 = 确认完成 + 新增/改期**（完全复用 3-8b 的 `match` + `PATCH`）｜**零迁移**（不新增列）。
 - **`P0-3-14`「主动提醒 / 优先级」**（Steven 2026-09-13 同意立项，2026-09-17 开工）—— ✅ **出站全链路已上线 2026-09-17**（三路由 + 出站 Worker + 迁移 + Vercel env 全部就绪，生产探针通过），待 Steven 真发验收。三项拍板：**渠道 = 邮件**（Web Push 排除）/ **优先级 = 截止临近排序**（不碰 Phase 2 权重）/ **正文口径 = 聚焦版**（只列「可行动」项 = 逾期 + 3 天内，其余折叠成一行计数 —— 首版全量平铺生成 63 行而主题写 20，口径打架且属洪水式日报）；ADR-017 点名它是"秘书"最核心的护城河，此前**无对应卡**；与 3-11 的出站范围边界见下方执行卡。
@@ -1119,6 +1119,7 @@ Phase 0 列表只有几十条，每行再加一个 tag 只会更密，信息增�
 | **P0-3-12** | **全站视觉统一扫尾**：把 3-5 ~ 3-11 的新界面收进设计基线 | Bud | P0-3-3 ~ 3-11 | 无遗留旧样式；对齐 Stride 观感 | ⚪ |
 | **P0-3-13** | **版本 freeze + 内部试用**（Steven + 1-2 熟人）｜**出口门** | 共担 | P0-3-12 | 修掉「看不懂 / 不舒服」；产出**可发版** | ⚪ |
 | **P0-3-14** | **主动提醒 / 优先级**：出站推送（提醒时机 + 优先级建议 + 频控）—— **ADR-017 点名的"秘书"核心护城河**（此前无卡） | Bud | P0-3-11 | 见下方执行卡（三项拍板：渠道=邮件 / 优先级=截止临近排序 / 正文=聚焦版） | ✅ **出站全链路已通 2026-09-17**（迁移①/Paid②/发件地址③/Worker④/env⑤/**真发⑥** —— 生产 `usersReminded:1`，Steven 已收到）；**验收发现「可提醒范围」漏筛 `submission_state`（误报 18/21）已修**，待 Steven 复验 |
+| **P0-3-15** | **完成态统一 + 提交态徽标**：修 `TaskList`「分组用合并判定、行内渲染只看 `status`」的分叉；Canvas 已判定完成 → 勾选框改为**静态灰勾（不可点）**；任务名后加**六态徽标**（未提交 / 缺交 / 已提交 / 待查重 / 已评分 / 待确认） | Bud | P0-3-14 | ① dashboard 里 Canvas 已判完成的作业不再画空勾选框；② 每条有提交态的任务后都有对应徽标 | ✅ 代码完成 2026-09-17（`isCanvasDone()` 收口三处副本；真数据 40/83 条受影响；回归 +7 条；待 Steven 浏览器复验） |
 
 **排序纪律（不是编号顺序）**：`3-3 设计基线 → 3-4 / 3-5 / 3-6 结构与内容 → 3-10 地基（提交状态 + 时区）→ 3-7 可视化 → 3-8 / 3-9 / 3-11 对话框与通道 → 3-14 主动提醒 → 3-12 扫尾`。
 > ⚠️ **3-14 编号在 3-13 之后，但执行顺序在 3-12 之前** —— 沿用 3-7b 的「编号 ≠ 执行顺序」惯例（编号只服务可读性，顺序以本行为准）。
@@ -1415,8 +1416,28 @@ Phase 0 列表只有几十条，每行再加一个 tag 只会更密，信息增�
 - **🔴 不做（ADR-017 / ADR-016 R5）**：月视图 / 拖拽改期等日历功能；惩罚性 streak / 断签；任何以"多打开 Tempo"为目标的激励。
 - **关键约束**：**准确优先于频繁** —— 一次误报（提醒一件已完成的事）比不提醒更伤信任（ADR-016 R3「不确定就标待确认，绝不猜」）。
 - **✅ 上线状态（2026-09-17）**：① 迁移 ✅ ② Workers Paid ✅（本就已付费，免升级）③ 发件地址 `noreply@tempocourse.com` 验证 ✅（**catch-all zone 上先建临时精确转发规则**，否则验证信被 Worker 吞）④ 出站 Worker 部署 ✅（`tempo-outbound-email.stevenli2007.workers.dev`）⑤ Vercel 三 env ✅（`OUTBOUND_EMAIL_WORKER_URL` / `OUTBOUND_EMAIL_SECRET` / `APP_BASE_URL`）⑥ **真发 ✅**（`GET /reminders/scheduled` → `usersReminded:1`，Steven 已收到；立刻重打 → `skipped.recent:1` = 频控生效）⑦ **验收发现的「误报 Canvas 已完成项」已修**（21 → 3），待复验。
-- **◻️ 待议（本卡不做，属 UX 层）**：`pending` 里积压着 24 条「Canvas 已判定完成但用户没手勾」的任务（如 `graded` 的 21 条）—— 邮件现在不再提它们，但它们会一直挂在 dashboard 待办里。是否做「一键确认 Canvas 已完成的项」/ 自动建议勾选，另立卡。
+- **◻️ 待议（本卡不做，属 UX 层）**：`pending` 里积压着 24 条「Canvas 已判定完成但用户没手勾」的任务（如 `graded` 的 21 条）—— 邮件现在不再提它们，但它们会一直挂在 dashboard 待办里。是否做「一键确认 Canvas 已完成的项」/ 自动建议勾选，另立卡。→ ✅ **已由 `P0-3-15` 关闭**（灰色勾 + 徽标已表达"Canvas 替我确认了"，用户不必再点一次）。
 - **🔴 已知数据层问题（不在本卡）**：`Final Exam` / `Unit 1-3 Exam` 在邮件中各出现两份（exam 派生任务与 syllabus 数据重复），单列后续卡处理。
+
+---
+
+#### 🎫 P0-3-15 · 完成态统一 + 提交态徽标 ✅ 代码完成 2026-09-17（待 Steven 浏览器复验）
+
+- **为什么立项**：P0-3-14 真发验收时 Steven 截图抓到 —— `Lab 1: Airbags Prelab Quiz` 在 dashboard 上**带着空勾选框**，可它早已被 Canvas 评分（`submission_state='graded'`）。既"看起来像待办"，又"勾选框点了没用"。
+- **根因 = 渲染层判定分叉，不是数据问题**：`TaskList` 的**分组**用 `isEffectivelyDone()`（手勾 **或** Canvas 已判定完成），而**行内渲染** `TaskRow` 写的是 `status === 'done'` → Canvas 已判定完成的任务被归进「已完成」折叠盒，却画出**空勾选框 + 无删除线**。实测 83 条任务里 **40 条**如此。
+  ⚠️ **`tsc` / `eslint` / `next build` / 全部回归脚本当时都是绿的** —— 两处各自都"没错"，错的是它们说的不是同一件事。已升格为 `CodingRules.md` §10.1 第 21 条。
+- **两项拍板（2026-09-17 Steven 确认，已补进 ADR-015）**：
+  1. **Canvas 已判定完成时，勾选框 = 静态标记**（灰色实心勾、**不可点**）。理由：此时往任何方向写 `status` 都改变不了 `isEffectivelyDone()` 为真 —— 任务仍在「已完成」区、勾仍在，用户只会看到"点了没反应"，又是一次静默失败。**用户主权只在 Canvas 没有真相时才需要表达**（`null` / `unsubmitted` / `missing` / 外部平台）。
+  2. **徽标六态全做**：未提交（amber）/ 缺交（red）/ 已提交 / 待查重 / 已评分（green）/ 待确认（gray，外部平台）；`null` 不标。
+- **交付**：
+  - `lib/tasks/progress.ts`：新增 `isCanvasDone(state)` —— 把「三值 OR」从**三处副本**收成一处（原 `isEffectivelyDone` / `app/(routes)/dashboard/page.tsx` / `lib/courses/course-list.ts` 各写一份）。
+  - `lib/tasks/submission.ts`（新）：`submissionBadge()` 六态映射 + `SUBMISSION_BADGE_CLASS` 色调（走 `app/globals.css` 的 `@theme` 令牌，亮/暗主题自动跟随）。
+  - `components/tasks/task-list.tsx`：`TaskRow` 完成判定改 `isEffectivelyDone()`；勾选框**三种画法**（手勾=品牌色实心 / Canvas 判定=灰色实心不可点 / 未交=空框）；徽标接共享模块。顺手去掉日期行里重复的「（逾期未交）」—— 已由「缺交」徽标表达。
+  - `components/courses/course-card.tsx`：改用共享徽标（原先只认三值、文案一律「已提交（Canvas）」，现在与任务行同口径）。
+- **改后真实数据分布**（83 条，只读审计，判据用**真函数**不手算）：待办区 40 / 已完成区 43；已完成区里 **40 条是 Canvas 判的**（36 已评分 + 2 已提交 + 2 待查重）、3 条用户手勾；待办区 24 条「未提交」+ 16 条无徽标。**`null` 的 16 条全部仍在待办区且可勾** —— syllabus 派生考试没被"顺手统一"吞掉。
+- **🔴 顺带关掉一个待议项**：P0-3-14 卡面列的「要不要做一键确认 Canvas 已完成的项」**不再需要**（见上）。
+- **自测**：`tsc` 0 / `eslint` 0 / `next build` 过 / `regress:progress` **+7 条（现 24/24）** / `regress:reminders` 47/47；另**在构建产物 CSS 里逐类核对** `text-amber` / `text-green` / `text-destructive` 是否生成且指向 `@theme` 令牌 —— 这类自定义令牌静默失效时，构建日志与 tsc 都发现不了。
+- **🔴 已知取舍（刻意）**：Canvas 已判定完成的任务**用户无法再取消勾选**（勾选框被禁用）。Phase 0 认为不需要：学生不会想把"Canvas 已评分"的作业拉回待办；真需要时改 `status` 也改变不了它仍属已完成的事实。若将来出现"重做/补交"场景，再开卡。
 
 ---
 
@@ -1507,3 +1528,4 @@ P0-0 基础设施
 | 2026-09-17 | **P0-3-14 出站全链路上线 + 正文口径收敛为「聚焦版」+ 验收踩坑**：① 出站启用 7 步走完 —— 迁移执行 ✅、**Workers Paid 本就已付费（免升级）** ✅、`noreply@tempocourse.com` 验证 ✅（**catch-all zone 上靠临时精确转发规则把验证信引到已验邮箱，验完删除** —— 否则验证信被 Worker 吞掉）、出站 Worker 部署 ✅（`tempo-outbound-email.stevenli2007.workers.dev`）、Vercel 三 env ✅。② 🔴 **验收踩坑：env 部署 ≠ 代码部署** —— 加完 env 面板弹 `Deployment created`，但新路由全 404，根因是 Vercel 从 `origin/main` 构建、而 P0-3-14 的 commit **还没 push**。**判据：无凭证打新路由 → 404=代码没上 / 401=已上线**（一眼区分）。③ 🔴 **预览（真数据）暴露产品问题**：首版正文**全量平铺 63 行**、主题只写 20（口径打架 + 洪水式日报）→ Steven 拍板**聚焦版**：正文只列「可行动」项（逾期 + 3 天内），其余折叠成「另有 N 项更远的任务（含 M 项日期待定）→ 在 Tempo 查看」；新增 `shownCount`/`hiddenCount`/`hiddenTbdCount`；`tsc`/`build` 过、回归 **23→34**。④ 已知数据层问题（**不在本卡**）：`Final Exam` / `Unit 1-3 Exam` 各两份（exam 派生任务与 syllabus 重复），单列后续卡。⑤ 卫生：出站 Worker 补 `.gitignore` + 提交 `package-lock.json`（commit `0aede18`） | P0-3-14、ADR-016、ADR-017 |
 | 2026-09-17 | **P0-3-14 修「可提醒范围」漏筛 `submission_state`（Steven 真发验收发现的 bug，误报率 86%）**：① **现象**：邮件列 `7A Pre-Assessment 02` 为「已逾期 13 天」，而 Tempo 里它显示 **已提交（Canvas）**。② **根因**：引擎 SQL 只筛 `status='pending'`、**没看 `submission_state`** —— `status` 是用户主权、同步永不写（ADR-015），Canvas 已提交/已评分的任务照样 `pending`。③ **实测（真数据只读审计，判据用真函数 `isEffectivelyDone()`）**：邮件列的 21 条里 **18 条 Canvas 已判定完成**（全表 64 条 pending 中 24 条属此类），只有 2 条是 Canvas 明确说没收到 —— 误报率 86%，直接击穿 ADR-016 R3。④ **修法**：新增 `isRemindable()`（`lib/reminders/build.ts`）= `!isEffectivelyDone()` 且 `!== 'external_unconfirmed'`；**内部复用全站唯一判定**而非重写。⑤ **三条边界写死**：`submitted`/`graded`/`pending_review` 不提醒 / `external_unconfirmed` 不催（ADR-013）/ **`null` 照常提醒**（含全部 syllabus 派生考试）。⑥ **修后同一份真实数据：21 → 3 条**（全是真开着的），折叠 43 → 37，总数 64 → 40（自洽）。回归 **39 → 47** | P0-3-14、ADR-013、ADR-015、ADR-016 R3 |
 | 2026-09-17 | **P0-3-14 真发成功 + 频控静默 bug 修复**：① **生产真发**：走 `GET /api/v1/reminders/scheduled`（带 `CRON_SECRET`）→ `{usersTotal:1, usersReminded:1, usersFailed:0}`，真信投到 `stevenli2007@berkeley.edu`；立刻重打 → `{usersReminded:0, usersSkipped:{recent:1}}` = **频控生效、不重复发**。库内 `last_reminder_at=2026-09-17T21:49:51Z`。② 🔴 **真发前拦下一个静默 bug**：原 `engine.ts` 判 `Date.now()-last_reminder_at < 24h` 跳过 → 定时任务固定同一时刻触发、而时间戳记的是「上一轮发送完成」时刻（必然略晚于触发时刻）→ **下一轮差值永远不足 24h** → 当天跳过、次日才发 = **实际「隔天一封」**，且日志只有 `reason:'recent'`、面板/审计全看不出（实测账：昨 14:00:03 发 → 今 14:00:00 查 = `86,397,000ms < 24h` = 跳过）。改为 `isSameLocalDay(last, now, profiles.timezone)`（`en-CA` → `YYYY-MM-DD` 比较；`DEFAULT_TIMEZONE` 收口到 `build.ts`），语义与「每天至多一封」字面一致。回归 **34→39**。③ **通用教训（已入 skill/memory）**：**「每天一封」的频控绝不能用滚动 24h 窗口 + 固定时刻调度** —— 必然退化成隔天；要用「用户本地日历日」判定。④ 判据升级：**部署状态用 `gh api .../commits/<sha>/status` 看 Vercel 结果**，比盯面板可靠 | P0-3-14、ADR-016 R3 |
+| 2026-09-17 | **P0-3-15 完成态统一 + 提交态徽标 代码完成 🔵（第 26 张卡，由 P0-3-14 验收触发）**：① **现象**（Steven 截图）：`Lab 1: Airbags Prelab Quiz` 在 dashboard 上带**空勾选框**，实则 `submission_state='graded'`。② **根因 = 渲染层判定分叉**：`TaskList` **分组**用 `isEffectivelyDone()`、**行内** `TaskRow` 写 `status === 'done'` → Canvas 已判定完成的任务归进「已完成」折叠盒却画出空勾框 + 无删除线。实测 **83 条里 40 条**如此；`tsc`/`eslint`/`build`/全部回归**当时全绿**。③ **两项拍板**：Canvas 已判定完成时勾选框改**静态灰勾（不可点）**（往任何方向写 `status` 都改变不了它仍属完成 → 点了没反应 = 静默失败；**用户主权只在 Canvas 无真相时才需表达**）；徽标**六态全做**（未提交 amber / 缺交 red / 已提交·待查重·已评分 green / 待确认 gray；`null` 不标）。④ **交付**：`lib/tasks/progress.ts` 新增 `isCanvasDone()`（把三值 OR 从**三处副本**收成一处：`isEffectivelyDone` / `dashboard/page.tsx` / `course-list.ts`）+ `lib/tasks/submission.ts`（新，徽标口径 + `@theme` 色调） + `task-list.tsx`（勾选框三种画法 + 徽标 + 去掉日期行重复的"逾期未交"）+ `course-card.tsx`（改用共享徽标）。⑤ **真实数据审计**：待办区 40 / 已完成区 43，其中 40 条已完成是 Canvas 判的；**`null` 的 16 条全部仍在待办区且可勾**（syllabus 派生考试没被"顺手统一"吞掉）。⑥ 回归 `regress:progress` **+7（现 24/24）**；另**在构建产物 CSS 里核对** `text-amber`/`text-green`/`text-destructive` 确已生成且指向 `@theme` 令牌。⑦ 升格 `CodingRules.md` §10.1 第 21 条「同一判定在组件里分叉」+ 两行坑索引；ADR-015 补三条展示层口径。⑧ **顺带关闭** P0-3-14 的「一键确认 Canvas 已完成的项」待议项 —— 灰色勾已表达"Canvas 替我确认了" | P0-3-15、ADR-015、ADR-016 R3 |

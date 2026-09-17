@@ -3,6 +3,7 @@ import { SYLLABUS_COLUMNS, toSyllabus } from '@/lib/syllabi'
 import type { SyllabusRow } from '@/lib/syllabi'
 import { createClient } from '@/lib/supabase/server'
 import { formatDue } from '@/lib/tasks/format'
+import { isCanvasDone } from '@/lib/tasks/progress'
 import type { Course } from '@/types/course'
 import type { Syllabus } from '@/types/syllabus'
 import type { UpcomingTask } from '@/types/task'
@@ -52,13 +53,11 @@ export function toUpcomingViews(
   const list = tasks ?? []
   return list.map((task) => {
     const { label, isOverdue } = formatDue(task.dueDate, now)
-    // 卡片只显示"接下来要做的事"：Canvas 已判定完成（submitted/graded/pending_review）的不算逾期待催；
+    // 卡片只显示"接下来要做的事"：Canvas 已判定完成（`isCanvasDone()`）的不算逾期待催；
     // external_unconfirmed（外部平台提交，Canvas 无记录）也不该标红"已逾期"（我们不知道真没交）。
-    const canvasCompleted =
-      task.submissionState === 'submitted' ||
-      task.submissionState === 'graded' ||
-      task.submissionState === 'pending_review'
-    const knownIncomplete = !canvasCompleted && task.submissionState !== 'external_unconfirmed'
+    // 🔴 判定必须走 `isCanvasDone()` 这一个来源 —— 三值 OR 曾在三处各写一份（P0-3-15）。
+    const knownIncomplete =
+      !isCanvasDone(task.submissionState) && task.submissionState !== 'external_unconfirmed'
     return {
       id: task.id,
       title: task.title,

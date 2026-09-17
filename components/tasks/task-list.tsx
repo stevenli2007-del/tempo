@@ -5,7 +5,8 @@ import { useRouter } from 'next/navigation'
 import { useState } from 'react'
 
 import { courseColorVar, courseColorKey } from '@/lib/courses/course-color'
-import { isEffectivelyDone } from '@/lib/tasks/progress'
+import { isCanvasDone, isEffectivelyDone } from '@/lib/tasks/progress'
+import { SUBMISSION_BADGE_CLASS, submissionBadge } from '@/lib/tasks/submission'
 import type { TaskStatus, TaskSubmissionState } from '@/types/task'
 
 /**
@@ -21,6 +22,13 @@ import type { TaskStatus, TaskSubmissionState } from '@/types/task'
  * ### 已完成的处理（Steven 拍板 2026-09-03）
  * **横线划掉 + 折叠**，不是隐藏，也不是置灰混排 ——
  * 隐藏会让用户找不到"我昨天勾掉了什么"，置灰混排会让待办列表被做完的事稀释。
+ *
+ * ### 两轴状态别打架（P0-3-15）
+ * 一条任务有**两轴**：`status`（用户手勾，只有用户能改）与 `submission_state`
+ * （Canvas 同步写）。合并判定**只能有一个来源** = `isEffectivelyDone()`。
+ * 本组件曾经在分组处用了它、却在渲染处写 `status === 'done'` —— 结果 Canvas 已评分的
+ * 任务被归进「已完成」盒，却画出空勾选框，看起来还是待办（Steven 2026-09-17 截图抓到）。
+ * **改动这里时，分组的 filter 与行内的渲染必须用同一个函数。**
  */
 
 export interface TaskListItem {
@@ -59,53 +67,56 @@ interface TaskRowProps {
 }
 
 /**
- * 任务行的「提交态标注」（P0-3-10）。
- * 用户已手勾（status=done）时不另标 —— 用户主权优先。
- * - submitted / graded / pending_review → 「已提交（Canvas）」（positive）
- * - external_unconfirmed → 「待确认（外部平台提交）」（neutral，绝不写"待完成"诬告用户）
+ * 任务行的「提交态标注」（P0-3-10，文案口径 P0-3-15 搬到共享模块）。
+ *
+ * 徽标 = **Canvas 真相**（六态细分：未提交 / 缺交 / 已提交 / 待查重 / 已评分 / 待确认），
+ * 与勾选框**分工不同**：这里说的是"Canvas 怎么记的"，勾选框说的是"谁判定完成的"。
+ * 两处各写一份 switch 迟早漂开，所以收在 `lib/tasks/submission.ts`。
  */
-function submissionNote(
-  item: TaskListItem,
-): { label: string; tone: 'positive' | 'neutral' } | null {
-  if (item.status === 'done') return null
-  switch (item.submissionState) {
-    case 'submitted':
-    case 'graded':
-    case 'pending_review':
-      return { label: '已提交（Canvas）', tone: 'positive' }
-    case 'external_unconfirmed':
-      return { label: '待确认（外部平台提交）', tone: 'neutral' }
-    default:
-      return null
-  }
-}
 
 function TaskRow({ item, busy, onToggle }: TaskRowProps) {
-  const isDone = item.status === 'done'
-  const note = submissionNote(item)
+  const handDone = item.status === 'done'
+  const canvasDone = isCanvasDone(item.submissionState)
+  // 🔴 P0-3-15：完成态的判定**必须是 `isEffectivelyDone()`**，不能是 `status === 'done'`。
+  // 之前这里只看 status，于是 Canvas 已判定完成的任务虽然被分进了「已完成」盒，
+  // 却渲染成空勾选框 + 无删除线 —— 用户看到的是一条"待办"。
+  const effectivelyDone = isEffectivelyDone(item)
+  const badge = submissionBadge(item.submissionState)
 
-  // 逾期文案：Canvas 标记缺交（missing）区别于普通"逾期未完成"。
-  const overdueText = item.isOverdue
-    ? item.submissionState === 'missing'
-      ? '（逾期未交）'
-      : '（已逾期）'
-    : ''
+  // 🔴 P0-3-15：Canvas 已判定完成时，勾选框**不可点**。
+  // 此时 toggle 无论往哪个方向写 `status`，`isEffectivelyDone()` 都仍然为真 ——
+  // 点下去任务还在「已完成」盒里、勾还在，用户只会看到"点了没反应"，
+  // 又是一次静默失败（CodingRules 7）。
+  // 所以画成灰色实心勾并禁用，由徽标说明"是 Canvas 判的"；
+  // **用户主权只在 Canvas 没有真相时才需要表达**（on_paper / 考试 / 不追踪）。
+  const canToggle = !canvasDone
+
+  /** 勾选框的三种画法：你手勾（实心）/ Canvas 判的（灰实心，不可点）/ 还没交（空框）。 */
+  const boxClass = canvasDone
+    ? 'border-transparent bg-muted text-muted-foreground'
+    : handDone
+      ? 'border-primary bg-primary text-primary-foreground'
+      : 'border-border hover:border-foreground/50'
 
   return (
     <li className="flex items-start gap-3 rounded-lg border border-border bg-card px-4 py-3">
       <button
         type="button"
         onClick={() => onToggle(item)}
-        disabled={busy}
-        aria-label={isDone ? `将「${item.title}」标记为未完成` : `将「${item.title}」标记为已完成`}
-        aria-pressed={isDone}
-        className={`mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded border text-xs disabled:opacity-50 ${
-          isDone
-            ? 'border-primary bg-primary text-primary-foreground'
-            : 'border-border hover:border-foreground/50'
-        }`}
+        disabled={busy || !canToggle}
+        aria-label={
+          canToggle
+            ? handDone
+              ? `将「${item.title}」标记为未完成`
+              : `将「${item.title}」标记为已完成`
+            : `「${item.title}」已由 Canvas 判定完成，无需手动勾选`
+        }
+        aria-pressed={canToggle ? handDone : undefined}
+        className={`mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded border text-xs ${boxClass} ${
+          canToggle ? '' : 'cursor-default'
+        } ${busy ? 'opacity-50' : ''}`}
       >
-        {isDone ? '✓' : ''}
+        {effectivelyDone ? '✓' : ''}
       </button>
 
       <div className="min-w-0 flex-1">
@@ -113,7 +124,7 @@ function TaskRow({ item, busy, onToggle }: TaskRowProps) {
           <Link
             href={`/courses/${item.courseId}`}
             className={`truncate text-sm font-medium underline-offset-4 hover:underline ${
-              isDone ? 'text-muted-foreground line-through' : 'text-foreground'
+              effectivelyDone ? 'text-muted-foreground line-through' : 'text-foreground'
             }`}
           >
             {item.title}
@@ -128,13 +139,13 @@ function TaskRow({ item, busy, onToggle }: TaskRowProps) {
             />
             {item.courseName}
           </span>
-          {note ? (
+          {/* 提交态徽标：每个任务名后都有（Canvas 不追踪时 `submissionBadge()` 返回 null，不标）。 */}
+          {badge ? (
             <span
-              className={`shrink-0 text-xs ${
-                note.tone === 'positive' ? 'text-primary/80' : 'text-muted-foreground/70'
-              }`}
+              className={`shrink-0 text-xs ${SUBMISSION_BADGE_CLASS[badge.tone]}`}
+              title={badge.title}
             >
-              {note.label}
+              {badge.label}
             </span>
           ) : null}
           {item.isDerived ? (
@@ -143,7 +154,8 @@ function TaskRow({ item, busy, onToggle }: TaskRowProps) {
         </div>
         <p className={`mt-0.5 text-xs ${item.isOverdue ? 'text-destructive' : 'text-muted-foreground'}`}>
           {item.dueLabel ?? '日期待定'}
-          {overdueText}
+          {/* 「缺交」已由徽标表达，日期行不再重复一遍（P0-3-15）。 */}
+          {item.isOverdue ? '（已逾期）' : ''}
         </p>
       </div>
     </li>
@@ -158,11 +170,12 @@ export function TaskList({ items }: TaskListProps) {
   const [error, setError] = useState<string | null>(null)
 
   // 服务端已按 dueDate 升序排好（null 排最后），这里只做分组，不打乱顺序。
-  // P0-3-10 合并规则：status='done' **或** Canvas 已判定完成（submitted/graded/pending_review）
-  // → 归入「已完成」区；其余（含 external_unconfirmed / missing / 未交）留在待办。
+  // P0-3-10 合并规则：status='done' **或** `isCanvasDone()` → 归入「已完成」区；
+  // 其余（含 external_unconfirmed / missing / 未交）留在待办。
   //
   // P0-3-7 起判定提到 `lib/tasks/progress.ts` 的 `isEffectivelyDone()` ——
   // 周历要用**完全相同**的规则过滤，两处各写一份迟早会只改一处。
+  // 🔴 P0-3-15：`TaskRow` 内部也必须用它（曾经用了 `status === 'done'`，见文件头注释）。
   const pending = items.filter((item) => !isEffectivelyDone(item))
   const done = items.filter((item) => isEffectivelyDone(item))
 

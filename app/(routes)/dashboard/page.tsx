@@ -22,6 +22,7 @@ import {
   buildUpcomingExams,
   buildWeekCalendar,
   debtWindow,
+  isCanvasDone,
   summarizeDebt,
 } from '@/lib/tasks/progress'
 import { createClient } from '@/lib/supabase/server'
@@ -68,14 +69,12 @@ const EXAM_POOL = 50
 function toListItems(tasks: Task[], now: Date): TaskListItem[] {
   return tasks.map((task) => {
     const { label, isOverdue } = formatDue(task.dueDate, now)
-    // Canvas 已判定完成（submitted/graded/pending_review）→ 不再当"逾期待催"；
+    // Canvas 已判定完成（`isCanvasDone()`）→ 不再当"逾期待催"；
     // external_unconfirmed（外部平台，Canvas 无可信记录）→ 我们不知道真没交，也不标红。
     // 这两类都不算"已知未完成"，只有 status=pending 且非以上两者才标红（P0-3-10 的 isOverdue 连带修）。
-    const canvasCompleted =
-      task.submissionState === 'submitted' ||
-      task.submissionState === 'graded' ||
-      task.submissionState === 'pending_review'
-    const knownIncomplete = !canvasCompleted && task.submissionState !== 'external_unconfirmed'
+    // 🔴 判定必须走 `isCanvasDone()` 这一个来源 —— 三值 OR 曾在三处各写一份（P0-3-15）。
+    const knownIncomplete =
+      !isCanvasDone(task.submissionState) && task.submissionState !== 'external_unconfirmed'
     return {
       id: task.id,
       courseId: task.courseId,

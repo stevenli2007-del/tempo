@@ -1,5 +1,5 @@
 import { addDays, dayKeyToUtcDate, monthDayLabel, schoolDayKey, weekdayLabel } from '@/lib/time'
-import type { Task } from '@/types/task'
+import type { Task, TaskSubmissionState } from '@/types/task'
 
 /**
  * 总览页可视化的**口径层**（P0-3-7a）。
@@ -73,12 +73,34 @@ export function isExamTask(task: Pick<Task, 'taskType'>): boolean {
 // ---------------------------------------------------------------- 完成判定
 
 /**
+ * Canvas 是否**已判定完成**这条任务（外部真相轴，ADR-015）。
+ *
+ * 三个值都算完成：`submitted`（交了）、`pending_review`（交了、待查重）、
+ * `graded`（评完了）。**顺序即语义**：只要 Canvas 收到了作业，用户就不该再被催。
+ *
+ * ### 🔴 为什么必须单独抽一个函数（P0-3-15）
+ * 这个三值 OR 原先在**三处各写了一份**：本文件的 `isEffectivelyDone`、
+ * `app/(routes)/dashboard/page.tsx` 的 `canvasCompleted`、
+ * `lib/courses/course-list.ts` 的 `canvasCompleted`。
+ * 三份副本里只要有一处漏掉 `pending_review`，就会出现"总览页说已完成、课程页还算逾期"
+ * 这类自相矛盾 —— 而这种矛盾**不会报错**，只会让用户不再信任页面上的任何数字。
+ *
+ * **故意不含**：
+ * - `external_unconfirmed` —— 外部平台（Gradescope）没有可信记录，ADR-013；
+ * - `null` —— Canvas 压根不追踪完成态（on_paper / not_graded / 考试派生）；
+ * - `unsubmitted` / `missing` —— Canvas 明确说没收到，正是要催的那一类。
+ */
+export function isCanvasDone(state: TaskSubmissionState | null): boolean {
+  return state === 'submitted' || state === 'pending_review' || state === 'graded'
+}
+
+/**
  * 「这条任务算不算做完了」——**全站唯一的判定**（P0-3-7 提为共享函数，在此之前
  * `dashboard/page.tsx` 与 `task-list.tsx` 各写了一份，很容易只改一处）。
  *
  * 两个来源**合并**，缺一不可：
  * - `status === 'done'` —— 用户手勾的，**永远是最高优先**（ADR-015：status 归用户主权）；
- * - Canvas 已判定提交（`submitted` / `graded` / `pending_review`）—— 外部真相。
+ * - `isCanvasDone()` —— Canvas 已判定完成，外部真相。
  *
  * **故意不含** `external_unconfirmed`：外部平台（Gradescope）没有可信记录时我们**不知道**
  * 交没交，把它当"已完成"是猜，当"未完成"是诬告 —— 它只能是第三态（ADR-013）。
@@ -87,12 +109,7 @@ export function isExamTask(task: Pick<Task, 'taskType'>): boolean {
 export function isEffectivelyDone(
   task: Pick<DebtInput, 'status' | 'submissionState'>,
 ): boolean {
-  return (
-    task.status === 'done' ||
-    task.submissionState === 'submitted' ||
-    task.submissionState === 'graded' ||
-    task.submissionState === 'pending_review'
-  )
+  return task.status === 'done' || isCanvasDone(task.submissionState)
 }
 
 // ---------------------------------------------------------------- 债务条口径

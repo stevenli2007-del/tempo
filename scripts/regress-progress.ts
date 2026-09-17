@@ -1,6 +1,8 @@
 /**
- * P0-3-7 回归：总览可视化的**口径层**（`lib/tasks/progress.ts`）三件事都对 ——
- * 债务条的三个桶、周历的分桶与窗口、最近的考试条的取用与排序。
+ * P0-3-7 回归：总览可视化的**口径层**（`lib/tasks/progress.ts`）四件事都对 ——
+ * 债务条的三个桶、周历的分桶与窗口、最近的考试条的取用与排序，
+ * 以及 P0-3-15 加的**完成判定与提交态徽标**（`isCanvasDone` / `isEffectivelyDone` /
+ * `submissionBadge`）。
  *
  * 运行：`npm run regress:progress`（**纯函数，不需要网络，不需要 env**，秒级）
  *
@@ -16,9 +18,12 @@ import {
   buildUpcomingExams,
   buildWeekCalendar,
   classifyDebt,
+  isCanvasDone,
+  isEffectivelyDone,
   summarizeDebt,
 } from '@/lib/tasks/progress'
-import type { Task } from '@/types/task'
+import { SUBMISSION_BADGE_CLASS, submissionBadge } from '@/lib/tasks/submission'
+import type { Task, TaskSubmissionState } from '@/types/task'
 
 const NOW = new Date('2026-09-13T22:48:32Z') // 2026-09-13 15:48 PDT
 
@@ -164,6 +169,67 @@ check(
   '放宽到 5 条时顺序为 今天 > 9/22 > 10/20 > 11/10 > 12/14',
   buildUpcomingExams(examTasks, NOW, 5).map((e) => e.title).join(' > ') ===
     '今天的考试 > Unit 1 Exam > Unit 2 Exam > Unit 3 Exam > Final Exam',
+)
+
+// ---------------------------------------------------------------- 完成判定与提交态徽标（P0-3-15）
+
+// 一条任务有**两轴**：`status` 归用户主权、`submission_state` 归 Canvas 真相（ADR-015）。
+// 这两个函数的输出直接决定"任务出现在待办区还是已完成区"—— 算错**不会报错**，
+// 只会让用户觉得页面在胡说（2026-09-17 Steven 截图抓到：Canvas 已评分的作业
+// 被归进「已完成」盒、却画着空勾选框）。所以把六种 state 全部钉死。
+
+const CANVAS_DONE_STATES = ['submitted', 'pending_review', 'graded'] as const
+
+check(
+  'isCanvasDone：submitted / pending_review / graded 为真（三者都算 Canvas 已判定完成）',
+  CANVAS_DONE_STATES.every((s) => isCanvasDone(s)),
+  CANVAS_DONE_STATES.map((s) => `${s}=${isCanvasDone(s)}`).join(' '),
+)
+check(
+  'isCanvasDone：unsubmitted / missing / external_unconfirmed / null 为假',
+  !isCanvasDone('unsubmitted') &&
+    !isCanvasDone('missing') &&
+    !isCanvasDone('external_unconfirmed') &&
+    !isCanvasDone(null),
+)
+check(
+  'isEffectivelyDone = 手勾 或 Canvas 已判定完成（两轴取并，缺一不可）',
+  isEffectivelyDone({ status: 'done', submissionState: null }) &&
+    isEffectivelyDone({ status: 'pending', submissionState: 'graded' }) &&
+    !isEffectivelyDone({ status: 'pending', submissionState: 'unsubmitted' }),
+)
+check(
+  '🔴 null（考试派生 / Canvas 不追踪）不算已完成 —— 防"顺手统一"把它并进去',
+  !isCanvasDone(null) && !isEffectivelyDone({ status: 'pending', submissionState: null }),
+)
+
+// 徽标：六态各有文案 + 色调，null 不标。**文案与颜色一起钉** —— 只改色也是回归。
+const badgeCases: [TaskSubmissionState | null, string | null, string | null][] = [
+  ['unsubmitted', '未提交', 'warning'],
+  ['missing', '缺交', 'danger'],
+  ['submitted', '已提交', 'positive'],
+  ['pending_review', '待查重', 'positive'],
+  ['graded', '已评分', 'positive'],
+  ['external_unconfirmed', '待确认', 'neutral'],
+  [null, null, null],
+]
+check(
+  'submissionBadge：六态文案与色调逐一对齐，null 不标',
+  badgeCases.every(([state, label, tone]) => {
+    const b = submissionBadge(state)
+    return label === null ? b === null : b?.label === label && b?.tone === tone
+  }),
+  badgeCases.map(([s, l]) => `${s ?? 'null'}→${l ?? '（不标）'}`).join(' '),
+)
+check(
+  'submissionBadge：每个徽标都带得出悬停解释（只有两个字说不清来源）',
+  badgeCases.every(([state]) => state === null || (submissionBadge(state)?.title.length ?? 0) > 0),
+)
+check(
+  'SUBMISSION_BADGE_CLASS：四种语气都有文字色工具类（缺一个会渲染成默认前景色）',
+  (['warning', 'danger', 'positive', 'neutral'] as const).every((t) =>
+    SUBMISSION_BADGE_CLASS[t].startsWith('text-'),
+  ),
 )
 
 // ---------------------------------------------------------------- 汇总
