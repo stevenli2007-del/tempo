@@ -18,7 +18,7 @@ inbound+3a4fd781b46a647be0421d8a9ef70a60984e@tempocourse.com
 
 ```
   你 / Gradescope
-        │  转发（或直接在 Gradescope 改通知邮箱）
+        │  转发（或把该平台通知邮箱指向密址 — 可选便利，非必需）
         ▼
   inbound+<token>@tempocourse.com
         │
@@ -241,6 +241,8 @@ Vercel → 项目 **tempo** → **Settings → Environment Variables**（Product
 ---
 
 ## 8. ✅【已完成】端到端验收（真人真邮件 2026-09-17 验收通过）
+
+> 📌 **范围界定（2026-09-17）**：密址是 **Canvas-blind 作业（`on_paper` / `no_submission`，或完全在 Canvas 外的平台）的手动兜底**——**不要求每用户改各平台通知邮箱**。主流 Gradescope-as-Canvas-submission-type 路径由 Canvas 同步覆盖 `submission_state`，邮件为冗余/兜底信号。inbox-pull（连用户收件箱 / Gmail 全自动）已否决、不纳入 MVP，见 ADR-019「否决的替代方案」（触发重议条件才再评估）。
 
 ### 8.1 Agent 侧已验（应用链路除"真邮件投递"外全部打通）
 

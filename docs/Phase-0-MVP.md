@@ -1382,7 +1382,7 @@ Phase 0 列表只有几十条，每行再加一个 tag 只会更密，信息增�
   - 绑定只用密址 token（确定性，不可伪造）；**不认注册邮箱 `From`**（可被伪造，ADR-019 砍）。
   - **不发「地址已就绪」验证回信**（那是出站，归 P0-3-14，ADR-019 砍）。
 - **为什么现在做**：当前同步触发是"用户打开 dashboard"（T1）—— **用户不来，数据就不新，所以他必须来**，这是结构性矛盾。邮件入站把触发器换成外部事件。
-- **关键约束**：零 OAuth（转发路径），成本远低于 Gmail API；Gmail 全自动留 Phase 1（restricted scope 需安全评估，周期以月计）。基础设施 = Cloudflare Email Routing Worker（thin forwarder）→ Vercel `POST /api/v1/email/inbound`。
+- **关键约束**：零 OAuth（转发路径），成本远低于 Gmail API；**inbox-pull（连收件箱 / Gmail 全自动）已否决、不纳入 MVP**（见 ADR-019「否决的替代方案」，触发重议条件才再评估）。**密址转发是 Canvas-blind 作业的手动兜底，不要求每用户改各平台通知邮箱**——主流 Canvas 作业由 Canvas 同步覆盖，邮件链路为冗余/兜底。基础设施 = Cloudflare Email Routing Worker（thin forwarder）→ Vercel `POST /api/v1/email/inbound`。
 - **📖 部署手册（【Steven 手动】逐步可勾选）**：`docs/EMAIL_INBOUND_SETUP.md` —— 域名 `tempocourse.com` 已注册 2026-09-17（Cloudflare Registrar）。
   - **进度（2026-09-17 12:23 PDT）**：①zone 生效 ✅ ②Email Routing onboard ✅ ③destination 地址验证 ✅ ④Subaddressing 开启 ✅ ⑤Worker 已部署 ✅（当前 Version `40192c25`，secret 已写入）⑥catch-all → Worker 已启用 ✅ ⑦Vercel env ✅（两条均已在 Production 生效）｜ **⑧端到端验收 ✅**（2026-09-17 12:22 PDT Steven 转发真 Gradescope 回执，`Lab 2: Smells` 自动标完成，`matchMode:'exact'` 印证收紧后逻辑上线）—— **P0-3-11 全链路闭环**
   - **⑦ 已实测**：`POST /api/v1/email/inbound`+正确 Bearer → `200 unknown_address`（SECRET 生效）；带真实登录态 `GET /api/v1/email/address` → 返回密址（DOMAIN 生效）。密址 = `inbound+3a4fd781b46a647be0421d8a9ef70a60984e@tempocourse.com`。
