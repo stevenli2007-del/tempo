@@ -5,7 +5,12 @@
 > **域名**：`tempocourse.com`（2026-09-17 于 Cloudflare Registrar 注册）。
 > **设计依据**：`docs/Decisions.md` ADR-019（密址绑定 + 纯入站）、`docs/Phase-0-MVP.md` P0-3-11。
 
-**进度速查**（2026-09-17）：①zone ✅ ②onboard ✅ ③destination ✅ ④subaddressing ✅ ⑤deploy Worker ✅（`7ac9d632`）⑥catch-all ✅ ｜ 剩余 ⑦Vercel env ⬜ ⑧端到端验收 ⬜
+**进度速查**（2026-09-17 12:00 PDT）：①zone ✅ ②onboard ✅ ③destination ✅ ④subaddressing ✅ ⑤deploy Worker ✅（`40192c25`）⑥catch-all ✅ ⑦Vercel env ✅（**两个都需等第二个部署上线**）｜ 剩余 **⑧端到端验收**（只差真人转发一封真邮件）
+
+**你的专属密址**（已生成、已实测打通）：
+```
+inbound+3a4fd781b46a647be0421d8a9ef70a60984e@tempocourse.com
+```
 
 ---
 
@@ -212,24 +217,82 @@ curl -s -X PUT -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/j
 
 ---
 
-## 7. 【手动】Vercel 环境变量 + Redeploy
+## 7. ✅【已完成 2026-09-17 11:58】Vercel 环境变量 + Redeploy
 
 Vercel → 项目 **tempo** → **Settings → Environment Variables**（Production）：
 
-- [ ] `INBOUND_EMAIL_SECRET` = 与 Worker **逐字相同**的那份密钥
-- [ ] `INBOUND_EMAIL_DOMAIN` = `tempocourse.com`
-- [ ] 保存后 **Redeploy**（env 变更不会自动进已有部署）
+- [x] `INBOUND_EMAIL_SECRET` = 与 Worker **逐字相同**的那份密钥 ✅（"Added just now"）
+- [x] `INBOUND_EMAIL_DOMAIN` = `tempocourse.com` ✅（"Added just now"）
+- [x] 保存后 **Redeploy** ✅（面板弹出 `Deployment created`）
+
+> **实测验证（Agent 侧，两条独立证据）**
+> | 探针 | 结果 | 说明 |
+> |---|---|---|
+> | `POST /api/v1/email/inbound` + 正确 Bearer | `200 {"data":{"status":"unknown_address"}}` | `INBOUND_EMAIL_SECRET` 已生效（未配该变量时按 `fail closed` 会回 **401**，见 `lib/api/cron-auth.ts`） |
+> | `GET /api/v1/email/address` + 真实登录态 | `{"data":{"address":"inbound+3a4fd781b46a647be0421d8a9ef70a60984e@tempocourse.com"}}` | `INBOUND_EMAIL_DOMAIN` 已生效；token **懒生成**并写回 `profiles.inbound_token` |
+
+> 🔴 **踩坑：一次会话里改两个 env → Vercel 会触发两个部署，只有第二个是完整的。**
+> 实测现象极具误导性：加完两个变量后，**`INBOUND_EMAIL_SECRET` 立刻生效、`INBOUND_EMAIL_DOMAIN` 却报 `inbound_not_configured`** —— 看着像"变量名打错了"或"值没保存"。
+> 真实原因：Vercel 按「最近更新」倒排，所以面板**最上面的那行是最后加的**；每加一个变量就触发一次部署。前面那个部署（A = 只有先加的那个变量）先构建完上线，后加的变量的部署（B）还在构建 → 出现"一半生效"的中间态。
+> **判据**：不要靠面板状态判断，直接打端点。等 ~2 分钟再打一次即可（本次 A→B 间隔约 1 分钟）。
+> **推论**：改多个 env 时应**一次性加完再手动 Redeploy 一次**，或加完后耐心等**最后一个**部署上线；看到"一半生效"别急着改代码。
+> ⚠️ 附带一条：`INBOUND_EMAIL_DOMAIN` 缺配时端点回的是 **500 `inbound_not_configured`**（不是 401）—— 因为 `GET /api/v1/email/address` 走用户会话，先过鉴权再查配置。
 
 ---
 
-## 8. 【手动】端到端验收
+## 8. 🔄【进行中】端到端验收
 
-- [ ] 登录 Tempo → **Settings** → 「邮件入站」区块应显示你的专属密址：`inbound+<token>@tempocourse.com`
-      （首次访问自动生成 token 写入 `profiles.inbound_token`）
+### 8.1 Agent 侧已验（应用链路除"真邮件投递"外全部打通）
+
+用**真实密址** POST 生产 webhook 两次（Agent 侧，2026-09-17 12:00 PDT）：
+
+| # | 投递内容 | 生产返回 | 结论 |
+|---|---|---|---|
+| A | 中性正文（`Weekly digest`，与提交无关） | `{"status":"processed","action":"none","event":"other","reason":"no_event"}` | 鉴权 ✅ → token 定位用户 ✅ → 课程/候选 ✅ → DeepSeek 解析 ✅ → 决策"不落写" ✅ → 审计落库 ✅ |
+| B | Gradescope 风格提交回执（`Homework 9999`） | `{"status":"processed","action":"mark_done","taskId":"1ae8355d-…","event":"submitted"}` | 落写路径 ✅（写了 `status='done'` + 审计 `action_taken=mark_done`） |
+
+> 📌 **B 的落写没有造成数据损坏**：它命中的 `Homework 2` 本来就是 `done`（Canvas `submission_state: graded`，同课 Homework 1/3/4/5 全为 `done`），只是被重写了同一个值。**无需回滚。**
+> ⚠️ **但 B 暴露了一个真实隐患，见 8.3。**
+
+### 8.2 只差这一步（真人真邮件）
+
+- [x] 密址已在生产可用：`inbound+3a4fd781b46a647be0421d8a9ef70a60984e@tempocourse.com`（Tempo → Settings 也会显示同一个）
 - [ ] 从你的邮箱**转发**一封 Gradescope 提交确认信到该密址（或在 Gradescope 把通知邮箱直接改成它）
-- [ ] 预期：**对应 task 自动标记完成**；`email_inbound_events` 表新增一行
-- [ ] 快速替身测试（不想发真邮件时）：随便发一封到密址，正文写 `Homework 6 submitted successfully`
-      → LLM 应解析出 `submitted` 并匹配到名为 "Homework 6" 的 task
+- [ ] 预期：**对应 task 自动标记完成**；`email_inbound_events` 表新增一行 `action_taken=mark_done`
+- [ ] 若没反应：开 `npx wrangler tail`（第 9 节排查表）
+
+> 这是**唯一**能验证 `MX → catch-all → Worker → Vercel` 整条链的一步 —— Agent 侧的探针只能打到 Vercel，打不到 Cloudflare 的收信入口。
+
+### 8.3 🔴 已知隐患：邮件自动落写路径不该用「交互式召回阈值」
+
+`lib/email/plan.ts` 直接复用了 `lib/tasks/match.ts` 的 `MATCH_THRESHOLD = 0.6`。但两者的**失败代价完全不同**：
+
+| 场景 | 匹配错了会怎样 | 0.6 合适吗 |
+|---|---|---|
+| 对话框 FAB（P0-3-8b） | 多列一条候选，**用户自己挑**，划掉即可 | ✅ 召回优先是对的 |
+| 邮件入站（本卡） | **无人确认**，直接写 `status='done'` → **悄悄标错作业** | ❌ 必须精确优先 |
+
+用真函数（`npx tsx` 直接 import，非手算）实测的分数：
+
+```
+query="Homework 9999"   → 0.8421 Homework 9 ／ 0.7368 Homework 2 ／ 0.7368 Homework 6   ← 一个不存在的作业
+query="Homework 5"      → 0.8889 Homework 2 ／ 0.8889 Homework 6 ／ 0.8889 Homework 7   ← 并列，靠 DB 返回顺序决定选谁
+query="Homework 6"      → 1.0000 Homework 6（正确）／ 0.8889 Homework 2 ／ 0.8889 Homework 7
+query="Homework 6: 1D Kinematics" → 0.9091 Homework 01 - 1D Kinematics ／ (Homework 6 未进前 1)
+阈值扫描("Homework 9999")：t=0.80 → 仍命中 Homework 9；t=0.85 → 归零
+```
+
+三个可复现的结论：
+1. **号码不同也能过 0.6**（`Homework 9999` ≈ `Homework 9` 得 0.84）—— 因为 `normalizeTitle` 把数字也拼进 token 串，编辑距离/Dice 对"数字换掉"极不敏感。
+2. **同分并列没有确定性 tie-break** —— `matchTasks` 只按 score 降序 `sort`，同分时保留候选数组原序（= DB 返回顺序，未指定）。生产那天 `Homework 9999` 落到 `Homework 2` 而非同分的 `Homework 6`，就是这个原因。**"可复现"是 match.ts 头部写明的设计目标，这里破了。**
+3. **提到两个线索反而更差**：`Homework 6: 1D Kinematics` 把 `Homework 01 - 1D Kinematics` 顶到第一，正确目标 `Homework 6` 掉出候选。
+
+**建议的最小改法**（不动共享的 `match.ts`，只收本卡的 `plan.ts`）：
+- 在 `plan.ts` 另立 `INBOUND_MATCH_THRESHOLD = 0.9`（或要求 `normalizeTitle` **完全相等**才自动落写），`matchTasks` 显式传该阈值；
+- 同分时按 `due_date` 等确定性字段 tie-break，或在分数并列时**放弃落写**、只记审计；
+- 补 `scripts/regress-inbound-email.ts` 用例把上面三条钉住。
+
+> **是否采纳由 Steven 定**（属产品取舍：宁可少标 vs 绝不标错）。**不阻塞 8.2 验收** —— 真 Gradescope 回执的标题与任务名高度一致（实测同分场景才会出问题）。
 
 ---
 
@@ -239,8 +302,10 @@ Vercel → 项目 **tempo** → **Settings → Environment Variables**（Product
 |---|---|
 | `Routing status` 长期停在 **Syncing** | DNS 传播中，官方口径 5–15 分钟（最长 24h）；查 `dig @1.1.1.1 MX tempocourse.com` 是否出现 `route1/2/3.mx.cloudflare.net` |
 | 完全没反应 | Cloudflare Email Routing 的 MX/SPF 是否生效；catch-all 是否 **Active**；Subaddressing 是否开（第 4 步） |
-| `unknown_address`（审计表） | 密址 token 与 `profiles.inbound_token` 不匹配；或邮件没进 Worker（查 catch-all） |
-| `no_text`（审计表） | Worker 没解出正文 → `npx wrangler tail` 看 `[inbound-worker] MIME 解析失败` |
+| 🔴 `unknown_address` **不会**出现在审计表里 | **这是设计如此，不是 bug** —— `lib/email/inbound.ts` 在 token 解析失败时**早退**（此时还不知道 user_id，审计行 `user_id` 非空，没处挂）。所以它只体现在 **webhook 的 HTTP 响应体**里。想看它：`npx wrangler tail` 里的 webhook body，或直接 POST 一次（见第 8.1 节探针 A）。**别拿"审计表里没有"当成"邮件没到"。** |
+| `inbound_not_configured` (500) | Vercel 缺 `INBOUND_EMAIL_DOMAIN`：变量没加、只加到非 Production 环境，或**加完的那个部署还没上线**（见第 7 节的"两个部署"坑） |
+| `secret_not_configured` (500) | Vercel 缺 `INBOUND_EMAIL_SECRET`（`fail closed`，不是 401） |
+| `no_text` | Worker 没解出正文 → `npx wrangler tail` 看 `[inbound-worker] MIME 解析失败` |
 | Worker 报 401 | Worker secret 与 Vercel `INBOUND_EMAIL_SECRET` **不逐字相同**（含末尾换行差异）。Worker 现会把 `webhook 非 2xx: 401 to=...` 打进 `npx wrangler tail` |
 | 日志里连 `email_inbound_events` 都没有 | 邮件根本没到 Vercel（路由规则/Worker 部署），不是应用侧问题 |
 
