@@ -431,7 +431,7 @@ P0-3-14 的「主动发邮件提醒」代码已全部就绪（Vercel 引擎 + 3 
    ⚠️ **一轮加多个变量会触发多次部署（"一半生效"中间态）**——加完后手动 Redeploy 一次更稳。判据用端点，别信面板状态。
    🔴 **改完 env 还要确认代码已 push**：Vercel 从 `origin/main` 构建，代码没推上去的话新路由照样 404。
 
-6. ⏳ **验证链路（先预览，再真发）**
+6. ✅ **验证链路（2026-09-17 全链路已通）**
    - 已验（零副作用）：无凭证打 `/api/v1/reminders/scheduled` → **401**（= 路由已上线）；`/api/v1/reminders/unsubscribe?t=abc` → **400**。
    - 预览（不真正发信、不更新 `last_reminder_at`）：
      ```
@@ -441,6 +441,11 @@ P0-3-14 的「主动发邮件提醒」代码已全部就绪（Vercel 引擎 + 3 
    - **真发一封**：`POST /api/v1/reminders/send`（同登录态）—— 会写入 `last_reminder_at`，**用户本地「今天」内**定时任务不再发（跨本地零点即恢复）。
    - 定时任务探针：`GET /api/v1/reminders/scheduled` 带 `CRON_SECRET` → `200` + 聚合报告（无 PII）。
    - 退订页：`GET /api/v1/reminders/unsubscribe?t=<token>` 返回确认页并关掉提醒。
+   - **✅ 生产实测（2026-09-17 21:49Z，走 `GET /reminders/scheduled` 真发链路）**：
+     - 第 1 发 → `{usersTotal:1, usersReminded:1, usersFailed:0}` = **已真发**（收件人 `stevenli2007@berkeley.edu`）。
+     - 第 2 发（立刻重打）→ `{usersReminded:0, usersSkipped:{recent:1}}` = **频控生效、不重复发**。
+     - 库内：`profiles.last_reminder_at = 2026-09-17T21:49:51Z`、`reminder_unsub_token = d5819b11…`（懒生成后跨轮复用）。
+     - 明早 `0 14 * * *`（PT 07:00）→ 本地已是 **9/18** → 会正常发（用真函数 `isSameLocalDay()` 复算过，非手算）。
 
 ### 失败降级（已写进代码，无需手动处理）
 - `OUTBOUND_EMAIL_*` 未配置 → `send.ts` 返回 `{ok:false, error:'not_configured'}`，**不报错、不 500**。
