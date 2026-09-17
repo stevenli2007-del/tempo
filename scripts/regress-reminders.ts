@@ -9,7 +9,13 @@
  * 改 build.ts 时务必同步这里（顶部注释已写明）。
  */
 
-import { buildReminderEmail, computeActionable, isSameLocalDay, sortByDueDateAsc } from '@/lib/reminders/build'
+import {
+  buildReminderEmail,
+  computeActionable,
+  isRemindable,
+  isSameLocalDay,
+  sortByDueDateAsc,
+} from '@/lib/reminders/build'
 
 let passed = 0
 let failed = 0
@@ -30,6 +36,26 @@ const overdue = { courseName: 'CHEM 1A', title: 'Homework 1', dueDate: '2026-09-
 const dueSoon = { courseName: 'MATH 53', title: 'Homework 7', dueDate: '2026-09-18T23:59:00Z', taskType: 'assignment' as const }
 const farFuture = { courseName: 'PHYSICS 7A', title: 'Problem Set 3', dueDate: '2026-12-01T23:59:00Z', taskType: 'assignment' as const }
 const tbd = { courseName: 'CHEM 1A', title: 'Lab Report', dueDate: null, taskType: 'assignment' as const }
+
+// ---------- 可提醒判据（「绝不误报」，2026-09-17 实发信 bug 的回归锚） ----------
+
+{
+  // 🔴 反例（真实事故）：Canvas 已判定完成、但 `status` 仍是 pending（同步永不写 status，ADR-015）。
+  //    首版只筛 status → 真发的那封信 21 条里 18 条是这类 → 误报率 86%。
+  assert(isRemindable({ status: 'pending', submissionState: 'submitted' }) === false, '可提醒：Canvas 已提交 → 不提醒')
+  assert(isRemindable({ status: 'pending', submissionState: 'graded' }) === false, '可提醒：Canvas 已评分 → 不提醒')
+  assert(isRemindable({ status: 'pending', submissionState: 'pending_review' }) === false, '可提醒：Canvas 待查重 → 不提醒')
+  // 用户主权优先：手勾 done 的一律不提醒（哪怕 Canvas 说没交）。
+  assert(isRemindable({ status: 'done', submissionState: 'unsubmitted' }) === false, '可提醒：用户已勾 done → 不提醒')
+  // 无外部真相（Gradescope 等 LTI）→ 不催（ADR-013：当"没交"是诬告）。
+  assert(isRemindable({ status: 'pending', submissionState: 'external_unconfirmed' }) === false, '可提醒：外部平台待确认 → 不催')
+  // Canvas 明确说没收到 → 正是最该催的一类。
+  assert(isRemindable({ status: 'pending', submissionState: 'unsubmitted' }) === true, '可提醒：Canvas 未交 → 提醒')
+  assert(isRemindable({ status: 'pending', submissionState: 'missing' }) === true, '可提醒：Canvas 缺交 → 提醒')
+  // ⚠️ 防"顺手统一"：`null` 包含全部 syllabus 派生考试与手动任务，**必须提醒**
+  //    （考试一学期只有 3-5 次；因"没外部真相"就不提醒是灾难）。null ≠ 不确定。
+  assert(isRemindable({ status: 'pending', submissionState: null }) === true, '可提醒：Canvas 不追踪（含考试派生）→ 仍提醒')
+}
 
 // ---------- 频控：本地日历日（「每用户每天至多一封」） ----------
 

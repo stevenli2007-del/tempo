@@ -1,4 +1,5 @@
-import type { TaskType } from '@/types/task'
+import type { TaskStatus, TaskSubmissionState, TaskType } from '@/types/task'
+import { isEffectivelyDone } from '@/lib/tasks/progress'
 
 /**
  * 提醒邮件的「内容渲染层」（P0-3-14）。
@@ -16,6 +17,43 @@ import type { TaskType } from '@/types/task'
  * 没有这类任务就**不发**邮件（避免无意义的每日轰炸）。TBD（null）任务会显示，但
  * 不单独触发发送 —— 日期都未知，催它没意义。
  */
+
+/**
+ * 「这条任务值得进提醒邮件吗」—— 提醒层的可提醒判据（P0-3-14 验收回归 #1）。
+ *
+ * ### 🔴 为什么必须走 `isEffectivelyDone()` 而不是只看 `status`
+ * 实测踩坑（2026-09-17 Steven 验收发现）：首版引擎 SQL 只筛 `status='pending'`，
+ * **完全没看 `submission_state`** → 真发的那封信里 21 条有 **18 条是 Canvas 已判定完成
+ * （submitted / graded / pending_review）**、`status` 仍是 `pending`（ADR-015：同步永不写
+ * `status`，等用户手勾）→ 邮件把它们标成「已逾期 14 天」。**误报率 86%**，
+ * 直接违反 ADR-016 R3「一次误报比不提醒更伤信任」。
+ *
+ * `isEffectivelyDone()` 是**全站唯一**的完成判定（`lib/tasks/progress.ts`，
+ * dashboard / 周历 / 任务清单共用）。这里**复用它**而不是重写一遍 —— 各写一份迟早漂开，
+ * 那就会出现「UI 说已完成、邮件说逾期」这种自相矛盾。
+ *
+ * ### `external_unconfirmed` 也不提醒（ADR-013 / ADR-015）
+ * 外部平台（Gradescope 等 LTI）：Canvas 没有可信记录（无记录，或它说的"未交"只是推断，
+ * 实测出现过已交却报未交）。把它当"已完成"是猜，当"未完成"是**诬告** ——
+ * 所以既不算完成、也不该被催。dashboard 同样不给它标红（`knownIncomplete` 的排除项）。
+ *
+ * ### ⚠️ `submissionState === null` **要提醒**（别顺手"统一"掉）
+ * `null` = Canvas 压根不追踪完成态（on_paper / not_graded / none），
+ * 也包含**全部 syllabus 派生考试与手动任务**。考试是一学期只有 3-5 次的高风险事项，
+ * 因为"没有外部真相"就不提醒是灾难性的。`null ≠ 不确定`，只表示"这事得靠用户自己勾"。
+ * （`progress.ts` 文件头警告过"两个消费者对考试任务态度相反"，这就是那类陷阱。）
+ */
+/** `isRemindable` 的最小入参形状（用结构类型而不是整个 `Task`，回归脚本可喂最小对象）。 */
+export type RemindableInput = {
+  status: TaskStatus
+  submissionState: TaskSubmissionState | null
+}
+
+export function isRemindable(task: RemindableInput): boolean {
+  if (isEffectivelyDone(task)) return false
+  if (task.submissionState === 'external_unconfirmed') return false
+  return true
+}
 
 /** 「截止临近」窗口：due date 距现在 ≤ 该天数（含逾期）的任务算「即将到期 / 可行动」。 */
 export const DUE_SOON_DAYS = 3

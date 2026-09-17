@@ -451,6 +451,7 @@ P0-3-14 的「主动发邮件提醒」代码已全部就绪（Vercel 引擎 + 3 
 - `OUTBOUND_EMAIL_*` 未配置 → `send.ts` 返回 `{ok:false, error:'not_configured'}`，**不报错、不 500**。
 - 发送异常（Worker 502 / 网络） → 引擎捕获后跳过该用户，继续下一位；定时任务永不因单用户失败而中断。
 - 每日频控：每位用户**每（本地）天**最多一封（判据 = `profiles.last_reminder_at` 是否落在用户时区的「今天」，`isSameLocalDay()`），已发过则不发。⚠️ 别改回固定 24h 窗口 —— 见 §11 变更记录里的「隔天一封」根因。
+- **可提醒范围**：每条任务必须过 `isRemindable()`（`lib/reminders/build.ts`）。⚠️ **别只筛 `status='pending'`** —— 首次真发就是这么写的，21 条里 18 条其实是「Canvas 已判定完成」（`graded`/`submitted`/`pending_review`，`status` 仍 pending 只因同步永不写它，ADR-015），被标成「已逾期」→ 误报率 86%。判据**复用** `isEffectivelyDone()`（`lib/tasks/progress.ts`，全站唯一），别重写。
 
 ### 代码位置索引（出站）
 | 层 | 文件 |

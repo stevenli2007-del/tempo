@@ -3,7 +3,7 @@ import { TASK_COLUMNS, toTask } from '@/lib/tasks'
 import type { Task } from '@/types/task'
 import type { createClient } from '@/lib/supabase/server'
 import { generateUnsubToken } from './token'
-import { DEFAULT_TIMEZONE, buildReminderEmail, isSameLocalDay } from './build'
+import { DEFAULT_TIMEZONE, buildReminderEmail, isRemindable, isSameLocalDay } from './build'
 import { sendReminderEmail } from './send'
 
 /**
@@ -17,7 +17,9 @@ import { sendReminderEmail } from './send'
  * ### 三条产品纪律（ADR-016 / ADR-017）
  * 1. **准确优先于频繁**：只发"有逾期或即将到期任务"的邮件；否则不发，也不更新时间戳。
  * 2. **频控**：每用户**每（本地）天**至多一封（`last_reminder_at` 落在用户时区的「今天」直接跳过）。
- * 3. **绝不误报**：邮件只列 `status='pending'` 的任务，已完成的永远不出现。
+ * 3. **绝不误报**：任务必须过 `isRemindable()` —— 用户已勾的、**Canvas 已判定完成的**
+ *    （submitted / graded / pending_review）、以及无外部真相的（external_unconfirmed）一律不出现。
+ *    ⚠️ 只筛 `status='pending'` 是**不够**的（那个字段是用户主权、同步永不写，见 ADR-015）。
  */
 
 /** service role 客户端类型（与 `lib/tasks.ts` 的 ServerSupabase 同款 —— admin 客户端被 cast 成它）。 */
@@ -124,7 +126,7 @@ export async function buildAndSendReminder(
   const courseIds = courses.map((c) => c.id)
   const courseNames = new Map(courses.map((c) => [c.id, c.course_name]))
 
-  // 5) pending 任务（**显式 course_id 集合**，不靠 RLS）。按 due_date 升序（null 最后）。
+  // 5) 待处理任务（**显式 course_id 集合**，不靠 RLS）。按 due_date 升序（null 最后）。
   const { data: taskRows, error: taskError } = await admin
     .from('tasks')
     .select(TASK_COLUMNS)
@@ -140,7 +142,18 @@ export async function buildAndSendReminder(
   if (!taskRows || (taskRows as TaskRow[]).length === 0) {
     return { userId, sent: false, reason: 'no_tasks' }
   }
-  const tasks: Task[] = (taskRows as TaskRow[]).map((row) => toTask(row, courseNames.get(row.course_id) ?? ''))
+  const allPending: Task[] = (taskRows as TaskRow[]).map((row) =>
+    toTask(row, courseNames.get(row.course_id) ?? ''),
+  )
+
+  // 5b) 🔴 可提醒筛选（**不能只看 `status`**）—— 见 `isRemindable` 的文档。
+  //     `status='pending'` 只说明"用户还没手勾"，不代表"还没做"：Canvas 已提交/已评分的
+  //     任务同样是 pending（ADR-015：同步永不写 status）。不筛这一层就会出现
+  //     「Canvas 显示已提交、邮件却说你逾期 14 天」的自相矛盾（2026-09-17 实发信的 bug）。
+  const tasks = allPending.filter(isRemindable)
+  if (tasks.length === 0) {
+    return { userId, sent: false, reason: 'no_tasks' }
+  }
 
   // 6) 退订 token（首次发送时懒生成并写回；查询已带 user_id，更新按 id）。
   let unsubToken = profile.reminder_unsub_token
