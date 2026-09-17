@@ -29,7 +29,7 @@
 
 ## 当前进度指针
 
-**当前 task**：**`P0-3-11`（邮件通道·入站）** —— ✅ 代码完成 2026-09-17（入站-only：密址绑定 + 纯入站，出站归 P0-3-14）；🟡 **部署 6/8 步**（①–⑥ 完成：zone / onboard / destination / Subaddressing / Worker 已部署 / catch-all 已指向 Worker），剩 ⑦Vercel env + ⑧端到端验收；**`P0-3-9`（截图档）** 代码完成、真实识别待 Steven 贴 `DASHSCOPE_API_KEY` 后补验；**P0-3-2 已验收**。
+**当前 task**：**`P0-3-11`（邮件通道·入站）** —— ✅ 代码完成 + **真人真邮件端到端验收通过 2026-09-17**（入站-only：密址绑定 + 纯入站，出站归 P0-3-14）；✅ **部署 8/8 步**（①–⑦ 配置全部生效，⑧ 真人转发真 Gradescope 回执验证 `MX→catch-all→Worker→Vercel` 全链路通过）；**`P0-3-9`（截图档）** 代码完成、真实识别待 Steven 贴 `DASHSCOPE_API_KEY` 后补验；**P0-3-2 已验收**。
 - ✅ **O-11 关闭：多模态 provider = Qwen 通义千问**（中国区 DashScope，默认 `qwen-vl-plus-latest`，可用 `LLM_MODEL_VISION` 覆写；需切回 Claude 时设 `LLM_PROVIDER_VISION=claude`）。配套 **ADR-018**：provider **按能力路由** —— 文本仍走 DeepSeek（**现有五板块解析零回归**），视觉走 Qwen。同时解决 **O-08**：两路均中国境内、无数据出境。
 - ✅ 另三项决策：**图片不落库**（浏览器压缩后 base64 直传、即用即弃）｜**范围 = 确认完成 + 新增/改期**（完全复用 3-8b 的 `match` + `PATCH`）｜**零迁移**（不新增列）。
 - 🆕 **新增 `P0-3-14`「主动提醒 / 优先级」**（Steven 2026-09-13 同意立项）—— ADR-017 点名它是"秘书"最核心的护城河，此前**无对应卡**；与 3-11 的出站范围边界见下方执行卡。
@@ -1115,7 +1115,7 @@ Phase 0 列表只有几十条，每行再加一个 tag 只会更密，信息增�
 | **P0-3-8b** | **对话框检索/更新档**：输入后**先检索现有任务** → 0 命中新增 / 有命中列举让用户选改哪条；`PATCH` 放开手动任务内容编辑 | Bud | P0-3-8 | 只有 `source='manual'` 可改（canvas/exam 被拦并引导源头）；匹配确定性、不用 LLM | ✅ 用户验收通过 2026-09-13 |
 | **P0-3-9** | **课程更新对话框（截图档）**：多模态接入 | Bud | P0-3-8、~~O-11~~（✅ 已解除） | **验收用例：Chem 1A Homework 6 的 Gradescope 提交成功页截图 → 自动标记完成** | 🔵 **代码完成 2026-09-13；真实识别待 Steven 贴 `DASHSCOPE_API_KEY` 后补验**（手机号暂未开通 Qwen key） |
 | **P0-3-10** | **Canvas 提交状态同步 + 日期时区修复**：`include[]=submission` + 三态 + 「待确认」态 + 按学校时区渲染 | Bud | — | 见下方执行卡 5 条验收路径 | ✅ 已完成（2026-09-13 用户验收） |
-| **P0-3-11** | **邮件通道·入站（纯入站）**：转发到 Tempo 专属**密址**（token 绑定，不认 `From`）→ 解析（DeepSeek 中国）→ 仅 `status='done'`（绝不自动建任务 / 改 dueDate / 写 `submission_state`）—— 出站归 `P0-3-14` | Bud | P0-3-8 | 转发一封 Gradescope 提交确认邮件 → 任务自动标记完成 | ✅ **代码完成 2026-09-17**（ADR-019：砍掉注册邮箱绑定 + 「地址已就绪」回信，纯入站） |
+| **P0-3-11** | **邮件通道·入站（纯入站）**：转发到 Tempo 专属**密址**（token 绑定，不认 `From`）→ 解析（DeepSeek 中国）→ 仅 `status='done'`（绝不自动建任务 / 改 dueDate / 写 `submission_state`）—— 出站归 `P0-3-14` | Bud | P0-3-8 | 转发一封 Gradescope 提交确认邮件 → 任务自动标记完成 | ✅ **代码完成 + 端到端验收通过 2026-09-17**（ADR-019：砍掉注册邮箱绑定 + 「地址已就绪」回信，纯入站；真信 `Lab 2: Smells` 自动标记 done） |
 | **P0-3-12** | **全站视觉统一扫尾**：把 3-5 ~ 3-11 的新界面收进设计基线 | Bud | P0-3-3 ~ 3-11 | 无遗留旧样式；对齐 Stride 观感 | ⚪ |
 | **P0-3-13** | **版本 freeze + 内部试用**（Steven + 1-2 熟人）｜**出口门** | 共担 | P0-3-12 | 修掉「看不懂 / 不舒服」；产出**可发版** | ⚪ |
 | **P0-3-14** | **主动提醒 / 优先级**：出站推送（提醒时机 + 优先级建议 + 频控）—— **ADR-017 点名的"秘书"核心护城河**（此前无卡） | Bud | P0-3-11 | 见下方执行卡（待细化） | 🆕 已立项 2026-09-13 |
@@ -1384,9 +1384,9 @@ Phase 0 列表只有几十条，每行再加一个 tag 只会更密，信息增�
 - **为什么现在做**：当前同步触发是"用户打开 dashboard"（T1）—— **用户不来，数据就不新，所以他必须来**，这是结构性矛盾。邮件入站把触发器换成外部事件。
 - **关键约束**：零 OAuth（转发路径），成本远低于 Gmail API；Gmail 全自动留 Phase 1（restricted scope 需安全评估，周期以月计）。基础设施 = Cloudflare Email Routing Worker（thin forwarder）→ Vercel `POST /api/v1/email/inbound`。
 - **📖 部署手册（【Steven 手动】逐步可勾选）**：`docs/EMAIL_INBOUND_SETUP.md` —— 域名 `tempocourse.com` 已注册 2026-09-17（Cloudflare Registrar）。
-  - **进度（2026-09-17 12:00 PDT）**：①zone 生效 ✅ ②Email Routing onboard ✅ ③destination 地址验证 ✅ ④Subaddressing 开启 ✅ ⑤Worker 已部署 ✅（当前 Version `40192c25`，secret 已写入）⑥catch-all → Worker 已启用 ✅ ⑦Vercel env ✅（两条均已在 Production 生效，实测断言见下）｜ **剩余 ⑧端到端验收（只差真人转发一封真邮件）**
+  - **进度（2026-09-17 12:23 PDT）**：①zone 生效 ✅ ②Email Routing onboard ✅ ③destination 地址验证 ✅ ④Subaddressing 开启 ✅ ⑤Worker 已部署 ✅（当前 Version `40192c25`，secret 已写入）⑥catch-all → Worker 已启用 ✅ ⑦Vercel env ✅（两条均已在 Production 生效）｜ **⑧端到端验收 ✅**（2026-09-17 12:22 PDT Steven 转发真 Gradescope 回执，`Lab 2: Smells` 自动标完成，`matchMode:'exact'` 印证收紧后逻辑上线）—— **P0-3-11 全链路闭环**
   - **⑦ 已实测**：`POST /api/v1/email/inbound`+正确 Bearer → `200 unknown_address`（SECRET 生效）；带真实登录态 `GET /api/v1/email/address` → 返回密址（DOMAIN 生效）。密址 = `inbound+3a4fd781b46a647be0421d8a9ef70a60984e@tempocourse.com`。
-  - **应用链路已端到端跑通**（Agent 用真 token 打生产 webhook）：鉴权 → token 定位用户 → 课程/候选 → DeepSeek 解析 → 决策 → 落写 + 审计全绿；唯一未验的是 `MX → catch-all → Worker` 这段真投递。
+  - **应用链路已端到端跑通**（Agent 用真 token 打生产 webhook）：鉴权 → token 定位用户 → 课程/候选 → DeepSeek 解析 → 决策 → 落写 + 审计全绿；`MX → catch-all → Worker` 这段真投递也于 2026-09-17 12:22 PDT 由 Steven 转发真 Gradescope 回执验证通过（`Lab 2: Smells` → `done`）。
   - ✅ **邮件自动落写路径的匹配阈值已收紧（2026-09-17）**：`plan.ts` 不再复用对话框的 `MATCH_THRESHOLD=0.6`，改为**归一化后完全相等**才落写；同名多条时"只剩一条未完成才写 / 全完成则 `already_done` / 多条未完成则 `ambiguous_title` 放弃"。回归 14→23 条，`tsc --noEmit` 与 `next build` 均通过。详见 `EMAIL_INBOUND_SETUP.md` §8.3。
   - **执行方式**：只有 `npx wrangler login` 必须人工（OAuth 要交互式终端）；登录后 Agent 侧可直接代跑 `deploy` / `secret put`，并用同一 OAuth token 打 Cloudflare REST API 配 catch-all。
 

@@ -5,7 +5,7 @@
 > **域名**：`tempocourse.com`（2026-09-17 于 Cloudflare Registrar 注册）。
 > **设计依据**：`docs/Decisions.md` ADR-019（密址绑定 + 纯入站）、`docs/Phase-0-MVP.md` P0-3-11。
 
-**进度速查**（2026-09-17 12:00 PDT）：①zone ✅ ②onboard ✅ ③destination ✅ ④subaddressing ✅ ⑤deploy Worker ✅（`40192c25`）⑥catch-all ✅ ⑦Vercel env ✅（**两个都需等第二个部署上线**）｜ 剩余 **⑧端到端验收**（只差真人转发一封真邮件）
+**进度速查**（2026-09-17 12:23 PDT）：①zone ✅ ②onboard ✅ ③destination ✅ ④subaddressing ✅ ⑤deploy Worker ✅（`40192c25`）⑥catch-all ✅ ⑦Vercel env ✅ ｜ **⑧端到端验收 ✅**（2026-09-17 12:22 PDT Steven 转发真 Gradescope 回执，`Lab 2: Smells` 自动标记完成）—— **P0-3-11 全部完成**
 
 **你的专属密址**（已生成、已实测打通）：
 ```
@@ -240,7 +240,7 @@ Vercel → 项目 **tempo** → **Settings → Environment Variables**（Product
 
 ---
 
-## 8. 🔄【进行中】端到端验收
+## 8. ✅【已完成】端到端验收（真人真邮件 2026-09-17 验收通过）
 
 ### 8.1 Agent 侧已验（应用链路除"真邮件投递"外全部打通）
 
@@ -254,12 +254,16 @@ Vercel → 项目 **tempo** → **Settings → Environment Variables**（Product
 > 📌 **B 的落写没有造成数据损坏**：它命中的 `Homework 2` 本来就是 `done`（Canvas `submission_state: graded`，同课 Homework 1/3/4/5 全为 `done`），只是被重写了同一个值。**无需回滚。**
 > ⚠️ **但 B 暴露了一个真实隐患，见 8.3；修复后我又用这两类输入轮询生产验证，反而误写了真实数据并回滚，见 8.4。**
 
-### 8.2 只差这一步（真人真邮件）
+### 8.2 ✅ 真人真邮件验收通过（2026-09-17 12:22 PDT）
 
-- [x] 密址已在生产可用：`inbound+3a4fd781b46a647be0421d8a9ef70a60984e@tempocourse.com`（Tempo → Settings 也会显示同一个）
-- [ ] 从你的邮箱**转发**一封 Gradescope 提交确认信到该密址（或在 Gradescope 把通知邮箱直接改成它）
-- [ ] 预期：**对应 task 自动标记完成**；`email_inbound_events` 表新增一行 `action_taken=mark_done`
-- [ ] 若没反应：开 `npx wrangler tail`（第 9 节排查表）
+- [x] 密址在生产可用：`inbound+3a4fd781b46a647be0421d8a9ef70a60984e@tempocourse.com`
+- [x] Steven 从个人邮箱**转发**一封真 Gradescope 提交确认信到该密址
+- [x] 结果（service role 只读探针核对生产审计表）：
+  | 时间 (UTC) | 入站标题 | 匹配 | 落写 | 当前 task 状态 |
+  |---|---|---|---|---|
+  | 2026-09-17T19:22:59Z | `Lab 2: Smells`（DeepSeek 从回执抽出） | `matchMode:'exact'`（归一化后完全相等，新逻辑生效） | `mark_done` → `e6dc2dd2-…` | `Lab 2: Smells` = **done** ✅ |
+- ✅ **这是唯一能验 `MX → catch-all → Worker → Vercel` 真投递的一步，已打通。** 回滚事故里的 HW6 / HW9 仍 `pending`、HW2 仍 `done`，无副作用。**P0-3-11 全链路闭环。**
+- 📌 排查口诀：若再有信没反应，开 `npx wrangler tail`（第 9 节排查表）看 Worker 是否收到、webhook 回 2xx 与否。
 
 > 这是**唯一**能验证 `MX → catch-all → Worker → Vercel` 整条链的一步 —— Agent 侧的探针只能打到 Vercel，打不到 Cloudflare 的收信入口。
 
