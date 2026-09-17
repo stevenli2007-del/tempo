@@ -252,7 +252,7 @@ Vercel → 项目 **tempo** → **Settings → Environment Variables**（Product
 | B | Gradescope 风格提交回执（`Homework 9999`） | `{"status":"processed","action":"mark_done","taskId":"1ae8355d-…","event":"submitted"}` | 落写路径 ✅（写了 `status='done'` + 审计 `action_taken=mark_done`） |
 
 > 📌 **B 的落写没有造成数据损坏**：它命中的 `Homework 2` 本来就是 `done`（Canvas `submission_state: graded`，同课 Homework 1/3/4/5 全为 `done`），只是被重写了同一个值。**无需回滚。**
-> ⚠️ **但 B 暴露了一个真实隐患，见 8.3。**
+> ⚠️ **但 B 暴露了一个真实隐患，见 8.3；修复后我又用这两类输入轮询生产验证，反而误写了真实数据并回滚，见 8.4。**
 
 ### 8.2 只差这一步（真人真邮件）
 
@@ -311,8 +311,41 @@ query="Homework 6: 1D Kinematics" → 0.9091 Homework 01 - 1D Kinematics ／ (Ho
 新增用例含三条原本会误命中的真实反例：`Homework 9999`、`Homework 5`（同分）、`Homework 6: 1D Kinematics` —— 现在**全部** `no_match`。
 同时保留等价性用例：`HW 6` / `homework   6` 仍能正确命中 `Homework 6`（`normalizeTitle` 吸收大小写/全角/标点/空白/缩写）。
 
-> 📌 **已知代价**：邮件里的标题必须与任务名**归一化后一致**才自动标完成。若 Gradescope 发的名字与 bCourses 作业名有实质差异（如多了 `(Ch. 3)` 这类后缀），会 `no_match` —— 此时只记审计、不落写，用户手点。**这是刻意的取舍：宁可少标，绝不标错。**
-> 📌 本改动**不阻塞 8.2 验收**（真 Gradescope 回执的标题通常与任务名一致）。
+**生产实测（新逻辑上线后，2026-09-17 12:07–12:08 PDT）**
+
+| 投递正文 | 生产返回 | 说明 |
+|---|---|---|
+| `Homework 9999`（不存在的作业） | `none` / `no_match` | ✅ **误命中已封**（旧逻辑同一输入写的是 `mark_done`，score 0.8421） |
+| `Homework 2`（本就已完成） | `none` / `already_done` | ✅ "全部已完成就不写"分支生效，**零写入** |
+| `Homework 6: 1D Kinematics` | `mark_done`（`matchMode: 'exact'`，`matchedTitle: 'Homework 6'`） | ✅ **见下方修正：实际不会因后缀失配** |
+
+> ✅ **修正一条我原先写重的「已知代价」**：光看纯函数会以为"标题多了 `: 1D Kinematics` 这类后缀就会 `no_match`"。**生产实测否证了这一点** —— LLM 解析层会把描述性后缀**剥掉**，抽出干净的 `Homework 6` 再交给匹配，于是照样精确命中。
+> 所以新逻辑的实际收紧点只有一条：**不再对"号码/词干不同"的标题做模糊猜测**（`Homework 9999`、`Homework 5` 那类）。常见语义等价（`HW 6` / 全角 / 标点 / 空白 / 描述后缀）都能过。
+> 📌 仍属刻意取舍：**宁可少标，绝不标错**。真 `no_match` 时只记审计、不落写，用户手点一下。
+
+### 8.4 🔴 生产轮询误写事故（2026-09-17，已手工回滚）
+
+⚠️ **把上面 §8.3 的"生产实测"当作"部署是否上线"的探针时，我踩了真实雷 —— 必须记下来警示后来人。**
+
+commit `5d6e133`（新逻辑）push 后，我直接用 `Homework 9999` / `Homework 6: 1D Kinematics` **打生产 webhook** 来判"新部署是否上线"。结果：
+
+1. **第 1 发打在了还没下线的旧部署上**（`5d6e133` 之前仍是旧匹配逻辑）→ `Homework 9999` 模糊命中**真实的 `Homework 9`（`2a0cd28f`，原本 `pending`）**并 `mark_done`。
+2. `Homework 6: 1D Kinematics` → LLM 剥后缀抽成 `Homework 6` → 精确命中**真实的 `Homework 6`（`a7e49cf9`，原本 `pending_review`）**并 `mark_done`。
+
+两次都**真实改了生产数据**，已手工回滚：
+
+```sql
+-- 回滚（保留 email_inbound_events 审计行，那是真实发生过的事）
+UPDATE tasks SET status = 'pending' WHERE id = '2a0cd28f';  -- Homework 9
+UPDATE tasks SET status = 'pending' WHERE id = 'a7e49cf9';  -- Homework 6（验证当前确为 pending）
+```
+
+**最终态已恢复（与 Canvas 一致）**：HW1–5 / HW1–4 仍 `done`；HW6 / HW9 均 `pending`。
+
+**两条教训（已写进 `CodingRules.md` §10.2）**：
+
+- 🔴 **别用"能触发写操作"的请求当部署探针** —— 轮询 N 次的第 1 次几乎必然打在旧部署上，会真改数据。判部署新鲜度要用**零副作用信号**：无鉴权的 `GET` / 只读端点 / 带**无效凭证**的请求（必被拒），或干脆等固定时长（Vercel 一次部署约 1 分钟）。
+- 🔴 **"我猜它不会命中"不是安全论证** —— 以为"不存在的作业名"必然未命中（实测模糊命中真实作业）；以为"带后缀长标题"必然失配（实测 LLM 剥后缀照样命中）。探针输入要取**语义上不可能存在**的值，且**先真跑一遍**（真函数 / 真端点）再下结论，不要推理"应该不会命中"。
 
 ---
 
