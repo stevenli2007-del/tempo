@@ -54,7 +54,7 @@ export default {
     }
 
     try {
-      await fetch(env.INBOUND_WEBHOOK_URL, {
+      const res = await fetch(env.INBOUND_WEBHOOK_URL, {
         method: 'POST',
         headers: {
           'content-type': 'application/json',
@@ -62,6 +62,14 @@ export default {
         },
         body: JSON.stringify({ to, from, subject, textBody }),
       })
+      // 必须把非 2xx 打出来：否则 Vercel 端 401（两边密钥不一致）/ 4xx 会被静默吞掉，
+      // `wrangler tail` 里什么都看不到 —— 排查时极易误判成"邮件没进 Worker"。
+      if (!res.ok) {
+        const detail = await res.text().catch(() => '')
+        console.error(
+          `[inbound-worker] webhook 非 2xx: ${res.status} to=${to} body=${detail.slice(0, 300)}`,
+        )
+      }
     } catch (err) {
       // 吞掉：邮件网关不应因我们 POST 失败而重试 / 退信，造成循环。
       console.error('[inbound-worker] forward failed', err)

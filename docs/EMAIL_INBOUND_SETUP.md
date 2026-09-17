@@ -128,8 +128,9 @@ https://dash.cloudflare.com/?to=/:account/email-service/routing
 ## 5. ✅【已完成 2026-09-17 11:50】部署 Worker
 
 > 🎉 **实际执行方式**：Steven 在本地终端完成 `npx wrangler login`（浏览器 OAuth）后，**后续三步由 Agent 侧直接代跑成功** —— OAuth 凭据落在 `~/Library/Preferences/.wrangler/config/default.toml`，沙箱进程可读，于是 `wrangler deploy` / `secret put` 与 Cloudflare REST API 都不再需要人工点。
-> **实测结果**：`Uploaded tempo-inbound-email (2.10 sec)`，`Version ID 7ac9d632-1db6-477b-aa36-5295cec351d2`，`Uploaded secret INBOUND_EMAIL_SECRET` ✅，`secret list` 回读含该键 ✅。
+> **实测结果**：`Uploaded tempo-inbound-email (2.10 sec)`，首次 Version `7ac9d632-1db6-477b-aa36-5295cec351d2`；随后为补「非 2xx 日志」又重部一次 → 当前 Version **`40192c25-b14a-4f3a-9990-85aacfef8129`**（secrets 跨版本保留，`secret list` 复查仍在 ✅）。`Uploaded secret INBOUND_EMAIL_SECRET` ✅。
 > Worker URL：`https://tempo-inbound-email.stevenli2007.workers.dev`；account `Stevenli2007@berkeley.edu's Account`（`34fd5b6ee95df046b7eba21e06f0adee`）。
+> 🔍 **顺带补的可观测性**：原 Worker **不检查 webhook 响应码** —— Vercel 端 401（两边密钥不一致）会被静默吞掉，`wrangler tail` 里一片空白，极易误判成"邮件没进 Worker"。现改为非 2xx 时 `console.error` 打出 `status + to + body` 前 300 字。
 
 > 🔴 **顺序铁律 1：本步必须先于第 6 步。** 第 6 步的动作只能选「已部署的 Worker」——先配规则会选不到 `tempo-inbound-email`。
 > 🔴 **顺序铁律 2：`deploy` 必须先于 `secret put`。** `wrangler secret put` 是给**已存在的 Worker** 加一份新版本，Worker 不存在会报 `not found`。
@@ -240,7 +241,7 @@ Vercel → 项目 **tempo** → **Settings → Environment Variables**（Product
 | 完全没反应 | Cloudflare Email Routing 的 MX/SPF 是否生效；catch-all 是否 **Active**；Subaddressing 是否开（第 4 步） |
 | `unknown_address`（审计表） | 密址 token 与 `profiles.inbound_token` 不匹配；或邮件没进 Worker（查 catch-all） |
 | `no_text`（审计表） | Worker 没解出正文 → `npx wrangler tail` 看 `[inbound-worker] MIME 解析失败` |
-| Worker 报 401 | Worker secret 与 Vercel `INBOUND_EMAIL_SECRET` **不逐字相同** |
+| Worker 报 401 | Worker secret 与 Vercel `INBOUND_EMAIL_SECRET` **不逐字相同**（含末尾换行差异）。Worker 现会把 `webhook 非 2xx: 401 to=...` 打进 `npx wrangler tail` |
 | 日志里连 `email_inbound_events` 都没有 | 邮件根本没到 Vercel（路由规则/Worker 部署），不是应用侧问题 |
 
 排查命令：
