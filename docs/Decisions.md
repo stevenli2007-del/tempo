@@ -577,6 +577,16 @@ P0-3-11 把 ADR-014 的「转发到 Tempo 专属地址」落地。开工前与 S
 
 P0-3-14 落地后重新评估「改期 / 新作业」是否要升级为落写；或出站推送需要复用入站地址时，再决定是否补回信能力。
 
+**否决的替代方案：连用户收件箱（inbox-pull / IMAP / Gmail API OAuth）（2026-09-17）**
+
+- **提议**：把邮件 ingestion 从「密址推送」改为「Tempo 连用户真实收件箱（OAuth），读全部邮件、按发件人/LLM 分类」，用户只需授权一次、零逐平台配置。
+- **否决理由**：
+  1. **主流路径已被 Canvas 同步白嫖**：当 Gradescope 是 Canvas 的 submission type（external tool）时，Gradescope 经 LTI grade passback 把 `submission_state` 写回 Canvas，Tempo 的 Canvas 同步直接拿到 `submitted` —— 此场景下邮件**冗余**，连收件箱纯属额外成本。
+  2. **邮件通道只在「Canvas 盲区」才必需**：(a) Canvas 作业为 `on_paper` / `no_submission`（`submission_state=null`，ADR-015 显「待确认」）；(b) 完全在 Canvas 外的平台（PrairieLearn / 独立门户 / 教授直邮）。为覆盖这小撮去读整个收件箱（隐私面 + 存邮箱凭据 + 轮询/PubSub 频率成本）对 MVP 是 **overkill**。
+  3. 成绩回执（graded+分数）价值低：Tempo 是规划 OS，不追分，`submission_state` 到 `submitted` 已够。
+- **结论**：**不推翻本 ADR、不建 inbox-pull**。保留密址转发（`inbound+<token>@`）作为「Canvas-blind / 非 Canvas 作业」的**手动兜底**（用户手转或把该平台通知邮箱指向密址）。隐私面、凭据存储、频率成本全免。
+- **触发重议的条件**：真实用户数据表明其课程大量是 `on_paper`/非 Canvas 接法、密址手动兜底摩擦过大时，再评估 inbox-pull。
+
 ---
 
 ### ADR-015：`submission_state` 与 `status` 分列，同步只写前者
