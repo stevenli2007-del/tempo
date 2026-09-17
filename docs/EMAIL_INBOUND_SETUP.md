@@ -86,16 +86,29 @@ https://dash.cloudflare.com/?to=/:account/email-service/routing
 
 ---
 
-## 3. 【手动】下一步：加一个「目标地址」并验证（硬性门槛）
+## 3. 【手动】加一个「目标地址」并验证（硬性门槛）✅ 已完成
 
 > 面板右侧 **Next Steps** 第 1 条就是这个：*"Add a destination address — Choose where forwarded email should be..."*。
 
-- [ ] 切到 **Destination addresses** 标签 → 在输入框里填你能收信的邮箱（如 `stevenli2007@berkeley.edu`）→ 提交。
-- [ ] 去该邮箱收 Cloudflare 验证信 → 点 **Verify email address**。（没收到就回该页点 **Resend**。）
+- [x] 切到 **Destination addresses** 标签 → 输入框填你能收信的邮箱 → 提交。（✅ 已加 `stevenli2007@berkeley.edu`）
+- [x] 去该邮箱收 Cloudflare 验证信 → 点 **Verify email address**。（✅ 状态为 **Verified**，2026-09-17）
 
 > 🔴 **官方明确要求**：*"Before you can create a routing rule, you must add and verify at least one destination address."* —— 不验证就**建不了任何规则**（指向未验证地址的规则保持 disabled）。
 > 📌 **Destination addresses 是「账户级」的**（不是 zone 级），跨域名复用；所以这一步对以后加域名也有效。
-> 我们的密址**不经过**这个收件箱（邮件进的是 Worker），但这一步是**开通 Email Routing 的前置门**，绕不过。
+
+### 🔑 关键澄清：Berkeley 邮箱**不会**收到入站邮件
+`Destination address` **只是一个「已验证的收件端点」，本身不收任何信**。Cloudflare 原文：*"A destination address is the verified email address that Email Routing **forwards messages to**"* —— 只有**某条 routing rule 的 Action 选了 `Send to an email` 并指向它**，匹配的邮件才会投过去。
+
+我们**唯一**的规则是 **catch-all → Send to a Worker**（第 6 步），没有任何规则指向 `stevenli2007@berkeley.edu`。所以：
+
+| 邮件 | 去向 | Berkeley 收到？ |
+|---|---|---|
+| 入站邮件（转发到 `inbound+token@tempocourse.com`） | catch-all → **Worker** → 处理 → 丢弃 | ❌ |
+| Cloudflare **一次性验证信**（确认拥有该邮箱） | 直发 Berkeley | ✅ 仅此一封 |
+| Gradescope 直发你 Berkeley 的原始确认信 | 与 `tempocourse.com` 无关 | ✅ 本来就有 |
+
+> ⚠️ **唯一反例**：若日后**额外**建一条普通规则（如 `info@tempocourse.com → Send to stevenli2007@berkeley.edu`），发往 `info@` 的信才会进 Berkeley。**只配 catch-all→Worker 就没这问题，别多加规则。**
+> 这样设计的目的正是：**入站邮件不刷你个人邮箱**，全部由 Tempo 后台消化。
 
 ---
 
