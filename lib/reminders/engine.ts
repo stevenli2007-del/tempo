@@ -42,7 +42,17 @@ export type ReminderResult = {
   /** 未发送的原因（sent=false 时有效）。 */
   reason?: 'disabled' | 'recent' | 'no_actionable' | 'no_tasks' | 'no_email' | 'send_failed' | 'preview'
   /** preview 或调试时回带的邮件内容（含 subject/html/text）。 */
-  email?: { subject: string; html: string; text: string; actionable: boolean; totalCount: number }
+  email?: {
+    subject: string
+    html: string
+    text: string
+    actionable: boolean
+    /** 正文实际列出条数（可行动项）。 */
+    shownCount: number
+    /** 被折叠成「另有 N 项」的条数。 */
+    hiddenCount: number
+    totalCount: number
+  }
 }
 
 export type BuildAndSendOptions = {
@@ -143,13 +153,15 @@ export async function buildAndSendReminder(
     }
   }
   const unsubscribeUrl = `${getAppBaseUrl()}/api/v1/reminders/unsubscribe?t=${unsubToken}`
+  const viewUrl = `${getAppBaseUrl()}/dashboard`
 
-  // 7) 组装邮件。
+  // 7) 组装邮件（聚焦版：正文只列可行动项，其余折叠成计数）。
   const built = buildReminderEmail({
     tasks,
     timezone: profile.timezone ?? 'America/Los_Angeles',
     now: new Date(),
     unsubscribeUrl,
+    viewUrl,
   })
 
   // 预览：只回带内容，不发送、不更新时间戳。
@@ -163,6 +175,8 @@ export async function buildAndSendReminder(
         html: built.html,
         text: built.text,
         actionable: built.actionable,
+        shownCount: built.shownCount,
+        hiddenCount: built.hiddenCount,
         totalCount: built.totalCount,
       },
     }
@@ -179,6 +193,8 @@ export async function buildAndSendReminder(
         html: built.html,
         text: built.text,
         actionable: built.actionable,
+        shownCount: built.shownCount,
+        hiddenCount: built.hiddenCount,
         totalCount: built.totalCount,
       },
     }

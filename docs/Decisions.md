@@ -805,12 +805,13 @@ P0-3-9（对话框·截图档）需要**视觉**，而 DeepSeek 无视觉（ADR-
 2. **优先级口径 = 截止临近排序**：邮件内任务按 dueDate 升序、TBD 排最后；**不碰 Phase 2 的 routine / 今日任务权重体系**。本卡因此实质是"提醒"而非"建议"。
 3. **频控 = 每用户每天至多一封**（`profiles.last_reminder_at`）；**准确优先于频繁**（[ADR-016](./Decisions.md#adr-016) R3）：无"逾期或 3 天内到期"任务时不发、也不更新时间戳——一次误报（提醒已完成的任务）比不提醒更伤信任。
 4. **退订** = 每用户随机 `reminder_unsub_token`，邮件内一键退订链接（公开 GET，无需登录）。
+5. **正文口径 = 聚焦版**（2026-09-17 预览验收后补，Steven 拍板）：正文**只列「可行动」项**（已逾期 + `DUE_SOON_DAYS=3` 天内到期），其余折叠成一行「另有 N 项更远的任务（含 M 项日期待定）→ 在 Tempo 查看」。**理由**：首版全量平铺，在 Steven 的真实数据上生成 **63 行**、而主题只写 20（口径打架）—— 洪水式日报连续收几天就会被无视，反而毁掉秘书定位。**规则：主题数字必须等于正文条数。**
 
 **与 P0-3-11 的边界（[ADR-019](./Decisions.md#adr-019) 沿用）**：入站只做"密址转发 → 解析 → 仅 `status='done'`"；出站体系（提醒时机 / 优先级 / 频控 / 退订）整体归本卡。
 
 **不做（ADR-017 / ADR-016 R5）**：月视图 / 拖拽改期等日历功能；惩罚性 streak / 断签；任何以"多打开 Tempo"为目标的激励。
 
-**影响**：`lib/reminders/{build,engine,send,token}.ts` + 三端点 + `workers/outbound-email` + 迁移 `20260917130000_reminders.sql`；`API-Contract.md` §10。
+**影响**：`lib/reminders/{build,engine,send,token}.ts` + 三端点 + `workers/outbound-email` + 迁移 `20260917130000_reminders.sql`；`API-Contract.md` §11（端点总表 §10）。**2026-09-17 生产验证通过**（迁移 ①/Workers Paid ②/发件地址验证 ③/出站 Worker ④/Vercel env ⑤ 全部就绪）。
 
 ---
 

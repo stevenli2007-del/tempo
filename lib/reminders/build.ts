@@ -40,6 +40,8 @@ export type ReminderBuildInput = {
   now: Date
   /** 退订链接（已带 token）。 */
   unsubscribeUrl: string
+  /** 落地页链接（「在 Tempo 查看」）。 */
+  viewUrl: string
 }
 
 export type ReminderBuildResult = {
@@ -50,6 +52,13 @@ export type ReminderBuildResult = {
   actionable: boolean
   overdueCount: number
   dueSoonCount: number
+  /** 正文实际列出的条数 == 可行动条数（逾期 + DUE_SOON_DAYS 天内）。聚焦版口径。 */
+  shownCount: number
+  /** 未列出、被折叠成「另有 N 项」的条数（远未来 + TBD）。 */
+  hiddenCount: number
+  /** hiddenCount 中「日期待定」(TBD) 的条数。 */
+  hiddenTbdCount: number
+  /** 全部 pending 任务数（= shownCount + hiddenCount）。 */
   totalCount: number
 }
 
@@ -93,6 +102,15 @@ export function computeActionable(
   return { actionable: overdueCount + dueSoonCount > 0, overdueCount, dueSoonCount }
 }
 
+/**
+ * 单条任务是否「可行动」：有明确 dueDate 且距今 ≤ DUE_SOON_DAYS（含已逾期）。
+ * TBD（null）不算 —— 与 `computeActionable` 同一口径，供「聚焦版」正文筛选用。
+ */
+function isActionableTask(task: ReminderTaskView, now: Date): boolean {
+  if (task.dueDate === null) return false
+  return daysUntil(task.dueDate, now) <= DUE_SOON_DAYS
+}
+
 /** 时区感知的日期格式化（只到「日期 + 星期」，不给时分，避免误导到具体钟点）。 */
 function formatDueDate(due: string, timezone: string): string {
   return new Intl.DateTimeFormat('zh-CN', {
@@ -132,32 +150,21 @@ function renderHtml(input: {
   actionable: boolean
   overdueCount: number
   dueSoonCount: number
+  hiddenCount: number
+  hiddenTbdCount: number
   unsubscribeUrl: string
+  viewUrl: string
 }): string {
-  const { rows, actionable, overdueCount, dueSoonCount, unsubscribeUrl } = input
+  const { rows, actionable, overdueCount, dueSoonCount, hiddenCount, hiddenTbdCount, unsubscribeUrl, viewUrl } = input
+  const shown = overdueCount + dueSoonCount
   const lead = actionable
-    ? `<p style="margin:0 0 18px;font-size:15px;line-height:1.6;color:#1d1d1f">你有 <strong style="color:#c0392b">${overdueCount + dueSoonCount}</strong> 项任务即将到期或已逾期，先处理它们 👇</p>`
-    : `<p style="margin:0 0 18px;font-size:15px;line-height:1.6;color:#1d1d1f">这是你当前的任务清单（暂无即将到期的事项）。</p>`
+    ? `<p style="margin:0 0 18px;font-size:15px;line-height:1.6;color:#1d1d1f">你有 <strong style="color:#c0392b">${shown}</strong> 项任务即将到期或已逾期，先处理它们 👇</p>`
+    : `<p style="margin:0 0 18px;font-size:15px;line-height:1.6;color:#1d1d1f">当前没有即将到期或已逾期的任务。</p>`
 
-  const items = rows
-    .map(
-      (r) => `
-        <tr>
-          <td style="padding:10px 12px;border-bottom:1px solid #ececec;color:#6b6b70;font-size:13px;white-space:nowrap">${escapeHtml(r.courseName)}</td>
-          <td style="padding:10px 12px;border-bottom:1px solid #ececec;font-size:14px;color:#1d1d1f">${escapeHtml(r.title)}</td>
-          <td style="padding:10px 12px;border-bottom:1px solid #ececec;font-size:13px;text-align:right;${r.overdue ? 'color:#c0392b;font-weight:600' : 'color:#1d1d1f'}">${escapeHtml(r.dueText)}${r.dueFormatted ? `<br><span style="color:#9b9ba0;font-size:12px">${escapeHtml(r.dueFormatted)}</span>` : ''}</td>
-        </tr>`,
-    )
-    .join('')
-
-  return `<!doctype html>
-<html lang="zh-CN">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
-<body style="margin:0;padding:24px;background:#f5f5f7;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'PingFang SC','Hiragino Sans GB',sans-serif">
-  <div style="max-width:560px;margin:0 auto;background:#ffffff;border-radius:14px;padding:28px 24px;box-shadow:0 1px 3px rgba(0,0,0,0.06)">
-    <div style="font-size:13px;font-weight:600;letter-spacing:0.5px;color:#86868b;margin-bottom:4px">TEMPO · 课程秘书</div>
-    <h1 style="margin:0 0 16px;font-size:20px;color:#1d1d1f">你的待办提醒</h1>
-    ${lead}
+  const table =
+    rows.length === 0
+      ? ''
+      : `
     <table style="width:100%;border-collapse:collapse;margin-bottom:20px">
       <thead>
         <tr>
@@ -166,8 +173,33 @@ function renderHtml(input: {
           <th style="padding:8px 12px;text-align:right;font-size:12px;color:#86868b;font-weight:600;border-bottom:2px solid #ececec">期限</th>
         </tr>
       </thead>
-      <tbody>${items}</tbody>
-    </table>
+      <tbody>${rows
+        .map(
+          (r) => `
+        <tr>
+          <td style="padding:10px 12px;border-bottom:1px solid #ececec;color:#6b6b70;font-size:13px;white-space:nowrap">${escapeHtml(r.courseName)}</td>
+          <td style="padding:10px 12px;border-bottom:1px solid #ececec;font-size:14px;color:#1d1d1f">${escapeHtml(r.title)}</td>
+          <td style="padding:10px 12px;border-bottom:1px solid #ececec;font-size:13px;text-align:right;${r.overdue ? 'color:#c0392b;font-weight:600' : 'color:#1d1d1f'}">${escapeHtml(r.dueText)}${r.dueFormatted ? `<br><span style="color:#9b9ba0;font-size:12px">${escapeHtml(r.dueFormatted)}</span>` : ''}</td>
+        </tr>`,
+        )
+        .join('')}</tbody>
+    </table>`
+
+  // 聚焦版（Steven 2026-09-17 拍板）：正文只列「可行动」项；其余折叠成一行计数 + 查看链接，
+  // 避免「主题说 20、正文列 63」的洪水式日报（63 行连续收几天就会被无视，毁掉秘书定位）。
+  const more =
+    hiddenCount > 0
+      ? `<p style="margin:0 0 20px;font-size:13px;color:#6b6b70;line-height:1.6">另有 <strong style="color:#1d1d1f">${hiddenCount}</strong> 项更远的任务${hiddenTbdCount > 0 ? `（含 ${hiddenTbdCount} 项日期待定）` : ''}，<a href="${escapeHtml(viewUrl)}" style="color:#5151ec;text-decoration:none">在 Tempo 查看</a>。</p>`
+      : ''
+
+  return `<!doctype html>
+<html lang="zh-CN">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
+<body style="margin:0;padding:24px;background:#f5f5f7;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'PingFang SC','Hiragino Sans GB',sans-serif">
+  <div style="max-width:560px;margin:0 auto;background:#ffffff;border-radius:14px;padding:28px 24px;box-shadow:0 1px 3px rgba(0,0,0,0.06)">
+    <div style="font-size:13px;font-weight:600;letter-spacing:0.5px;color:#86868b;margin-bottom:4px">TEMPO · 课程秘书</div>
+    <h1 style="margin:0 0 16px;font-size:20px;color:#1d1d1f">你的待办提醒</h1>
+    ${lead}${table}${more}
     <p style="margin:0;font-size:12px;color:#9b9ba0;line-height:1.6">
       Tempo 只在有任务即将到期时才给你发信，绝不刷屏。<br>
       不想再收到提醒？<a href="${escapeHtml(unsubscribeUrl)}" style="color:#5151ec">点此退订</a>。
@@ -182,21 +214,31 @@ function renderText(input: {
   actionable: boolean
   overdueCount: number
   dueSoonCount: number
+  hiddenCount: number
+  hiddenTbdCount: number
   unsubscribeUrl: string
+  viewUrl: string
 }): string {
-  const { rows, actionable, overdueCount, dueSoonCount, unsubscribeUrl } = input
+  const { rows, actionable, overdueCount, dueSoonCount, hiddenCount, hiddenTbdCount, unsubscribeUrl, viewUrl } = input
+  const shown = overdueCount + dueSoonCount
   const lines: string[] = []
   lines.push('TEMPO · 你的待办提醒')
   lines.push('')
   if (actionable) {
-    lines.push(`你有 ${overdueCount + dueSoonCount} 项任务即将到期或已逾期，先处理它们：`)
+    lines.push(`你有 ${shown} 项任务即将到期或已逾期，先处理它们：`)
   } else {
-    lines.push('这是你当前的任务清单（暂无即将到期的事项）：')
+    lines.push('当前没有即将到期或已逾期的任务。')
   }
   lines.push('')
   for (const r of rows) {
     const extra = r.dueFormatted ? `（${r.dueFormatted}）` : ''
     lines.push(`· [${r.courseName}] ${r.title} — ${r.dueText}${extra}`)
+  }
+  if (hiddenCount > 0) {
+    lines.push('')
+    lines.push(
+      `另有 ${hiddenCount} 项更远的任务${hiddenTbdCount > 0 ? `（含 ${hiddenTbdCount} 项日期待定）` : ''}。在 Tempo 查看：${viewUrl}`,
+    )
   }
   lines.push('')
   lines.push('Tempo 只在有任务即将到期时才发信。')
@@ -207,7 +249,11 @@ function renderText(input: {
 /**
  * 组装一封提醒邮件（subject / html / text / 可行动判定）。
  *
- * 纯函数：排序 + 标签 + 渲染全部在这里，调用方只负责取数 + 发送。
+ * 纯函数：排序 + 筛选 + 标签 + 渲染全部在这里，调用方只负责取数 + 发送。
+ *
+ * ### 聚焦版口径（Steven 2026-09-17 拍板）
+ * 正文**只列「可行动」项**（逾期 + DUE_SOON_DAYS 天内），其余（远未来 / TBD）折叠成
+ * 一行「另有 N 项更远的任务」。目标：主题的数字与正文的条数**一致**，邮件短到能一次读完。
  */
 export function buildReminderEmail(input: ReminderBuildInput): ReminderBuildResult {
   const sorted = sortByDueDateAsc(input.tasks)
@@ -217,7 +263,11 @@ export function buildReminderEmail(input: ReminderBuildInput): ReminderBuildResu
     ? `Tempo 提醒：你有 ${overdueCount + dueSoonCount} 项任务待处理`
     : 'Tempo · 你的任务一览'
 
-  const rows: RenderedRow[] = sorted.map((t) => {
+  const shown = sorted.filter((t) => isActionableTask(t, input.now))
+  const hiddenCount = sorted.length - shown.length
+  const hiddenTbdCount = sorted.filter((t) => t.dueDate === null).length
+
+  const rows: RenderedRow[] = shown.map((t) => {
     const due = t.dueDate === null ? { text: '日期待定', overdue: false } : dueLabel(t.dueDate, input.now)
     return {
       courseName: t.courseName,
@@ -228,13 +278,27 @@ export function buildReminderEmail(input: ReminderBuildInput): ReminderBuildResu
     }
   })
 
-  return {
-    subject,
-    html: renderHtml({ rows, actionable, overdueCount, dueSoonCount, unsubscribeUrl: input.unsubscribeUrl }),
-    text: renderText({ rows, actionable, overdueCount, dueSoonCount, unsubscribeUrl: input.unsubscribeUrl }),
+  const renderInput = {
+    rows,
     actionable,
     overdueCount,
     dueSoonCount,
+    hiddenCount,
+    hiddenTbdCount,
+    unsubscribeUrl: input.unsubscribeUrl,
+    viewUrl: input.viewUrl,
+  }
+
+  return {
+    subject,
+    html: renderHtml(renderInput),
+    text: renderText(renderInput),
+    actionable,
+    overdueCount,
+    dueSoonCount,
+    shownCount: shown.length,
+    hiddenCount,
+    hiddenTbdCount,
     totalCount: sorted.length,
   }
 }

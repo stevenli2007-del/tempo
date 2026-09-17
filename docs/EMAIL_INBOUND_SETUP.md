@@ -379,55 +379,68 @@ npx wrangler tail          # 看 Worker 实时日志
 
 ## 出站启用（P0-3-14 · 主动提醒）
 
-P0-3-14 的「主动发邮件提醒」代码已全部就绪（Vercel 引擎 + 3 条路由 + Cloudflare 出站 Worker + 迁移 + 回归脚本）。但**出站发送依赖 Cloudflare Email Sending**，需要 Workers Paid 计划 + 已验证发件地址，这部分**只能由 Steven 手动操作**（Agent 不会擅自改 Cloudflare 计费）。
+P0-3-14 的「主动发邮件提醒」代码已全部就绪（Vercel 引擎 + 3 条路由 + Cloudflare 出站 Worker + 迁移 + 回归脚本）。但**出站发送依赖 Cloudflare Email Sending**，需要 Workers Paid 计划 + 已验证发件地址。
+
+> **✅ 状态（2026-09-17）**：①–⑤ 全部完成，生产零副作用探针通过（`/reminders/scheduled` → 401、`/reminders/unsubscribe` → 400），**只差 ⑦ 真发一封做最终验收**。
+> **🔴 头号踩坑**：`env 部署 ≠ 代码部署` —— 加完 Vercel env 面板会弹 `Deployment created`，但 Vercel 从 `origin/main` 构建，**若代码 commit 还没 push，新路由照样 404**。**判据：无凭证打新路由 → 404=代码没上 / 401=已上线**（一眼区分），别只看面板。
 
 > 与入站的区别：入站走 catch-all → Worker（`email` handler）；出站是独立的 `workers/outbound-email`（只有一个 `fetch` handler），两者部署单元分离，互不干扰。入站密址 `inbound+<token>@tempocourse.com` 与出站退订 token `reminder_unsub_token` 也是两套独立 token。
 
-### Steven 手动清单
+### 启用清单（含实测状态）
 
-1. **执行迁移**（Supabase Dashboard → SQL Editor，粘贴并运行）
+1. ✅ **执行迁移**（Supabase Dashboard → SQL Editor，粘贴并运行）
    `supabase/migrations/20260917130000_reminders.sql`
-   —— 新增 `profiles.reminder_enabled` / `last_reminder_at` / `reminder_unsub_token` + 唯一部分索引。
+   —— 新增 `profiles.reminder_enabled` / `last_reminder_at` / `reminder_unsub_token` + 唯一部分索引。返回 `Success. No rows returned` 是 DDL 正常结果。
 
-2. **升级 Cloudflare 到 Workers Paid 计划**
-   —— Email Sending Beta 要求付费计划才能发往外部域名（如 `berkeley.edu`）。免费计划只能 `fetch` 不能真正外发。
+2. ✅ **Workers Paid 计划 —— 本就已付费，免升级**
+   —— 打开 `dash.cloudflare.com/<account_id>/workers/plans`：若 Paid 卡片按钮是灰的 **「Current plan」** 且 Includes 写有「Containers & Email sending included」，说明已是付费，**无需再升级**。Email Sending 发外部域名（如 `berkeley.edu`）需要它。
 
-3. **验证发件地址 `noreply@tempocourse.com`**
+3. ✅ **验证发件地址 `noreply@tempocourse.com`**
    —— Cloudflare Email Service 要求 `from` 是「已验证的目标地址」。
-   ⚠️ **P0-3-11 的 catch-all 会吞掉验证邮件**：验证前先临时停用 catch-all 规则（或加一条精确 `noreply@tempocourse.com → 目标地址` 规则且排在 catch-all 之前），收到验证邮件并点击确认后再恢复 catch-all。
+   ⚠️ **catch-all 会吞掉验证邮件**（纯 sink，无收件箱，点不到链接）。**正确顺序：先用 API 建一条精确转发规则 → 再加 destination → 验证信落到已验邮箱 → 点链接 → 删规则。**
+   ```
+   # ① 建临时精确规则（priority 0 < catch-all 2147483647，优先命中）
+   curl -s -X POST -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+     "https://api.cloudflare.com/client/v4/zones/$ZONE/email/routing/rules" \
+     -d '{"name":"noreply-verify-forward (temp)","enabled":true,
+          "matchers":[{"type":"literal","field":"to","value":"noreply@tempocourse.com"}],
+          "actions":[{"type":"forward","value":["stevenli2007@berkeley.edu"]}]}'
+   # ② 在 Destination addresses 加 noreply@tempocourse.com → 验证信转发到上面邮箱 → 点链接
+   # ③ 验证通过后删规则
+   curl -s -X DELETE -H "Authorization: Bearer $TOKEN" \
+     "https://api.cloudflare.com/client/v4/zones/$ZONE/email/routing/rules/<rule_id>"
+   ```
 
-4. **给出站 Worker 配密钥**
+4. ✅ **部署出站 Worker + 配密钥**（**顺序：deploy → secret put**）
    ```
    cd workers/outbound-email
-   wrangler secret put OUTBOUND_EMAIL_SECRET     # 与 Vercel 里的同一串
+   npm install          # 先装依赖，否则 npx wrangler 会交互式问装包而卡住
+   npx wrangler deploy  # 先部署，Worker 才有版本可挂 secret
+   printf '%s' '<与 Vercel 同一串>' | npx wrangler secret put OUTBOUND_EMAIL_SECRET
    ```
-   —— `FROM_ADDRESS` 已在 `wrangler.toml` 里写成 `noreply@tempocourse.com`，无需 secret。
+   —— `FROM_ADDRESS` 已在 `wrangler.toml` 里写成 `noreply@tempocourse.com`，无需 secret。本次部署 URL：`https://tempo-outbound-email.stevenli2007.workers.dev`。
+   **🔑 wrangler OAuth token 会过期** —— 若用 toml 里的 `oauth_token` 直接 curl CF API 报 `10000 Authentication error` / `1000 Invalid API Token`，**先跑一次 `npx wrangler whoami` 让它自动续期**，再读 toml（别误判成"没有 email_routing 权限"）。
 
-5. **部署出站 Worker**
-   ```
-   cd workers/outbound-email
-   wrangler deploy
-   ```
-   —— 部署后 Worker 才有版本可挂 secret（与入站同样的「login → deploy → secret put」顺序）。
-
-6. **在 Vercel 设置 3 个环境变量**（Project → Settings → Environment Variables）
+5. ✅ **在 Vercel 设置 3 个环境变量**（Project → Settings → Environment Variables，**一次性加完再手动 Redeploy 一次**）
    | 变量 | 值 | 说明 |
    |---|---|---|
-   | `OUTBOUND_EMAIL_WORKER_URL` | `https://tempo-outbound-email.<subdomain>.workers.dev` | 出站 Worker 的 URL |
+   | `OUTBOUND_EMAIL_WORKER_URL` | `https://tempo-outbound-email.stevenli2007.workers.dev` | 出站 Worker 的 URL |
    | `OUTBOUND_EMAIL_SECRET` | 与第 4 步同一串 | Bearer 令牌 |
-   | `APP_BASE_URL` | `https://tempo-six-neon.vercel.app` | 退订链接域名（缺省走 `VERCEL_URL`） |
+   | `APP_BASE_URL` | `https://tempo-six-neon.vercel.app` | 退订/查看链接域名（缺省走 `VERCEL_URL`） |
 
    ⚠️ **一轮加多个变量会触发多次部署（"一半生效"中间态）**——加完后手动 Redeploy 一次更稳。判据用端点，别信面板状态。
+   🔴 **改完 env 还要确认代码已 push**：Vercel 从 `origin/main` 构建，代码没推上去的话新路由照样 404。
 
-7. **验证链路（先预览，再真发）**
-   - 预览（不真正发信，不更新 `last_reminder_at`）：
+6. ⏳ **验证链路（先预览，再真发）**
+   - 已验（零副作用）：无凭证打 `/api/v1/reminders/scheduled` → **401**（= 路由已上线）；`/api/v1/reminders/unsubscribe?t=abc` → **400**。
+   - 预览（不真正发信、不更新 `last_reminder_at`）：
      ```
      POST /api/v1/reminders/send?preview=1
      ```
-     带用户登录态，返回 `{ preview:true, subject, html, text, actionable, ... }`。
-   - 真发一封：`POST /api/v1/reminders/send`（同登录态）。
+     带用户登录态，返回 `{ data: { sent:false, reason:'preview', email:{subject,html,text,actionable,shownCount,hiddenCount,totalCount} } }`。
+   - **真发一封**：`POST /api/v1/reminders/send`（同登录态）—— 会写入 `last_reminder_at`，24h 内定时任务不再发。
    - 定时任务探针：`GET /api/v1/reminders/scheduled` 带 `CRON_SECRET` → `200` + 聚合报告（无 PII）。
-   - 退订页：`GET /api/v1/reminders/unsubscribe?t=<token>` 返回确认页。
+   - 退订页：`GET /api/v1/reminders/unsubscribe?t=<token>` 返回确认页并关掉提醒。
 
 ### 失败降级（已写进代码，无需手动处理）
 - `OUTBOUND_EMAIL_*` 未配置 → `send.ts` 返回 `{ok:false, error:'not_configured'}`，**不报错、不 500**。
@@ -445,9 +458,11 @@ P0-3-14 的「主动发邮件提醒」代码已全部就绪（Vercel 引擎 + 3 
 | 定时任务路由 | `app/api/v1/reminders/scheduled/route.ts` |
 | 公开退订路由 | `app/api/v1/reminders/unsubscribe/route.ts` |
 | 出站 Worker | `workers/outbound-email/src/index.ts` + `wrangler.toml` |
-| 迁移 | `supabase/migrations/20260917130000_reminders.sql`（**待 Steven 执行**） |
-| 回归 | `npm run regress:reminders`（23/23 ✅） |
+| 迁移 | `supabase/migrations/20260917130000_reminders.sql`（**✅ 已执行 2026-09-17**） |
+| 回归 | `npm run regress:reminders`（**34/34 ✅** —— 含「聚焦版」口径） |
 | 定时触发 | `vercel.json` 新增 `0 14 * * *`（UTC 14:00 ≈ PT 07:00） |
+
+> **正文口径 = 聚焦版**（Steven 2026-09-17 拍板）：只列「可行动」项（逾期 + 3 天内），其余折叠成「另有 N 项更远的任务（含 M 项日期待定）→ 在 Tempo 查看」。**主题数字必须 = 正文条数**（首版全量平铺在真实数据上生成 63 行、主题只写 20）。
 
 ## 附 A. 三个不变量（为什么代码这么写，别改回去）
 

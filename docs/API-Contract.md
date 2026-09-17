@@ -1072,22 +1072,28 @@
 | POST/DELETE | `/api/v1/demo[/seed]` | Demo Workspace | P0-1-10 |
 | POST | `/api/v1/email/inbound` | 邮件入站 webhook（Cloudflare Worker 转发，INBOUND_EMAIL_SECRET） | ✅ P0-3-11 |
 | GET | `/api/v1/email/address` | 当前用户的邮件入站密址 | ✅ P0-3-11 |
-| POST | `/api/v1/reminders/send` | 手动触发当前用户提醒（可选 `?preview=1` 只预览不发送） | P0-3-14（待 Steven 配 Cloudflare 出站 + 跑迁移） |
-| GET/POST | `/api/v1/reminders/scheduled` | 定时批量提醒（CRON_SECRET，service role） | P0-3-14（待 Steven 配 Cloudflare 出站 + 跑迁移） |
-| GET | `/api/v1/reminders/unsubscribe` | 一键退订（公开，token 定位） | P0-3-14（待 Steven 配 Cloudflare 出站 + 跑迁移） |
+| POST | `/api/v1/reminders/send` | 手动触发当前用户提醒（可选 `?preview=1` 只预览不发送） | P0-3-14（✅ 已上线 2026-09-17） |
+| GET/POST | `/api/v1/reminders/scheduled` | 定时批量提醒（CRON_SECRET，service role） | P0-3-14（✅ 已上线 2026-09-17） |
+| GET | `/api/v1/reminders/unsubscribe` | 一键退订（公开，token 定位） | P0-3-14（✅ 已上线 2026-09-17） |
 
 ---
 
-## 10. 主动提醒 / 优先级（P0-3-14）
+## 11. 主动提醒 / 优先级（P0-3-14）
 
 ADR-017 点名的"秘书"护城河：**Tempo 找人，不是人找 Tempo**。当前同步靠用户打开 dashboard（T1）触发，用户不来数据就不新 —— 与 ADR-016 直接矛盾。本组端点把"主动提醒"落地为**出站邮件**（渠道 Steven 拍板：邮件；Web Push 排除），优先级口径 = **截止临近排序**（邮件内任务按 dueDate 升序、TBD 排最后，不碰 Phase 2 权重体系）。
 
 > 出站体系与 P0-3-11 的入站体系边界（ADR-019）：入站只做"密址转发 → 解析 → 仅 `status='done'`"，本组端点负责"提醒时机 / 优先级 / 频控 / 退订"全部出站逻辑。
 
+### 邮件口径（聚焦版，Steven 2026-09-17 拍板）
+正文**只列「可行动」项**（已逾期 + `DUE_SOON_DAYS=3` 天内到期），其余（远未来 + TBD）**折叠成一行**：「另有 N 项更远的任务（含 M 项日期待定）→ 在 Tempo 查看」。
+- 目的：让**主题数字与正文条数一致**，邮件短到一次读完 —— 首版全量平铺在真实数据上会生成 63 行（主题说 20、正文列 63），连续收几天必被无视，违背 ADR-017 秘书定位。
+- 结果字段：`shownCount`（正文条数）/ `hiddenCount`（折叠数）/ `hiddenTbdCount`（折叠中含 TBD 的数）/ `totalCount`（= shown + hidden）。
+- 排序不变：逾期 → 3 天内 → 更远 → TBD（`sortByDueDateAsc`）。
+
 ### `POST /api/v1/reminders/send`
 手动触发**当前登录用户**的提醒（自测 / 想立刻看一眼时用）。需登录（`getCurrentUser()`，否则 401）。
 - `?preview=1`：**只组装、回带邮件内容、不发送、不更新时间戳、不卡开关/频控** —— 用来在出站 Worker 还没配好时也能验证排序与口径。
-- 响应 `{ data: { userId, sent, reason?, email? } }`。`reason` ∈ `disabled` / `recent` / `no_actionable` / `no_tasks` / `no_email` / `send_failed` / `preview`；`email`（subject/html/text/actionable/totalCount）在 preview 或 `no_actionable` 时回带。
+- 响应 `{ data: { userId, sent, reason?, email? } }`。`reason` ∈ `disabled` / `recent` / `no_actionable` / `no_tasks` / `no_email` / `send_failed` / `preview`；`email`（subject/html/text/actionable/shownCount/hiddenCount/totalCount）在 preview 或 `no_actionable` 时回带。
 
 ### `GET|POST /api/v1/reminders/scheduled`
 定时批量提醒（T3 同款），由 `vercel.json` 的 cron 每天 UTC 14:00（≈美西 07:00）触发一次。service role 遍历全部 `reminder_enabled=true` 的用户逐个组装 + 发送。**与 `/sync/scheduled` 同款鉴权**：`Authorization: Bearer ${CRON_SECRET}` + sha256 恒定时间比较 + fail closed（未配 secret → 500）。
@@ -1102,7 +1108,7 @@ Vercel 引擎组装好邮件后，POST `{ to, subject, html, text }` 给 Cloudfl
 
 ---
 
-## 11. 变更记录
+## 12. 变更记录
 
 | 日期 | 变更 | 依据 |
 |---|---|---|
@@ -1127,4 +1133,5 @@ Vercel 引擎组装好邮件后，POST `{ to, subject, html, text }` 给 Cloudfl
 | 2026-09-07 | **§9 新增 `GET /api/v1/metrics`**（P0-3-1，章节由「健康检查」改名为「健康检查与运营指标」）：返回 PRD 8.1 四项指标（编辑修正率 / 7 日回访 / 人均关联课程数 / token 续期完成率）。鉴权与 `/sync/scheduled` 共用 `lib/api/cron-auth.ts`（该文件的恒定时间比较 + fail closed 逻辑此前只存在于定时同步路由，P0-3-1 抽出共用，行为不变）。**分母为 0 时 `rate` 返回 `null` 而非 0**；读数失败一律 500，不返回假 0；`perUser` 只带 uuid 不含邮箱。**§7 `DELETE /api/v1/account` 级联范围补 `usage_events`**（P0-3-2 勿漏） | P0-3-1、`PRD.md` 8.1 |
 | 2026-09-09 | **§7 三个端点实现落地**（P0-3-2）：① `GET /api/v1/account/data-summary` 补齐响应形状（课程 / 归档课程 / syllabus / 任务 / Canvas 连接态与过期时间 / 已关联课程数），**计数失败抛 500 不退成 0**；② `DELETE /api/v1/account/data?scope=canvas` 按契约落地为「撤销凭据 + **物理删** `source='canvas'` 的任务」，与 P0-2-9 的 `DELETE /canvas/credentials`（撤销但**保留**已导入任务）**刻意并存**——前者回答"我不想留着从 Canvas 拉来的东西"，后者回答"我想断开但别动我的记录"，两者都保留 syllabus 与手动任务；③ `DELETE /api/v1/account` 明确**删除顺序与失败语义**：Storage 前缀（含孤儿文件）→ `auth.admin.deleteUser()`（FK 级联清库）→ 兜底删 `profiles` 行；**Storage 失败即整趟 500 `delete_failed`**（否则等于制造无主文件）；未配 service role key → 500 `service_role_key_missing` | P0-3-2、`Security-Privacy.md` A11/A12 |
 | 2026-09-05 | **§6 `GET /api/v1/sync/status` 标注为「决定不实现」**（P0-2-7，Steven 拍板）：唯一可能的调用方是总览页状态条，而 dashboard 与课程详情页都是**服务端组件**，可直读 Supabase（`lib/sync/status.ts` 的纯函数）；建端点的唯一正当理由是客户端轮询，而实测一趟同步 6 秒，现有「同步中…」+ `router.refresh()`` 已够用。| 2026-09-05 | **§6 `GET /api/v1/sync/status` 标注为「决定不实现」**（P0-2-7，Steven 拍板）：唯一可能的调用方是总览页状态条，而 dashboard 与课程详情页都是**服务端组件**，可直读 Supabase（`lib/sync/status.ts` 的纯函数）；建端点的唯一正当理由是客户端轮询，而实测一趟同步 6 秒，现有「同步中…」+ `router.refresh()` 已够用。数据仍全部落库，将来需要轮询时按本节形状实现即可。**§5 `meta` 里 `staleWarning` / `lastSuccessfulSyncAt` 仍未返回**（同步状态改由 dashboard 服务端渲染，不走 tasks API），归 P0-2-11 | P0-2-7 |
-| 2026-09-17 | **§10 新增「主动提醒 / 优先级」（P0-3-14，代码完成、待 Steven 配 Cloudflare 出站 + 跑迁移）**：ADR-017 点名的"秘书"护城河落地为出站邮件（渠道 Steven 拍板=邮件、Web Push 排除；优先级口径=截止临近排序）。三端点：`POST /api/v1/reminders/send`（用户态、可选 `?preview=1` 只预览不发送）、`GET|POST /api/v1/reminders/scheduled`（cron 批量、service role、CRON_SECRET 鉴权、聚合计数不泄露用户数据）、`GET /api/v1/reminders/unsubscribe`（公开退订）。引擎 `lib/reminders/{build,engine,send,token}.ts`：**纯函数排序/可行动判定/渲染**（`scripts/regress-reminders.ts` 23/23）+ **service role 编排**（每查询显式带 user_id，红线 #3）+ **发送失败软降级**。频控=每用户每天至多一封（`profiles.last_reminder_at`）；准确优先于频繁（无逾期/3天内到期任务则不发）。出站走独立 Cloudflare Worker（`workers/outbound-email`，不碰已验收的入站 Worker）的 `send_email` 绑定。DB 迁移 `20260917130000_reminders.sql`：`profiles` 加 `reminder_enabled`/`last_reminder_at`/`reminder_unsub_token` | P0-3-14、ADR-017、ADR-019 |
+| 2026-09-17 | **§11 新增「主动提醒 / 优先级」（P0-3-14，✅ 已上线）**：ADR-017 点名的"秘书"护城河落地为出站邮件（渠道 Steven 拍板=邮件、Web Push 排除；优先级口径=截止临近排序）。三端点：`POST /api/v1/reminders/send`（用户态、可选 `?preview=1` 只预览不发送）、`GET|POST /api/v1/reminders/scheduled`（cron 批量、service role、CRON_SECRET 鉴权、聚合计数不泄露用户数据）、`GET /api/v1/reminders/unsubscribe`（公开退订）。引擎 `lib/reminders/{build,engine,send,token}.ts`：**纯函数排序/可行动判定/渲染**（`scripts/regress-reminders.ts` 23/23，后扩至 34/34）+ **service role 编排**（每查询显式带 user_id，红线 #3）+ **发送失败软降级**。频控=每用户每天至多一封（`profiles.last_reminder_at`）；准确优先于频繁（无逾期/3天内到期任务则不发）。出站走独立 Cloudflare Worker（`workers/outbound-email`，不碰已验收的入站 Worker）的 `send_email` 绑定。DB 迁移 `20260917130000_reminders.sql`：`profiles` 加 `reminder_enabled`/`last_reminder_at`/`reminder_unsub_token` | P0-3-14、ADR-017、ADR-019 |
+| 2026-09-17 | **§11 邮件正文口径收敛为「聚焦版」+ 出站全链路生产验证通过**（P0-3-14 续）：① **聚焦版**（Steven 拍板）—— 正文只列「可行动」项（逾期 + 3 天内），其余折叠成「另有 N 项更远的任务（含 M 项日期待定）→ 在 Tempo 查看」；新增结果字段 `shownCount` / `hiddenCount` / `hiddenTbdCount`；根因=首版全量平铺在真实数据上生成 **63 行**、而主题写 20（口径打架 + 洪水式日报，违背 ADR-016 R3 / ADR-017）。② **出站启用**：迁移执行 ✅、Workers Paid **本就已付费**（免升级）、`noreply@tempocourse.com` 验证 ✅（catch-all zone 上靠**临时精确转发规则**把验证信引到已验邮箱，验完删除）、出站 Worker 部署 ✅（`tempo-outbound-email.stevenli2007.workers.dev` + `send_email` 绑定 + Bearer 密钥）、Vercel 三 env ✅。③ **验收判据**：无凭证打 `/reminders/scheduled` → **401（路由已上线）而非 404（代码没上）** —— env 触发的部署不含未 push 的代码，是本次唯一卡点。④ 本地零副作用预览（service role + 真数据 + `preview:true`）：`actionable=true`、主题 20 / 正文 20 / 折叠 43（= 63）。⑤ 已知数据层问题（**不在本卡**）：`Final Exam` / `Unit 1-3 Exam` 各出现两份（exam 派生任务与 syllabus 重复），单列后续卡 | P0-3-14、ADR-016、ADR-017 |

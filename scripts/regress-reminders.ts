@@ -65,7 +65,7 @@ const tbd = { courseName: 'CHEM 1A', title: 'Lab Report', dueDate: null, taskTyp
   assert(r.overdueCount === 0 && r.dueSoonCount === 0, '可行动：无逾期/即将到期')
 }
 
-// ---------- 邮件组装 ----------
+// ---------- 邮件组装（聚焦版：正文只列可行动项） ----------
 
 {
   const built = buildReminderEmail({
@@ -73,30 +73,52 @@ const tbd = { courseName: 'CHEM 1A', title: 'Lab Report', dueDate: null, taskTyp
     timezone: 'America/Los_Angeles',
     now: NOW,
     unsubscribeUrl: 'https://tempo.example.com/api/v1/reminders/unsubscribe?t=abc',
+    viewUrl: 'https://tempo.example.com/dashboard',
   })
   assert(built.actionable === true, '组装：actionable 透传')
   assert(built.subject.includes('待处理'), '组装：可行动主题含「待处理」')
   assert(built.html.includes('CHEM 1A'), '组装：html 含课程名')
-  assert(built.html.includes('Homework 1'), '组装：html 含任务标题')
+  assert(built.html.includes('Homework 1'), '组装：html 含可行动任务标题')
   assert(built.html.includes('已逾期'), '组装：html 含逾期标签')
   assert(built.html.includes('还有 1 天') || built.html.includes('还有'), '组装：html 含即将到期标签')
-  assert(built.html.includes('日期待定'), '组装：TBD 渲染为「日期待定」')
-  assert(built.html.includes('https://tempo.example.com/api/v1/reminders/unsubscribe?t=abc'), '组装：html 含退订链接')
-  assert(built.text.includes('Homework 1'), '组装：text 含任务标题')
-  assert(built.totalCount === 4, '组装：totalCount = 4')
+  assert(built.html.includes('日期待定'), '组装：折叠行含「日期待定」计数')
+  assert(
+    built.html.includes('https://tempo.example.com/api/v1/reminders/unsubscribe?t=abc'),
+    '组装：html 含退订链接',
+  )
+  assert(built.text.includes('Homework 1'), '组装：text 含可行动任务标题')
+  assert(built.totalCount === 4, '组装：totalCount = 全部 pending = 4')
+
+  // 聚焦版核心口径：正文只列可行动项，其余折叠成计数。
+  assert(built.shownCount === 2, '聚焦：shownCount = 可行动 2（逾期+即将到期）')
+  assert(built.hiddenCount === 2, '聚焦：hiddenCount = 2（远未来+TBD）')
+  assert(built.hiddenTbdCount === 1, '聚焦：hiddenTbdCount = 1（TBD）')
+  assert(!built.html.includes('Problem Set 3'), '聚焦：远未来任务不进正文')
+  assert(!built.html.includes('Lab Report'), '聚焦：TBD 任务不进正文表格')
+  assert(built.html.includes('另有'), '聚焦：html 含「另有 N 项」折叠行')
+  assert(built.html.includes('在 Tempo 查看'), '聚焦：html 含落地页链接文案')
+  assert(built.html.includes('https://tempo.example.com/dashboard'), '聚焦：html 含落地页链接')
+  assert(built.text.includes('另有 2 项'), '聚焦：text 含折叠计数')
 }
 
 {
-  // 不可行动 → 主题用「任务一览」，且仍渲染全部任务（仅不发信）。
+  // 不可行动 → 主题用「任务一览」，正文无表格（可行动为空），只留折叠行。
   const built = buildReminderEmail({
     tasks: [farFuture, tbd],
     timezone: 'America/Los_Angeles',
     now: NOW,
     unsubscribeUrl: 'https://tempo.example.com/u?t=x',
+    viewUrl: 'https://tempo.example.com/dashboard',
   })
   assert(built.actionable === false, '组装(不可行动)：actionable = false')
   assert(built.subject.includes('任务一览'), '组装(不可行动)：主题用「任务一览」')
-  assert(built.html.includes('PHYSICS 7A'), '组装(不可行动)：仍渲染远未来任务')
+  assert(built.shownCount === 0, '聚焦(不可行动)：正文 0 条')
+  assert(!built.html.includes('PHYSICS 7A'), '聚焦(不可行动)：远未来任务不进正文')
+  // HTML 里数字被 <strong> 包住，故断言标记形态而非「另有 2 项」整串。
+  assert(
+    built.html.includes('另有 <strong') && built.html.includes('2</strong> 项更远的任务'),
+    '聚焦(不可行动)：折叠行仍给出总数',
+  )
 }
 
 console.log(`\n提醒回归：${passed} 通过 / ${failed} 失败`)

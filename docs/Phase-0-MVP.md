@@ -29,10 +29,10 @@
 
 ## 当前进度指针
 
-**当前 task**：**`P0-3-14`（主动提醒 / 优先级）** —— 🔵 **代码完成 2026-09-17**（引擎 `lib/reminders/*` + 三端点 + 独立出站 Worker `workers/outbound-email` + 迁移就绪），**待 Steven 配 Cloudflare 出站（Workers Paid + 验证 `noreply@tempocourse.com`）+ 跑迁移 `20260917130000_reminders.sql` + 验收**；**`P0-3-11`（邮件通道·入站）** ✅ 代码完成 + **真人真邮件端到端验收通过 2026-09-17**（入站-only：密址绑定 + 纯入站，出站归 P0-3-14）；✅ **部署 8/8 步**（①–⑦ 配置全部生效，⑧ 真人转发真 Gradescope 回执验证 `MX→catch-all→Worker→Vercel` 全链路通过）；**`P0-3-9`（截图档）** 代码完成、真实识别待 Steven 贴 `DASHSCOPE_API_KEY` 后补验；**P0-3-2 已验收**。
+**当前 task**：**`P0-3-14`（主动提醒 / 优先级）** —— ✅ **出站全链路已上线 2026-09-17**（迁移 ①/Workers Paid ② 本就已付费/发件地址验证 ③/出站 Worker ④/Vercel env ⑤ 全部就绪；三路由生产零副作用探针通过；正文口径收敛为**聚焦版**），**待 Steven 真发一封验收**；**`P0-3-11`（邮件通道·入站）** ✅ 代码完成 + **真人真邮件端到端验收通过 2026-09-17**（入站-only：密址绑定 + 纯入站，出站归 P0-3-14）；✅ **部署 8/8 步**（①–⑦ 配置全部生效，⑧ 真人转发真 Gradescope 回执验证 `MX→catch-all→Worker→Vercel` 全链路通过）；**`P0-3-9`（截图档）** 代码完成、真实识别待 Steven 贴 `DASHSCOPE_API_KEY` 后补验；**P0-3-2 已验收**。
 - ✅ **O-11 关闭：多模态 provider = Qwen 通义千问**（中国区 DashScope，默认 `qwen-vl-plus-latest`，可用 `LLM_MODEL_VISION` 覆写；需切回 Claude 时设 `LLM_PROVIDER_VISION=claude`）。配套 **ADR-018**：provider **按能力路由** —— 文本仍走 DeepSeek（**现有五板块解析零回归**），视觉走 Qwen。同时解决 **O-08**：两路均中国境内、无数据出境。
 - ✅ 另三项决策：**图片不落库**（浏览器压缩后 base64 直传、即用即弃）｜**范围 = 确认完成 + 新增/改期**（完全复用 3-8b 的 `match` + `PATCH`）｜**零迁移**（不新增列）。
-- **`P0-3-14`「主动提醒 / 优先级」**（Steven 2026-09-13 同意立项，2026-09-17 开工）—— 🔵 代码完成、待 Steven 配 Cloudflare 出站 + 跑迁移 + 验收。两项拍板：**渠道 = 邮件**（Web Push 排除）/ **优先级 = 截止临近排序**（不碰 Phase 2 权重）；ADR-017 点名它是"秘书"最核心的护城河，此前**无对应卡**；与 3-11 的出站范围边界见下方执行卡。
+- **`P0-3-14`「主动提醒 / 优先级」**（Steven 2026-09-13 同意立项，2026-09-17 开工）—— ✅ **出站全链路已上线 2026-09-17**（三路由 + 出站 Worker + 迁移 + Vercel env 全部就绪，生产探针通过），待 Steven 真发验收。三项拍板：**渠道 = 邮件**（Web Push 排除）/ **优先级 = 截止临近排序**（不碰 Phase 2 权重）/ **正文口径 = 聚焦版**（只列「可行动」项 = 逾期 + 3 天内，其余折叠成一行计数 —— 首版全量平铺生成 63 行而主题写 20，口径打架且属洪水式日报）；ADR-017 点名它是"秘书"最核心的护城河，此前**无对应卡**；与 3-11 的出站范围边界见下方执行卡。
 - 上一张 `P0-3-8` + `P0-3-8b` **已验收通过 2026-09-13**（Steven 原话"验收通过，效果非常好"；代码 `45d3bc3` + `5969f55` + follow-up `4f86ab7`）。
 - ✅ `P0-3-8` 课程更新对话框（文本档）**用户验收通过 2026-09-13（Steven 原话"验收通过，效果非常好"；代码 `45d3bc3` + 3-8b `5969f55` + follow-up `4f86ab7`）**：全局浮窗 FAB + `POST /api/v1/tasks`（手动任务）+ `DELETE /api/v1/tasks/:id` + `POST /api/v1/tasks/parse`（LLM 解析·**不落库**）。**用户验收通过 ✅**。
 - ✅ `P0-3-8b` 对话框**检索/更新档** **用户验收通过 2026-09-13**：新增 `lib/tasks/match.ts`（**确定性匹配，不用 LLM**）+ `GET /api/v1/tasks/search`（候选检索）+ `PATCH` 放开手动任务内容编辑（非 manual 返回 `source_not_editable`）。浮窗流程升级为「解析 → **先检索现有任务** → 0 命中新增 / 有命中**列举让用户选** → 确认」。**用户验收通过 ✅**。
@@ -1118,7 +1118,7 @@ Phase 0 列表只有几十条，每行再加一个 tag 只会更密，信息增�
 | **P0-3-11** | **邮件通道·入站（纯入站）**：转发到 Tempo 专属**密址**（token 绑定，不认 `From`）→ 解析（DeepSeek 中国）→ 仅 `status='done'`（绝不自动建任务 / 改 dueDate / 写 `submission_state`）—— 出站归 `P0-3-14` | Bud | P0-3-8 | 转发一封 Gradescope 提交确认邮件 → 任务自动标记完成 | ✅ **代码完成 + 端到端验收通过 2026-09-17**（ADR-019：砍掉注册邮箱绑定 + 「地址已就绪」回信，纯入站；真信 `Lab 2: Smells` 自动标记 done） |
 | **P0-3-12** | **全站视觉统一扫尾**：把 3-5 ~ 3-11 的新界面收进设计基线 | Bud | P0-3-3 ~ 3-11 | 无遗留旧样式；对齐 Stride 观感 | ⚪ |
 | **P0-3-13** | **版本 freeze + 内部试用**（Steven + 1-2 熟人）｜**出口门** | 共担 | P0-3-12 | 修掉「看不懂 / 不舒服」；产出**可发版** | ⚪ |
-| **P0-3-14** | **主动提醒 / 优先级**：出站推送（提醒时机 + 优先级建议 + 频控）—— **ADR-017 点名的"秘书"核心护城河**（此前无卡） | Bud | P0-3-11 | 见下方执行卡（两项拍板：渠道=邮件 / 优先级=截止临近排序） | 🔵 代码完成 2026-09-17；待 Steven 配 Cloudflare 出站 + 跑迁移 + 验收 |
+| **P0-3-14** | **主动提醒 / 优先级**：出站推送（提醒时机 + 优先级建议 + 频控）—— **ADR-017 点名的"秘书"核心护城河**（此前无卡） | Bud | P0-3-11 | 见下方执行卡（三项拍板：渠道=邮件 / 优先级=截止临近排序 / 正文=聚焦版） | ✅ **出站全链路上线 2026-09-17**（迁移①/Paid②/发件地址③/Worker④/env⑤ + 生产探针通过）；待 Steven 真发验收 |
 
 **排序纪律（不是编号顺序）**：`3-3 设计基线 → 3-4 / 3-5 / 3-6 结构与内容 → 3-10 地基（提交状态 + 时区）→ 3-7 可视化 → 3-8 / 3-9 / 3-11 对话框与通道 → 3-14 主动提醒 → 3-12 扫尾`。
 > ⚠️ **3-14 编号在 3-13 之后，但执行顺序在 3-12 之前** —— 沿用 3-7b 的「编号 ≠ 执行顺序」惯例（编号只服务可读性，顺序以本行为准）。
@@ -1400,18 +1400,21 @@ Phase 0 列表只有几十条，每行再加一个 tag 只会更密，信息增�
 - **做什么**：Steven + 1-2 熟人内部 dogfood → 修掉「看不懂 / 不舒服」→ 产出**可发版**。
 - **🔴 这是 exit gate**：之后**不追加卡片**，所有"想再改一版"归入 Phase 1/2。测的是**一个"不丢人"的最小可测版**，不是终版。
 
-#### 🎫 P0-3-14 · 主动提醒 / 优先级 🔵 代码完成 2026-09-17，待 Steven 配 Cloudflare 出站 + 跑迁移 + 验收
+#### 🎫 P0-3-14 · 主动提醒 / 优先级 ✅ 出站全链路上线 2026-09-17，待 Steven 真发验收
 
 - **为什么立项**：**ADR-017** 把「主动提醒 / 优先级」点名为"秘书"（Jarvis）**最核心的护城河** —— 「Tempo 找人，不是人找 Tempo」（ADR-016 R4），而它在 M3 里**一直没有对应卡**（ADR-017 的"已知缺口"）。
   结构性理由：当前同步触发是"用户打开 dashboard"（T1，`Sync-Strategy.md` §3）—— **用户不来数据就不新，所以他必须来**。这与"用户操作量趋近于 0 才是成功"（ADR-016）直接矛盾。
 - **🔴 与其他卡的边界（已拍板，ADR-019）**：**`P0-3-11` 只做入站**（密址转发 → 解析 → 仅 `status='done'`，**不含**「地址已就绪」验证回信）；**出站推送体系（提醒时机 / 优先级 / 频控 / 退订）整体归本卡**。3-11 卡面已同步改写为纯入站。
-- **两项拍板（2026-09-17 Steven 确认，已落 ADR-020）**：
+- **三项拍板（2026-09-17 Steven 确认，已落 ADR-020）**：
   1. **提醒渠道 = 邮件**（复用 tempocourse.com 域与 Cloudflare 账户，成本最低；Web Push 排除）。出站走独立 Cloudflare Worker 的 `send_email` 绑定，不碰已验收的入站 Worker。
   2. **「优先级」口径 = 截止临近排序**：邮件内任务按 dueDate 升序、TBD 排最后；**不碰 Phase 2 的 routine / 今日任务权重体系**。本卡实质是"提醒"而非"建议"。
+  3. **正文口径 = 聚焦版**（预览验收后补拍）：正文**只列「可行动」项**（已逾期 + 3 天内到期），其余折叠成一行「另有 N 项更远的任务（含 M 项日期待定）→ 在 Tempo 查看」。**理由**：首版全量平铺在真实数据上生成 **63 行**、主题却写 20（口径打架 + 洪水式日报，连续收几天必被无视）。**规则：主题数字必须 = 正文条数。**
   - **频控**：每用户每天至多一封（`profiles.last_reminder_at`）；**准确优先于频繁**（ADR-016 R3）—— 无"逾期或 3 天内到期"任务时不发、也不更新时间戳。
   - **退订**：每用户随机 `reminder_unsub_token`，邮件内一键退订链接（公开 GET，无需登录）。
 - **🔴 不做（ADR-017 / ADR-016 R5）**：月视图 / 拖拽改期等日历功能；惩罚性 streak / 断签；任何以"多打开 Tempo"为目标的激励。
 - **关键约束**：**准确优先于频繁** —— 一次误报（提醒一件已完成的事）比不提醒更伤信任（ADR-016 R3「不确定就标待确认，绝不猜」）。
+- **✅ 上线状态（2026-09-17）**：① 迁移 ✅ ② Workers Paid ✅（本就已付费，免升级）③ 发件地址 `noreply@tempocourse.com` 验证 ✅（**catch-all zone 上先建临时精确转发规则**，否则验证信被 Worker 吞）④ 出站 Worker 部署 ✅（`tempo-outbound-email.stevenli2007.workers.dev`）⑤ Vercel 三 env ✅（`OUTBOUND_EMAIL_WORKER_URL` / `OUTBOUND_EMAIL_SECRET` / `APP_BASE_URL`）。生产零副作用探针通过（`/reminders/scheduled` 401、`/reminders/unsubscribe` 400）。**待 Steven 真发一封做最终验收。**
+- **🔴 已知数据层问题（不在本卡）**：`Final Exam` / `Unit 1-3 Exam` 在邮件中各出现两份（exam 派生任务与 syllabus 数据重复），单列后续卡处理。
 
 ---
 
@@ -1498,3 +1501,5 @@ P0-0 基础设施
 | **2026-09-13** | **M3 重定义为「打磨收敛期」（13 张卡）+ 新增 M4「验证期」（4 张卡），Steven refine 清单定稿落盘**：原 M3 六张卡拆两段 —— M3 只打磨、不接触真实用户，出口门是 **P0-3-13 版本 freeze + 内部试用**（之后不追加，防无限收敛）；原验证四张卡整体下移重编号为 **`P0-4-1 ~ P0-4-4`**。新增卡：3-3 设计基线（移植 Stride 令牌）/ 3-4 `L1–L40` 课表漏抽修复 / 3-5 模块与上传解耦 / 3-6 列表收敛 / 3-7 总览可视化 / 3-8 对话框文本档 / 3-9 对话框截图档 / **3-10 Canvas 提交状态 + 日期时区修复（地基卡）** / 3-11 邮件通道 / 3-12 视觉扫尾 / 3-13 freeze。**移出**：#9 routine、#10① 今日任务 → Phase 2；#10② Google Calendar → Phase 1。**配套**：`Roadmap.md` 五处（看板 / 内核阶梯新增「用户操作量」+ Phase 0 进度感知改「有提交状态」/ G0-7 降级 + 新增 G0-8 人工干预率 / §9 新增 M3 exit gate / §10 两条明确不做）、`Decisions.md` 新增 ADR-013~016、`Database.md` 新增 `tasks.submission_state` / `submitted_at`、`CodingRules.md` §10.1 第 17 条 + §10.2 三行坑索引、`PRD.md` §1 定位补「执行层 vs 理解层」+ §8.1 指标口径改造 |
 | 2026-09-13 | **P0-3-9 领卡：四项决策拍板 + 新增 ADR-018 + 新卡立项（本次改动为纯文档，代码未动）**：**关闭 O-11** —— 多模态 provider 定为 **Claude**（默认 `claude-sonnet-5`，型号取自 Anthropic 官方文档而非凭印象；可用 `LLM_MODEL_VISION` 覆写为 `claude-haiku-4-5`）。**新增 ADR-018「provider 按能力路由」** —— 这是本卡真正的架构决策：`LLM_PROVIDER` 原是**单一全局开关**，而截图档需要"文本走 DeepSeek（高频量大、便宜）+ 图片走 Claude（低频、才有视觉）"**并存**；全局切 Claude 会把每次 syllabus 解析也搬走（成本上升 + 需重跑 P0-3-4 回归自证不退），绕过抽象层则违反 ADR-003。ADR-018 另记一条**统计陷阱**：`llm_runs.provider` 从此不单调，按 provider 比准确率必须带上 capability。另三项决策：**图片不落库**（压缩后 base64 直传、即用即弃 → 零孤儿文件 + 零截图 PII 留存）｜**范围 = 确认完成 + 新增/改期**（复用 3-8b 的 `match` + `PATCH`）｜**零迁移**。🔴 记入红线：截图路径**只写 `status`**，**绝不写 `submission_state`/`submitted_at`**（ADR-015：那是"Canvas 外部真相、仅同步可写"，写了会被下次同步覆盖）。**🆕 新增 `P0-3-14`「主动提醒 / 优先级」**（Steven 同意立项，落 ADR-017 点名的无卡缺口），执行顺序在 3-11 与 3-12 之间（沿用「编号 ≠ 执行顺序」惯例）；其与 3-11 的出站范围边界**尚未拍板**，已写进执行卡待细化 | P0-3-9、O-11、ADR-017、ADR-018 |
 | 2026-09-13 | **P0-3-9 代码完成（待 Steven 验收）**：实现 ADR-018 能力路由 —— `lib/llm/{types,env,index,run}.ts` 重构（content 支持文字+图片块、`getLLMProvider(capability)` 能力不匹配即 fail closed、`runStructured` 加 `capability` 默认 `text` → **文本档调用方零改动**）；🆕 `lib/llm/providers/claude.ts`（Anthropic Messages API，原生 fetch、零新依赖，顶层 `system` + 必填 `max_tokens` + base64 图片块）；🆕 `app/api/v1/tasks/parse-image/route.ts`（与 `/parse` 同形状、`capability:'vision'`、图片闸门 PNG/JPEG/WebP ≤5MB、fail closed → 502 `llm_vision_failed`）；`components/course-update-fab.tsx` 加 Cmd+V 粘贴/选图 + 客户端压缩(≤1600px/JPEG q0.8) + 缩略图 + `submitted` 徽标与确认时 `PATCH status='done'`（仅 status，用户主权）；🆕 `scripts/regress-vision.ts` + `npm run regress:vision`（13/13）。文档：`API-Contract.md` §5、`TechStack.md` §5.2、`Security-Privacy.md` §6（O-08 两笔出境：文本→中国 DeepSeek / 截图→美国 Anthropic）、设置页隐私说明补截图出境美国+避免 PII。**本地自测**：`next build` 全过、`regress:vision` 13/13、文本档零回归。**未自测**：视觉真实调用（沙箱出不去 `api.anthropic.com`，需 Steven 本地/生产验收）；未 push（纯功能、触发部署待 Steven 说）。**另**：3-14 与 3-11 的出站边界仍待 Steven 拍板 | P0-3-9、ADR-018 |
+| 2026-09-17 | **P0-3-14 主动提醒 / 优先级 代码完成 🔵（第 25 张卡）**：ADR-017 点名的"秘书"护城河落地为**出站邮件**。拍板两项 —— **渠道=邮件**（Web Push 排除）/ **优先级=截止临近排序**（`DUE_SOON_DAYS=3`），落 ADR-020。交付：`lib/reminders/{build,engine,send,token}.ts`（build=纯函数排序/可行动判定/渲染；engine=service role 编排，**每查询显式带 user_id**，红线 #3；send=出站 Worker 客户端，未配 env → `not_configured` 绝不抛错；token=独立于 `inbound_token`）+ 三路由（`send` 用户态含 `?preview=1` / `scheduled` 复用 `authorizeCronRequest` + service role + 聚合计数不含 PII / `unsubscribe` 公开 token 页）+ 独立出站 Worker `workers/outbound-email`（`send_email` 绑定，**不碰已验收的入站 Worker**）+ 迁移 `20260917130000_reminders.sql`（`profiles` 加 `reminder_enabled`/`last_reminder_at`/`reminder_unsub_token` + 唯一部分索引）+ `vercel.json` cron `0 14 * * *` + `scripts/regress-reminders.ts`（23/23）。频控=每用户每天至多一封；**准确优先于频繁**（无逾期/3天内到期则不发也不盖时间戳）。自测：`tsc` 0 / `eslint` 0 / `next build` 过 / 回归 23/23。commit `389e472` | P0-3-14、ADR-020、ADR-017 |
+| 2026-09-17 | **P0-3-14 出站全链路上线 + 正文口径收敛为「聚焦版」+ 验收踩坑**：① 出站启用 7 步走完 —— 迁移执行 ✅、**Workers Paid 本就已付费（免升级）** ✅、`noreply@tempocourse.com` 验证 ✅（**catch-all zone 上靠临时精确转发规则把验证信引到已验邮箱，验完删除** —— 否则验证信被 Worker 吞掉）、出站 Worker 部署 ✅（`tempo-outbound-email.stevenli2007.workers.dev`）、Vercel 三 env ✅。② 🔴 **验收踩坑：env 部署 ≠ 代码部署** —— 加完 env 面板弹 `Deployment created`，但新路由全 404，根因是 Vercel 从 `origin/main` 构建、而 P0-3-14 的 commit **还没 push**。**判据：无凭证打新路由 → 404=代码没上 / 401=已上线**（一眼区分）。③ 🔴 **预览（真数据）暴露产品问题**：首版正文**全量平铺 63 行**、主题只写 20（口径打架 + 洪水式日报）→ Steven 拍板**聚焦版**：正文只列「可行动」项（逾期 + 3 天内），其余折叠成「另有 N 项更远的任务（含 M 项日期待定）→ 在 Tempo 查看」；新增 `shownCount`/`hiddenCount`/`hiddenTbdCount`；`tsc`/`build` 过、回归 **23→34**。④ 已知数据层问题（**不在本卡**）：`Final Exam` / `Unit 1-3 Exam` 各两份（exam 派生任务与 syllabus 重复），单列后续卡。⑤ 卫生：出站 Worker 补 `.gitignore` + 提交 `package-lock.json`（commit `0aede18`） | P0-3-14、ADR-016、ADR-017 |
