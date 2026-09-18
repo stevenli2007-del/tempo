@@ -3,11 +3,13 @@
  *
  * 运行：`npm run regress:announcements`
  *
- * 钉死四件事：
+ * 钉死五件事：
  * 1. **HTML 清洗的顺序**（先剥标签、后解实体）—— 顺序反了就是把消毒做成"先开门再上锁"；
  * 2. **两端日期都进查询串** —— 只传 start_date 会静默漏掉最近一个月（实测 2 条 vs 71 条）；
  * 3. **落点判定的宽窄** —— 判窄了能力被藏起来，判宽了最多多点一次确认；
- * 4. **消息载荷**：原文链接、落点标记、「知道了」文案的触发条件。
+ * 4. **消息载荷**：原文链接、落点标记、「知道了」文案的触发条件；
+ * 5. **C 口径的分流与摘要**（2026-09-18 拍板）：两条通道**不重不漏**、
+ *    摘要**截断但计数不撒谎**、标题报总数、排序不依赖 Canvas 返回顺序。
  */
 
 import {
@@ -20,7 +22,15 @@ import {
   toCanvasAnnouncements,
 } from "@/lib/canvas/announcements"
 import { hasStructuredLanding } from "@/lib/course-update/landing"
-import { bodyLines, buildAnnouncementPayload } from "@/lib/sync/announcements"
+import {
+  MAX_DIGEST_ITEMS,
+  bodyLines,
+  buildAnnouncementDigestPayload,
+  buildAnnouncementPayload,
+  partitionByLanding,
+  postedAtLabel,
+} from "@/lib/sync/announcements"
+import type { FreshAnnouncement } from "@/lib/sync/announcements"
 
 let passed = 0
 let failed = 0
@@ -257,6 +267,103 @@ console.log("buildAnnouncementPayload（消息载荷）")
     (noLanding.details ?? []).some((line) => line.includes("不改任何字段")),
     JSON.stringify(noLanding.details),
   )
+}
+
+console.log("partitionByLanding / buildAnnouncementDigestPayload（C 口径）")
+{
+  /** 造一条"本轮新到"的公告。默认 MATH 53、有原文链接。 */
+  const make = (
+    externalId: string,
+    title: string,
+    bodyText: string,
+    postedAt: string | null = "2026-09-10T17:00:00Z",
+  ): FreshAnnouncement => ({
+    announcement: {
+      externalId,
+      courseExternalId: "1234",
+      title,
+      bodyText,
+      htmlUrl: `https://bcourses.berkeley.edu/courses/1/announcements/${externalId}`,
+      postedAt,
+    },
+    courseId: "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+    courseName: "MATH 53",
+  })
+
+  // ---- 分流：两条通道之和必须等于输入（少算一条 = 一条公告静默消失） ----
+  const items = [
+    make("1", "Quiz dates", "Quizzes on 9/4 and 9/18."), // 有落点
+    make("2", "Office hours", "Office hours moved to Wednesday 2-3pm."), // 无落点
+    make("3", "Class cancelled", "Class is cancelled this Friday."), // 无落点
+    make("4", "Final weight", "Final 30%, midterms 40%."), // 有落点（无日期但有百分比）
+  ]
+  const { withLanding, plain } = partitionByLanding(items)
+  check(
+    "有落点只挑能写的（日期型 + 百分比型）",
+    withLanding.length === 2 &&
+      withLanding[0].announcement.externalId === "1" &&
+      withLanding[1].announcement.externalId === "4",
+    `withLanding=[${withLanding.map((i) => i.announcement.externalId)}]`,
+  )
+  check("无落点归入摘要", plain.length === 2, `plain=${plain.length}`)
+  // 🔴 这条是本次改动的**安全底线**：分流漏一条，那条公告就永远看不到（账已落、不会重投）。
+  check(
+    "分流不丢条（两通道之和 == 输入）",
+    withLanding.length + plain.length === items.length,
+    `${withLanding.length}+${plain.length} vs ${items.length}`,
+  )
+  check("空输入 → 两条通道都空", partitionByLanding([]).withLanding.length === 0)
+
+  // ---- 摘要载荷 ----
+  const digest = buildAnnouncementDigestPayload(plain)
+  check("标题报条数", String(digest.title).includes("2 条通知类公告"), String(digest.title))
+  check("单门课不写「N 门课」前缀", !String(digest.title).includes("门课"), String(digest.title))
+  // 🔴 必须是 false：缺了它 `view.ts` 会把按钮画成「确认」，变成"点一下、什么都没发生"。
+  check("landing = false（按钮是「知道了」）", digest.landing === false)
+  check("条目数与输入一致", (digest.digest ?? []).length === 2)
+  check(
+    "details 第一行说清「确认不写字段」",
+    (digest.details ?? [])[0]?.includes("确认只留一行回执") === true,
+    JSON.stringify(digest.details),
+  )
+  check("条目带原文链接", (digest.digest ?? [])[0]?.sourceUrl?.includes("/announcements/") === true)
+  check("没有超出时不带 overflow 字段", digest.digestOverflow === undefined)
+  check("置信度 high（low 会禁掉按钮）", digest.confidence === "high")
+  check("空输入 → 0 条", (buildAnnouncementDigestPayload([]).digest ?? []).length === 0)
+
+  // ---- 跨课程：标题带课程数（一眼看出"不是我这门课话多，是全都在发"） ----
+  const crossCourse = buildAnnouncementDigestPayload([
+    make("20", "A", "Welcome."),
+    { ...make("21", "B", "Welcome."), courseName: "CHEM 1A" },
+  ])
+  check("多门课 → 标题带课程数", String(crossCourse.title).includes("2 门课的"), String(crossCourse.title))
+
+  // ---- 排序：新的在前、没有时间的垫底（不依赖 Canvas 返回顺序） ----
+  const ordered = buildAnnouncementDigestPayload([
+    make("30", "Old notice", "Welcome.", "2026-09-01T00:00:00Z"),
+    make("31", "New notice", "Welcome.", "2026-09-15T00:00:00Z"),
+    make("32", "No date notice", "Welcome.", null),
+  ])
+  const titles = (ordered.digest ?? []).map((d) => d.title)
+  check("按发布时间倒序（新的在前）", titles[0] === "New notice" && titles[1] === "Old notice", `[${titles}]`)
+  check("没有时间的排最后", titles[2] === "No date notice", `[${titles}]`)
+
+  // ---- 上限：列出被截断、但**计数不撒谎**（标题报总数、overflow 报缺口） ----
+  const many = Array.from({ length: MAX_DIGEST_ITEMS + 7 }, (_, i) =>
+    make(String(100 + i), `Notice ${i}`, "Welcome."),
+  )
+  const capped = buildAnnouncementDigestPayload(many)
+  check(`超上限只列 ${MAX_DIGEST_ITEMS} 条`, (capped.digest ?? []).length === MAX_DIGEST_ITEMS)
+  check("缺口的条数如实计数", capped.digestOverflow === 7, String(capped.digestOverflow))
+  check(
+    "标题报的是总数而不是列出数",
+    String(capped.title).includes(`${MAX_DIGEST_ITEMS + 7} 条`),
+    String(capped.title),
+  )
+
+  // ---- postedAtLabel：两条通道说的是**同一句话**（抽自同一个函数） ----
+  check("有日期", postedAtLabel("2026-09-10T17:00:00Z") === "发布于 2026-09-10")
+  check("无日期", postedAtLabel(null) === "发布时间未知")
 }
 
 console.log("")

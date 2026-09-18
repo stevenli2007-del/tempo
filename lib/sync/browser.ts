@@ -78,13 +78,20 @@ export async function callSyncNow(trigger: 'manual' | 'app_open'): Promise<SyncC
  * 而"老师发了公告、Tempo 没抓到、界面上一片正常"正是 ADR-016 R3 点名的那种静默失败。
  *
  * `announcements` 缺失按"没跑"处理（弱校验过的响应可能来自老版本服务端 / 被代理改写）。
+ *
+ * ⚠️ C 口径（2026-09-18）之后 `created` 是**消息**条数、不是公告条数：
+ * 40 条通知类公告只产出 1 条摘要消息。只说 `created` 会让用户以为"只收到 1 条公告"，
+ * 所以有摘要时把折进去的条数一并说出来。
  */
 function announcementLine(summary: SyncSummary): string {
   const a = summary.announcements
   if (!a) return ''
   if (a.error) return `；公告同步失败（${a.error}）`
-  if (a.created > 0) return `；${a.created} 条新公告进了消息栏`
-  return ''
+  if (a.created === 0) return ''
+  if (a.digested > 0) {
+    return `；${a.created} 条进消息栏（${a.digested} 条通知类公告已并入摘要）`
+  }
+  return `；${a.created} 条新公告进了消息栏`
 }
 
 /** 把一次成功的同步结果压成一行人话。 */

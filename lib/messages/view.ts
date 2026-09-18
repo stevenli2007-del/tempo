@@ -45,6 +45,18 @@ const TIME_FORMATTER = new Intl.DateTimeFormat('zh-CN', {
   timeZone: SCHOOL_TIME_ZONE,
 })
 
+/**
+ * 合并摘要里的一条（视图模型）。与 `MessageDigestItem` 的区别：
+ * 每个字段都**已经过守卫**（链接过了 http(s) 白名单、空课程名归 null），
+ * 渲染层拿到就能直接画，不必再判一遍。
+ */
+export type DigestItemView = {
+  title: string
+  courseLabel: string | null
+  postedAtLabel: string | null
+  sourceUrl: string | null
+}
+
 export type MessageView = {
   id: string
   type: MessageType
@@ -74,6 +86,13 @@ export type MessageView = {
    * 只有这一条路能看。**已强制 http(s)**，见 `readSourceUrl`。
    */
   sourceUrl: string | null
+  /**
+   * 合并摘要的条目（P0-3-25 C 口径）。**空数组 = 这条不是摘要**，
+   * 渲染层据此决定要不要画那个可展开的列表。
+   */
+  digestItems: DigestItemView[]
+  /** 摘要里因超上限未列出的条数（0 = 全列出来了）。 */
+  digestOverflow: number
   /** 「确认」按钮的文案。无落点的公告是「知道了」。 */
   confirmLabel: string
 }
@@ -93,23 +112,77 @@ function readDetails(payload: MessagePayload): string[] {
 }
 
 /**
- * 读原文链接。🔴 **只放行 http(s)**。
+ * 读一个 URL 字段。🔴 **只放行 http(s)**。
  *
  * `payload` 是 `jsonb`，写入方现在只有公告同步一处，但类型上没有约束。
  * 哪天某个产出方（或一次手工改库）塞个 `javascript:…` 进来，渲染层的 `<a href>`
  * 就成了"点一下就执行"的口子 —— 而它长得和普通链接一模一样，评审时看不出来。
  * 在**唯一**的读取点挡掉，比在每个渲染点各写一遍白名单可靠。
+ *
+ * ⚠️ 入参刻意是 `unknown` 而不是 `string`：摘要（`digest`）里也有链接，
+ * 那条路的形状更"野"（数组里的对象），必须是同一个函数挡，不能各写一遍。
  */
-function readSourceUrl(payload: MessagePayload): string | null {
-  const url = payload.sourceUrl
-  if (typeof url !== 'string' || url.trim() === '') return null
+function readSafeUrl(value: unknown): string | null {
+  if (typeof value !== 'string' || value.trim() === '') return null
   try {
-    const parsed = new URL(url)
+    const parsed = new URL(value)
     if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') return null
     return parsed.toString()
   } catch {
     return null
   }
+}
+
+/**
+ * 摘要里最多渲染多少条。
+ *
+ * 写入侧已有 `MAX_DIGEST_ITEMS` 截断，这里是**读取侧的独立防线** ——
+ * payload 是 jsonb，一次手工改库就能塞进几千项，而渲染是在浏览器里做的。
+ * 两道限流不重复：写入侧限的是"我们产出多大"，读取侧限的是"我们肯渲染多少"。
+ */
+const MAX_DIGEST_RENDERED = 100
+
+/**
+ * 读合并摘要（P0-3-25 C 口径）。
+ *
+ * 逐项守卫，**坏的那一项丢掉、其余照常渲染** —— 与整份摘要一起吞掉相比，
+ * 少显示一条的代价远小于"老师发的通知一条都看不到"。
+ * 唯一例外是**没有标题的项**：摘要行没标题就只是一行空白，留着只会让用户困惑。
+ */
+function readDigest(payload: MessagePayload): DigestItemView[] {
+  const raw = payload.digest
+  if (!Array.isArray(raw)) return []
+
+  const items: DigestItemView[] = []
+  for (const entry of raw) {
+    if (items.length >= MAX_DIGEST_RENDERED) break
+    if (typeof entry !== 'object' || entry === null) continue
+
+    const record = entry as Record<string, unknown>
+    const title = typeof record.title === 'string' ? record.title.trim() : ''
+    if (title === '') continue
+
+    const courseName = typeof record.courseName === 'string' ? record.courseName.trim() : ''
+    const postedAtLabel =
+      typeof record.postedAtLabel === 'string' && record.postedAtLabel.trim() !== ''
+        ? record.postedAtLabel
+        : null
+
+    items.push({
+      title,
+      courseLabel: courseName === '' ? null : courseName,
+      postedAtLabel,
+      sourceUrl: readSafeUrl(record.sourceUrl),
+    })
+  }
+  return items
+}
+
+/** 摘要里未列出的条数。负数 / 非数一律当 0（绝不显示"还有 -3 条"）。 */
+function readDigestOverflow(payload: MessagePayload): number {
+  const value = payload.digestOverflow
+  if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) return 0
+  return Math.floor(value)
 }
 
 export function toMessageView(message: Message): MessageView {
@@ -144,7 +217,9 @@ export function toMessageView(message: Message): MessageView {
     canAccept: isPending && confidence === 'high' && applierReady,
     blockReason,
     timeLabel: TIME_FORMATTER.format(new Date(message.createdAt)),
-    sourceUrl: readSourceUrl(message.payload),
+    sourceUrl: readSafeUrl(message.payload.sourceUrl),
+    digestItems: readDigest(message.payload),
+    digestOverflow: readDigestOverflow(message.payload),
     // 只有**明确标了**「无落点」的公告才改文案。`landing` 缺失（老数据 / 其他类型）
     // 一律按「确认」—— 不能因为字段没写就让按钮含糊其辞。
     confirmLabel:

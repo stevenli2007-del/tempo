@@ -179,6 +179,75 @@ console.log("公告视图（P0-3-25）")
   )
 }
 
+console.log("合并摘要视图（P0-3-25 C 口径）")
+{
+  // `makeMessage` 的载荷参数是 `Partial<MessagePayload>`，故意非法的值（`null` / 字符串）
+  // 过不了类型 —— 而 jsonb 里这些**真的可能出现**，所以这里用一条不过类型的构造器。
+  function makeRaw(payload: Record<string, unknown>): Message {
+    return {
+      id: "raw-id",
+      type: "announcement",
+      status: "pending",
+      createdAt: "2026-09-17T18:00:00Z",
+      payload: { title: "6 门课的 40 条通知类公告", ...payload } as MessagePayload,
+    }
+  }
+
+  // 12. 摘要项逐项守卫：坏的丢掉、好的照常渲染（少显示一条 << 整份看不到）。
+  const v = toMessageView(
+    makeRaw({
+      landing: false,
+      digest: [
+        {
+          title: "Office hours moved",
+          courseName: "MATH 53",
+          postedAtLabel: "发布于 2026-09-10",
+          sourceUrl: "https://bcourses.berkeley.edu/courses/1/announcements/1",
+        },
+        // 链接是 javascript: → 必须被挡（渲染层要画 <a href>）
+        { title: "Class cancelled", courseName: "CHEM 1A", sourceUrl: "javascript:alert(1)" },
+        // 没有标题 → 摘要行会是一行空白，丢掉
+        { title: "   ", courseName: "PHYSICS 7A" },
+        // 压根不是对象
+        "not an object",
+        { courseName: "No title at all" },
+      ],
+      digestOverflow: 7,
+    }),
+  )
+  check("只留合法项（丢空标题 / 非对象）", v.digestItems.length === 2, `len=${v.digestItems.length}`)
+  check("课程名透传", v.digestItems[0].courseLabel === "MATH 53", String(v.digestItems[0].courseLabel))
+  check(
+    "摘要项链接放行 https",
+    v.digestItems[0].sourceUrl?.endsWith("/announcements/1") === true,
+    String(v.digestItems[0].sourceUrl),
+  )
+  // 🔴 摘要里也有链接，必须走**同一个**白名单函数，不能因为"这是内部数据"就免检。
+  check("摘要项拒绝 javascript: 链接", v.digestItems[1].sourceUrl === null, String(v.digestItems[1].sourceUrl))
+  check("发布时间透传", v.digestItems[0].postedAtLabel === "发布于 2026-09-10")
+  check("缺课程名 → null", toMessageView(makeRaw({ digest: [{ title: "x" }] })).digestItems[0].courseLabel === null)
+  check("overflow 透传", v.digestOverflow === 7, String(v.digestOverflow))
+  check("摘要按钮是「知道了」", v.confirmLabel === "知道了", v.confirmLabel)
+  check("摘要仍可确认（走空写入回执）", v.canAccept === true)
+
+  // 13. 非摘要消息不受影响（`digest` 缺失是绝大多数消息的常态）。
+  const plainMessage = toMessageView(makeMessage("material", "pending"))
+  check("非摘要 → digestItems 为空", plainMessage.digestItems.length === 0)
+  check("非摘要 → digestOverflow 为 0", plainMessage.digestOverflow === 0)
+  check("digest 非数组 → 空列表", toMessageView(makeRaw({ digest: "nope" })).digestItems.length === 0)
+
+  // 14. overflow 守卫：负数 / NaN / 字符串 / Infinity 一律归 0。
+  //     显示"还有 -3 条"或"还有 NaN 条"比不显示更糟。
+  for (const bad of [-1, 0, Number.NaN, "3", null, undefined, Number.POSITIVE_INFINITY]) {
+    const b = toMessageView(makeRaw({ digestOverflow: bad }))
+    check(`非法 overflow 归 0：${String(bad)}`, b.digestOverflow === 0, String(b.digestOverflow))
+  }
+
+  // 15. 渲染侧独立上限：payload 是 jsonb，一次手工改库就能塞进几千项。
+  const huge = toMessageView(makeRaw({ digest: Array.from({ length: 500 }, (_, i) => ({ title: `N${i}` })) }))
+  check("渲染侧上限 100 条", huge.digestItems.length === 100, String(huge.digestItems.length))
+}
+
 console.log("planDecision（API 写入判定）")
 {
   // 7. 已经处理过 → 拒绝（幂等放过会让 applier 有副作用时执行两次）。

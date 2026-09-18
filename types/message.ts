@@ -28,6 +28,26 @@ export type MessageType = 'syllabus_drift' | 'practice_test' | 'routine' | 'mate
 export type MessageStatus = 'pending' | 'accepted' | 'dismissed'
 
 /**
+ * 合并摘要里的一条公告（P0-3-25 C 口径，2026-09-18 Steven 拍板）。
+ *
+ * ### 为什么要有它
+ * 一轮同步实测 48 条公告、其中 40 条「通知类」（office hours 改了、本周课取消…）。
+ * 若每条都独立进消息栏，用户要点 40 次「知道了」—— 与 ADR-016「用户操作量趋零」直接冲突。
+ * 于是这 40 条**合并成一条**消息：**「不漏」保住**（用户照样知道老师发了什么，
+ * 每条都带原文入口），**操作量从 48 降到 9**（有落点的 8 条各自可写，加这 1 条摘要）。
+ *
+ * 🔴 合并**只对无落点的公告**生效。有落点的那条一旦被折进摘要，
+ * 用户就没法「确认」写入考试 / 成绩构成了 —— 那是能力被藏起来，代价更大。
+ */
+export type MessageDigestItem = {
+  title: string
+  courseName?: string
+  postedAtLabel?: string
+  /** 原文链接。渲染前过 http(s) 白名单（见 `lib/messages/view.ts` 的 `readSafeUrl`）。 */
+  sourceUrl?: string | null
+}
+
+/**
  * 提案载荷的**最小契约**（P0-3-18 定义，后续卡按此产出）。
  *
  * 本卡是「全站系统提案的唯一出口」，所以载荷的公共形状定在这里，
@@ -58,6 +78,15 @@ export type MessagePayload = {
   announcementId?: string
   /** 有没有结构化落点。 */
   landing?: boolean
+  /**
+   * 「通知类公告」的合并摘要（P0-3-25 C 口径）。
+   *
+   * 只有**无落点**的公告走这条路：它们合并成一条消息，逐条列在这里。
+   * 读取侧必须当"可能不存在 / 可能是任何形状"处理（jsonb 无 schema 约束）。
+   */
+  digest?: MessageDigestItem[]
+  /** 条数超过上限（`MAX_DIGEST_ITEMS`）时，没被列进 `digest` 的条数。 */
+  digestOverflow?: number
   [key: string]: unknown
 }
 

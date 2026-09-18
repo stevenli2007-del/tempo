@@ -13,6 +13,8 @@ import type { ApplyContext, ApplyOutcome, MessageApplier } from '@/lib/messages/
  * - **无落点**（如「本周课取消」「office hours 改到周三」）：
  *   刻意空写入，只留一行回执 —— **一个字段都不写**。
  *   Steven 2026-09-17 拍板去掉 office hours 结构化落点，避免造一个没人维护的 OH 模型。
+ *   ⚠️ 这类公告在**同步侧**已被合并成一条摘要（C 口径，2026-09-18 拍板，见
+ *   `lib/sync/announcements.ts`），所以这里多半一次面对几十条 —— 回执会报出条数。
  *
  * ### 🔴 解析放在「确认」而不是「同步」
  * 同步一轮要给几十条公告判落点，每条打一次模型既慢又贵，而且**同步不该依赖模型可用性**
@@ -66,8 +68,27 @@ export const announcementApplier: MessageApplier = async (
   //
   // `landing !== true` 而不是 `=== false`：字段缺失（老数据、别的产出方）
   // 一律当"没有落点"处理更安全 —— 不确定能不能写的时候，**不写**。
+  //
+  // ⚠️ C 口径（2026-09-18）之后这类消息多半是**合并摘要**（一轮几十条通知类公告
+  // 合成一条）。回执必须说出条数，否则用户点完"知道了"只看到一句
+  // "没有要写入的字段"，会以为自己刚才确认的是一条无关紧要的东西。
   if (payload.landing !== true) {
-    return { ok: true, summary: '知道了（这条是通知类公告，没有要写入的字段）' }
+    const digestCount = Array.isArray(payload.digest) ? payload.digest.length : 0
+    if (digestCount === 0) {
+      return { ok: true, summary: '知道了（这条是通知类公告，没有要写入的字段）' }
+    }
+    // `digest` 是**截断后**列出的那批（上限 `MAX_DIGEST_ITEMS`），超出的在 `digestOverflow`。
+    // 报总数而不是数组长度 —— 说少了对不上账（列表也是同一个数组算的，会自己打架）。
+    const overflow =
+      typeof payload.digestOverflow === 'number' && payload.digestOverflow > 0
+        ? Math.floor(payload.digestOverflow)
+        : 0
+    const overflowNote =
+      overflow > 0 ? `（摘要里列出前 ${digestCount} 条，另 ${overflow} 条请到 Canvas 查看）` : ''
+    return {
+      ok: true,
+      summary: `知道了（${digestCount + overflow} 条通知类公告${overflowNote}，没有要写入的字段）`,
+    }
   }
 
   const courseId = typeof payload.courseId === 'string' ? payload.courseId : ''

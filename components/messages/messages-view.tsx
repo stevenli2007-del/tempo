@@ -174,6 +174,44 @@ function ProposalBubble({
             {line}
           </p>
         ))}
+        {/*
+          合并摘要（P0-3-25 C 口径）：一轮几十条「通知类公告」在这条消息里逐条列出。
+          🔴 用 `<details>` 而不是"显示前 N 条 + 更多"：用户要的是**确认没漏事**，
+          所以默认收起（不占版面）、但一次点击就能看到全部 —— 而不是逼他再点第二层。
+          （用户原话场景：老师发了 40 条通知，不该在消息栏变成 40 次「知道了」。）
+        */}
+        {view.digestItems.length > 0 && (
+          <details className="mt-2 rounded-card border border-line bg-surface2/40">
+            <summary className="cursor-pointer px-3 py-2 text-xs text-ink-muted hover:text-ink">
+              展开全部 {view.digestItems.length} 条原文入口
+              {view.digestOverflow > 0 && `（另有 ${view.digestOverflow} 条未列出）`}
+            </summary>
+            <ul className="max-h-72 space-y-1.5 overflow-y-auto overscroll-contain border-t border-line px-3 py-2">
+              {view.digestItems.map((item, i) => (
+                <li key={i} className="flex items-baseline gap-2 text-xs">
+                  {item.courseLabel && (
+                    <span className="shrink-0 text-ink-faint">{item.courseLabel}</span>
+                  )}
+                  <span className="min-w-0 flex-1 text-ink-muted">{item.title}</span>
+                  {item.postedAtLabel && (
+                    <span className="shrink-0 text-ink-faint">{item.postedAtLabel}</span>
+                  )}
+                  {item.sourceUrl && (
+                    <a
+                      href={item.sourceUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="shrink-0 text-ink-faint underline decoration-dotted underline-offset-2 hover:text-ink"
+                    >
+                      原文 ↗
+                    </a>
+                  )}
+                </li>
+              ))}
+            </ul>
+          </details>
+        )}
+
         <p className="mt-2 text-xs text-ink-faint">
           {view.timeLabel}
           {view.sourceUrl && (

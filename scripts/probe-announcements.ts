@@ -11,10 +11,14 @@
  *
  * `tsc` / `eslint` / `next build` 对以上三种**全绿**。只有真打一次才知道。
  *
- * ### 它验证什么（三个都打印出来对照）
+ * ### 它验证什么（都打印出来对照，**全部复用线上同一份函数**）
  * 1. **陷阱复现**：只传 `start_date` 拿到几条；
  * 2. **本卡实现**：`announcementWindow()` + `announcementsPath()` 两端显式传，拿到几条；
- * 3. **真映射器**：用线上同一份 `toCanvasAnnouncements()` 映射，看还剩几条、归属对不对。
+ * 3. **真映射器**：用线上同一份 `toCanvasAnnouncements()` 映射，看还剩几条、归属对不对；
+ * 4. **C 口径的操作数**（2026-09-18 拍板）：用线上同一份 `partitionByLanding()` 分流，
+ *    数出"消息栏会新增几条" —— 这是 C 路线**唯一的实测依据**，也是验收最该看的数字；
+ * 5. **摘要长什么样**：用线上同一份 `buildAnnouncementDigestPayload()` 生成并打印，
+ *    探针输出 = 消息栏里会画出来的东西（标题 / 预览行 / 可展开条数 / 按钮文案）。
  *
  * ### 副作用
  * **零**。只发 GET，不写库、不写 `llm_runs`。两次 Canvas 请求（相对 20/轮的预算是零头）。
@@ -34,9 +38,14 @@ import {
 } from '@/lib/canvas/announcements'
 import { loadDecryptedCredential } from '@/lib/canvas/credentials'
 import { canvasGet } from '@/lib/canvas/client'
-import { hasStructuredLanding } from '@/lib/course-update/landing'
 import { validateExamInput, validateGradeComponentInput } from '@/lib/course-update/normalize'
 import { parseCourseUpdate } from '@/lib/course-update/parse'
+import {
+  MAX_DIGEST_ITEMS,
+  buildAnnouncementDigestPayload,
+  partitionByLanding,
+  type FreshAnnouncement,
+} from '@/lib/sync/announcements'
 
 const here = path.dirname(fileURLToPath(import.meta.url))
 
@@ -181,30 +190,64 @@ async function main(): Promise<void> {
     }
   }
 
-  // ---------- 5) 落点分布（产品口径的诊断，不是功能验证） ----------
+  // ---------- 5) 落点分布 + C 口径的操作数 ----------
   //
-  // 同步一轮会把**窗口内每一条**公告投进消息栏。这个数字直接决定用户要处理多少条 ——
-  // 而 ADR-016 说"用户操作量趋零才是成功"。所以把分布量出来，别靠感觉。
-  const landing = realItems.filter((item) => hasStructuredLanding(item.bodyText))
-  const noise = realItems.filter((item) => !hasStructuredLanding(item.bodyText))
+  // 🔴 这里**必须**用线上同一份 `partitionByLanding()`，不能在探针里自己重写一遍
+  // `hasStructuredLanding(...) ? a : b`：那样数出来的就不是"同步真实会做的事"，
+  // 而是"我以为同步会做的事"（P0-3-15 的教训：两处各写一遍、都绿、肉眼才看得出分叉）。
+  const targetByExternalId = new Map(targets.map((t) => [t.canvasCourseId, t]))
+  const freshForInbox: FreshAnnouncement[] = realItems.map((item) => {
+    const target = targetByExternalId.get(item.courseExternalId)
+    return {
+      announcement: item,
+      courseId: target?.id ?? '',
+      courseName: target?.courseName ?? `未关联(${item.courseExternalId})`,
+    }
+  })
 
-  console.log('\n落点分布（决定用户要点几次）：')
-  console.log(`  有落点（按钮是「确认」）：${landing.length} 条`)
-  console.log(`  无落点（按钮是「知道了」）：${noise.length} 条`)
+  const { withLanding: landing, plain: noise } = partitionByLanding(freshForInbox)
+
+  console.log('\n落点分布 / 消息栏要新增几条（C 口径：有落点逐条 + 无落点合并一条）：')
+  console.log(`  公告总数：${realItems.length} 条`)
+  console.log(`  ① 有落点 → 逐条进消息栏（按钮「确认」）：${landing.length} 条`)
+  console.log(`  ② 无落点 → 合并成 1 条摘要（按钮「知道了」）：${noise.length} 条`)
+  const inboxCount = landing.length + (noise.length > 0 ? 1 : 0)
+  console.log(`  ⇒ 消息栏实际新增 **${inboxCount} 条**，用户最少点 ${inboxCount} 次`)
+  console.log(
+    `     （对比：每条各进一次的旧口径是 ${realItems.length} 次 —— ADR-016「操作量趋零」的差距就在这）`,
+  )
+
   if (landing.length > 0) {
-    console.log('  有落点的这些：')
+    console.log('\n  ① 有落点的这些（各自一条消息）：')
     for (const item of landing) {
-      console.log(`    · [${item.title}] ${item.bodyText.slice(0, 60).replace(/\n/g, ' ')}…`)
+      console.log(
+        `    · [${item.courseName}] ${item.announcement.title} — ${item.announcement.bodyText
+          .slice(0, 50)
+          .replace(/\n/g, ' ')}…`,
+      )
     }
   }
+
   if (noise.length > 0) {
-    console.log('  无落点的样本（这些确认后什么都不写）：')
-    for (const item of noise.slice(0, 5)) {
-      console.log(`    · [${item.title}]`)
+    // 用**真实构造器**生成摘要载荷 —— 打印出来的就是消息栏里会画出来的东西。
+    const digest = buildAnnouncementDigestPayload(noise)
+    const items = digest.digest ?? []
+    console.log('\n  ② 那条摘要消息会长这样（真构造器输出）：')
+    console.log(`     标题：${String(digest.title)}`)
+    for (const line of digest.details ?? []) console.log(`     · ${line}`)
+    console.log(
+      `     可展开列表：${items.length} 条` +
+        (digest.digestOverflow ? `（另有 ${digest.digestOverflow} 条超出上限 ${MAX_DIGEST_ITEMS}）` : ''),
+    )
+    console.log(`     landing=${String(digest.landing)}（false → 按钮是「知道了」，不写任何字段）`)
+    for (const item of items.slice(0, 5)) {
+      console.log(
+        `       - [${item.courseName}] ${item.title} · ${item.postedAtLabel}` +
+          (item.sourceUrl ? ' · 有原文链接' : ' · ⚠️ 无原文链接'),
+      )
     }
+    if (items.length > 5) console.log(`       … 其余 ${items.length - 5} 条略`)
   }
-  console.log('\n⚠️ 这个数字如果很大，说明"每条公告都进消息栏"会让用户被淹没 ——')
-  console.log('   那是产品口径的问题（要不要只在有落点时进站），不是本脚本能决定的。')
 
   // ---------- 6) 有落点的公告**真的能写出东西吗**（验收 ② 的真检验） ----------
   //
@@ -218,13 +261,13 @@ async function main(): Promise<void> {
   for (const item of landing) {
     const parsed = await parseCourseUpdate({
       userId,
-      text: item.bodyText,
+      text: item.announcement.bodyText,
       purpose: 'announcement_probe',
       // 探针不写 llm_runs（脚本没有请求上下文，也不该插审计噪音）。
       record: false,
     })
     if (!parsed.ok) {
-      console.log(`  ⚠️ [${item.title}] 解析失败：${parsed.message}`)
+      console.log(`  ⚠️ [${item.announcement.title}] 解析失败：${parsed.message}`)
       continue
     }
 
@@ -235,7 +278,7 @@ async function main(): Promise<void> {
     const total = exams.length + components.length
     if (total > 0) writable += 1
     console.log(
-      `  ${total > 0 ? '✅' : '⚪'} [${item.title}] 考试 ${exams.length} / 成绩构成 ${components.length}` +
+      `  ${total > 0 ? '✅' : '⚪'} [${item.announcement.title}] 考试 ${exams.length} / 成绩构成 ${components.length}` +
         (parsed.data.tasks?.length ? ` / 作业类 ${parsed.data.tasks.length}（不写）` : ''),
     )
   }

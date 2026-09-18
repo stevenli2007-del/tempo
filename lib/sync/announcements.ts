@@ -33,6 +33,26 @@ import type { getCurrentUser } from '@/lib/api/response'
  * ### 🔴 没有落点 ≠ 不写字段就算了
  * 无落点的公告照样进消息栏（否则用户根本不知道老师发了通知），
  * 只是确认时走「知道了」回执（见 `lib/messages/apply.ts` 的 announcement applier）。
+ *
+ * ### 🔴 两条通道（C 口径，2026-09-18 Steven 拍板）
+ * 第一版是"每条公告各建一条消息"。真账号实测一轮窗口内 **48 条**，其中 **40 条无落点**
+ * —— 用户要点 40 次「知道了」才能把消息栏清干净，与 ADR-016「用户操作量趋零」直接冲突。
+ *
+ * 于是按落点分两条通道：
+ * | 通道 | 谁走 | 消息条数 | 按钮 |
+ * |---|---|---|---|
+ * | 逐条 | **有落点**（能写出考试 / 成绩构成） | 每条 1 条 | 「确认」（真的会写） |
+ * | 摘要 | **无落点**（通知类，不写任何字段） | 全部合并成 **1 条** | 「知道了」 |
+ *
+ * 实测 48 条 → **9 条消息**（8 逐条 + 1 摘要），而用户**一条都没漏**：
+ * 摘要里逐条列着标题 + 课程名 + 原文链接。这是"操作量"和"不漏"之间刻意选的平衡点。
+ *
+ * ⚠️ **有落点的公告绝不折进摘要**：折进去用户就没法点「确认」了 ——
+ * 那是把能力藏起来，比多点一次更糟（见 `lib/course-update/landing.ts` 的宽进原则）。
+ *
+ * ⚠️ 摘要**按轮**：一轮同步里新到的无落点公告合成一条。所以持续收到通知时，
+ * 消息栏会积累多条摘要而不是无限增长的一条 —— 每一条代表"那一轮老师发了什么"，
+ * 时间线语义（会话式版面要的正是这个）。
  */
 
 type SupabaseClient = Awaited<ReturnType<typeof getCurrentUser>>['supabase']
@@ -111,6 +131,105 @@ export function buildAnnouncementPayload(input: {
   }
 }
 
+/** 本轮新到的一条公告 + 它属于哪门课（进入"两条通道"之前的中间形状）。 */
+export type FreshAnnouncement = {
+  announcement: CanvasAnnouncement
+  courseId: string
+  courseName: string
+}
+
+/**
+ * 🔴 **分流是 C 口径的唯一判定点**（同步与在线探针共用）。
+ *
+ * 抽出来不只是为了少写一行 filter —— `scripts/probe-announcements.ts` 要数出
+ * "用户到底要点几次"，而它必须数的是**线上真实会做的分流**。
+ * 探针里自己重写一遍 `hasStructuredLanding(...) ? a : b`，就等于 P0-3-15 那种
+ * 「两处各写一遍、都绿、肉眼才看得出」的分叉预备队。
+ */
+export function partitionByLanding(fresh: FreshAnnouncement[]): {
+  /** 有落点：逐条进消息栏，按钮是「确认」。 */
+  withLanding: FreshAnnouncement[]
+  /** 无落点：合并成一条摘要，按钮是「知道了」。 */
+  plain: FreshAnnouncement[]
+} {
+  const withLanding: FreshAnnouncement[] = []
+  const plain: FreshAnnouncement[] = []
+  for (const item of fresh) {
+    if (hasStructuredLanding(item.announcement.bodyText)) withLanding.push(item)
+    else plain.push(item)
+  }
+  return { withLanding, plain }
+}
+
+/**
+ * 摘要里最多列多少条。
+ *
+ * 学期初或长时间没同步后，一轮可能涌进上百条。payload 是 jsonb，
+ * 不设上限就是"某天消息栏里多了一张几十 KB 的卡片，浏览器渲染它要几秒"。
+ * 超出的部分**明确计数**（`digestOverflow`），不假装全部可见。
+ */
+export const MAX_DIGEST_ITEMS = 50
+
+/** 摘要预览行（`details`）显示几条标题 —— 气泡收起时用户先看到这几条。 */
+const DIGEST_PREVIEW_LINES = 3
+
+/** `posted_at` → 显示文案。抽出来是为了逐条通道和摘要通道**说的是同一句话**。 */
+export function postedAtLabel(postedAt: string | null): string {
+  return postedAt ? `发布于 ${postedAt.slice(0, 10)}` : '发布时间未知'
+}
+
+/**
+ * 组装「通知类公告」的合并摘要载荷（C 口径）。
+ *
+ * ### 标题为什么带课程数
+ * 「40 条通知类公告」和「6 门课的 40 条通知类公告」对用户是两种信息 ——
+ * 后者一眼能看出"不是我那门课的老师话多，是全都在发"。单门课时就不写前缀（读起来更顺）。
+ *
+ * ### 排序按发布时间倒序
+ * 摘要列表里最新的在最上面（用户关心的是"最近发生了什么"）。
+ * 🔴 不能依赖 Canvas 的返回顺序 —— 那是接口实现细节，哪天变了就是静默错排。
+ * `postedAt` 是 ISO 字符串，字典序即时间序；缺失的（`''`）在倒序里自然落到最后。
+ */
+export function buildAnnouncementDigestPayload(items: FreshAnnouncement[]): MessagePayload {
+  const ordered = [...items].sort((a, b) =>
+    (b.announcement.postedAt ?? '').localeCompare(a.announcement.postedAt ?? ''),
+  )
+
+  const shown = ordered.slice(0, MAX_DIGEST_ITEMS)
+  const overflow = ordered.length - shown.length
+  const courseCount = new Set(ordered.map((item) => item.courseName)).size
+
+  const payload: MessagePayload = {
+    title:
+      courseCount > 1
+        ? `${courseCount} 门课的 ${ordered.length} 条通知类公告`
+        : `${ordered.length} 条通知类公告`,
+    details: [
+      // 第一行必须先说清"确认之后什么都不会变" —— 否则用户点「知道了」时是心里没底的。
+      '这些公告里没有可写入的考试 / 成绩构成，确认只留一行回执',
+      // 预览几行标题：气泡**收起时**用户就能知道"老师最近说了什么"，
+      // 不必为了看个大概就展开整个列表。完整列表（带时间与原文链接）在 `digest` 里。
+      ...shown
+        .slice(0, DIGEST_PREVIEW_LINES)
+        .map((item) => `[${item.courseName}] ${item.announcement.title}`),
+    ],
+    digest: shown.map((item) => ({
+      title: item.announcement.title,
+      courseName: item.courseName,
+      postedAtLabel: postedAtLabel(item.announcement.postedAt),
+      sourceUrl: item.announcement.htmlUrl,
+    })),
+    // 🔴 无落点 → applier 走「知道了」空写入分支。这个字段**必须**有：
+    // 缺了它 `view.ts` 会把按钮画成「确认」，那就成了"点一下、什么都没发生"的静默失败。
+    landing: false,
+    // Canvas 是权威源、正文是老师亲手写的 —— 不标低置信度（低置信度会禁掉按钮）。
+    confidence: 'high',
+  }
+
+  if (overflow > 0) payload.digestOverflow = overflow
+  return payload
+}
+
 /**
  * 拉一轮公告并投进消息栏。
  *
@@ -135,6 +254,7 @@ export async function syncCourseAnnouncements(input: {
     status: 'success',
     scanned: 0,
     created: 0,
+    digested: 0,
     seen: 0,
     incomplete: false,
     error: null,
@@ -268,9 +388,12 @@ export async function syncCourseAnnouncements(input: {
     insertedRows.map((row) => [`${row.course_id}|${row.canvas_announcement_id}`, row.id]),
   )
 
-  // ---------- 6) 每条新公告 → 一条消息（进消息栏，复用 3-18 的接缝） ----------
+  // ---------- 6) 分流（C 口径的唯一判定点，见 `partitionByLanding`） ----------
+  const { withLanding, plain } = partitionByLanding(fresh)
+
+  // ---------- 7) 有落点 → 逐条进消息栏（按钮「确认」，applier 会真的写字段） ----------
   let created = 0
-  for (const item of fresh) {
+  for (const item of withLanding) {
     const rowId = rowIdByKey.get(`${item.courseId}|${item.announcement.externalId}`)
     if (!rowId) {
       console.warn(
@@ -285,43 +408,105 @@ export async function syncCourseAnnouncements(input: {
       courseId: item.courseId,
       courseName: item.courseName,
       announcementRowId: rowId,
-      postedAtLabel: item.announcement.postedAt
-        ? `发布于 ${item.announcement.postedAt.slice(0, 10)}`
-        : '发布时间未知',
+      postedAtLabel: postedAtLabel(item.announcement.postedAt),
     })
 
-    const { data: messageRow, error: messageError } = await supabase
-      .from('messages')
-      .insert({ user_id: userId, type: 'announcement', payload, status: 'pending' })
-      .select('id')
-      .single()
+    const messageId = await insertAnnouncementMessage(supabase, userId, payload)
+    if (!messageId) continue
 
-    if (messageError) {
-      // 账已经落了，但消息没建成 —— 这一条用户**看不到**，必须留日志。
-      // 不回滚账目：账在，下一轮会当成"已见过"，于是这条公告再也不进消息栏。
-      // 这是刻意的取舍：宁可少投一次（因为账是唯一锚点），也不重复投递。
-      console.error('[sync] 公告消息创建失败（账已落，本条不再重投）:', messageError.message)
-      continue
-    }
-
-    const messageId = (messageRow as { id: string }).id
-    const { error: linkError } = await supabase
-      .from('course_announcements')
-      .update({ message_id: messageId })
-      .eq('id', rowId)
-    if (linkError) {
-      console.error('[sync] 回填公告 message_id 失败（不影响消息本身）:', linkError.message)
-    }
-
+    await linkMessageToAnnouncements(supabase, [rowId], messageId)
     created += 1
+  }
+
+  // ---------- 8) 无落点 → 合并成**一条**摘要（C 口径的核心） ----------
+  //
+  // 🔴 这里刻意只建一条消息，不是循环。40 条通知类公告各建一条 = 用户要点 40 次
+  // 「知道了」，与 ADR-016「用户操作量趋零」直接冲突（实测 48 条 / 40 条无落点）。
+  // 合并**不丢信息**：摘要里逐条列着标题 + 课程名 + 原文链接。
+  if (plain.length > 0) {
+    const rowIds: string[] = []
+    const missing: string[] = []
+    for (const item of plain) {
+      const rowId = rowIdByKey.get(`${item.courseId}|${item.announcement.externalId}`)
+      if (rowId) rowIds.push(rowId)
+      else missing.push(item.announcement.externalId)
+    }
+    if (missing.length > 0) {
+      // 账已落但拿不到行 id：这些公告进不了摘要的 `message_id` 回填 —— 留日志，
+      // 因为"摘要里少了一条"是**用户看不见**的（而账在，下一轮也不会重投）。
+      console.warn('[sync] 公告已写入但未返回 id，摘要里无法回填:', missing.join(','))
+    }
+
+    const payload = buildAnnouncementDigestPayload(plain)
+    const messageId = await insertAnnouncementMessage(supabase, userId, payload)
+    if (messageId) {
+      await linkMessageToAnnouncements(supabase, rowIds, messageId)
+      created += 1
+    }
+    // 失败时 `created` 不加：这一批公告**一条都没进消息栏**（账已落、不会重投），
+    // 如实反映在计数里，让 `sync_runs` 的账看得出来（见下面 insertAnnouncementMessage 的注释）。
   }
 
   return {
     status: 'success',
     scanned: fetched.items.length,
     created,
+    digested: plain.length,
     seen: seenRowIds.length,
     incomplete: !fetched.complete,
     error: null,
+  }
+}
+
+/**
+ * 建一条公告消息。成功返回 id，失败返回 null（**并留日志**）。
+ *
+ * ### 🔴 失败为什么不回滚公告账
+ * 账（`course_announcements`）是幂等的唯一锚点，消息是它的产物。回滚账 = 下一轮
+ * 窗口再抓到同一条 → 重复投递；而重复进消息栏是最伤信任的一类 bug
+ * （用户看到两条一样的公告，就会开始怀疑所有条目）。所以取舍是：
+ * **宁可少投一次，也不重复投**，并把失败写进日志（不静默）。
+ *
+ * ⚠️ 代价要说清：这个失败**不会**进 `SyncAnnouncementSummary.error`
+ * —— 公告整体是成功的（拿到了、也记账了），只有某几条没变成消息。
+ * 表现是"消息栏少了几条"，日志里有。`created` 计数会如实偏低，可作对账依据。
+ */
+async function insertAnnouncementMessage(
+  supabase: SupabaseClient,
+  userId: string,
+  payload: MessagePayload,
+): Promise<string | null> {
+  const { data, error } = await supabase
+    .from('messages')
+    .insert({ user_id: userId, type: 'announcement', payload, status: 'pending' })
+    .select('id')
+    .single()
+
+  if (error) {
+    console.error('[sync] 公告消息创建失败（账已落，本条不再重投）:', error.message)
+    return null
+  }
+  return (data as { id: string }).id
+}
+
+/**
+ * 回填 `course_announcements.message_id`（溯源用：这条账变成了哪条消息）。
+ *
+ * 摘要通道下多个公告行会指向**同一条**消息 —— 这是对的，不是数据错误：
+ * 字段语义是"它进消息栏时挂在哪条消息上"，而摘要本来就是多对一。
+ * 回填失败**不影响消息本身**（用户已经能看到），所以只留日志、不抛。
+ */
+async function linkMessageToAnnouncements(
+  supabase: SupabaseClient,
+  rowIds: string[],
+  messageId: string,
+): Promise<void> {
+  if (rowIds.length === 0) return
+  const { error } = await supabase
+    .from('course_announcements')
+    .update({ message_id: messageId })
+    .in('id', rowIds)
+  if (error) {
+    console.error('[sync] 回填公告 message_id 失败（不影响消息本身）:', error.message)
   }
 }
