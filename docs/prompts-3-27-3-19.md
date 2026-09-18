@@ -4,7 +4,7 @@
 > `3-26 → 3-27 → 3-19`。下面两份 prompt 都内置「前置依赖自检」——
 > 前置卡没合并就**自动停手**等 Steven，所以即便两个窗口同时开也不会撞车或写错依赖。
 > 真正能提速的并行对是 **3-20 ∥ 3-23**（在 3-19 之后）。
-> 当前 HEAD = `684607e`（P0-3-26 回执+撤销，已验收通过），3-27 是下一张已就绪卡。
+> 当前 3-27 本窗口进行中（代码未合）；3-19 须等 3-27 合并+验收后，第二窗口并行才会真正开工（会先撞护栏自动等）。真正能提速的并行对是 **3-20 ∥ 3-23**（在 3-19 之后）。
 
 ---
 
@@ -15,7 +15,7 @@
 本窗口只做一张卡：**P0-3-27（M3.5 · URL 自动抓取）**。
 
 【硬协作规则（本窗口遵守）】
-1. 开工前先读：docs/Phase-0-MVP.md（搜 P0-3-27 卡定义 + 进度指针）、docs/Decisions.md（ADR-013/015/016/017/021/022/023/024）、docs/CodingRules.md（§10 踩坑库）、docs/API-Contract.md（§5 口径）、docs/Database.md、docs/Sync-Strategy.md、.workbuddy/memory/MEMORY.md、.workbuddy/memory/2026-09-17.md。并先 `grep -rn "// ?"` 作答。
+1. 开工前先读：docs/Phase-0-MVP.md（搜 P0-3-27 卡定义 + 进度指针）、docs/Decisions.md（ADR-013/015/016/017/021/022/023/024）、docs/CodingRules.md（§10 踩坑库）、docs/API-Contract.md（§5 口径）、docs/Database.md、docs/Sync-Strategy.md、.workbuddy/memory/MEMORY.md、.workbuddy/memory/2026-09-18.md。并先 `grep -rn "// ?"` 作答。
 2. 每条回复开头必须声明「P0-3-27」。
 3. 先简要报告：项目整体进度 + 本卡已完成/未完成 + 待做清单。
 4. 一张卡做完必须停手，输出 Done Report（明确区分 代码完成 / 本地自测通过 / 用户验收通过），等我说「Ok」才继续下一张。
@@ -47,7 +47,7 @@
 本窗口只做一张卡：**P0-3-19（资料索引 · Canvas 文件元数据）**。
 
 【硬协作规则（本窗口遵守）】
-1. 开工前先读：docs/Phase-0-MVP.md（搜 P0-3-19 卡定义 + 进度指针）、docs/Decisions.md（ADR-013/015/016）、docs/CodingRules.md（§10 踩坑库）、docs/API-Contract.md（§5 口径）、docs/Database.md、docs/Sync-Strategy.md、.workbuddy/memory/MEMORY.md、.workbuddy/memory/2026-09-17.md。并先 `grep -rn "// ?"` 作答。
+1. 开工前先读：docs/Phase-0-MVP.md（搜 P0-3-19 卡定义 + 进度指针）、docs/Decisions.md（ADR-013/015/016）、docs/CodingRules.md（§10 踩坑库）、docs/API-Contract.md（§5 口径）、docs/Database.md、docs/Sync-Strategy.md、.workbuddy/memory/MEMORY.md、.workbuddy/memory/2026-09-18.md。并先 `grep -rn "// ?"` 作答。
 2. 每条回复开头必须声明「P0-3-19」。
 3. 先简要报告：项目整体进度 + 本卡已完成/未完成 + 待做清单。
 4. 一张卡做完必须停手，输出 Done Report（明确区分 代码完成 / 本地自测通过 / 用户验收通过），等我说「Ok」才继续下一张。
