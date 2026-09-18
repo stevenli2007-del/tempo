@@ -21,7 +21,12 @@
 --   —— 那会印出一个 2026 年的时间，而实际可能是几个月前的文件版本。
 --
 -- 为什么不需要改任何 CHECK 约束：
---   漂移写入的行用 `source = 'canvas'`（它**来自 Canvas 上的文件**）——
+--   漂移写入的行用 `source = 'syllabus'`。🔴 判据是**这个事实从哪来**（来自一份
+--   syllabus 文档），不是**它托在哪**（那份文件恰好放在 Canvas 上）—— 写成
+--   'canvas' 会把两件不同的事混成一件事：`source='canvas'` 在本项目里意为
+--   「Canvas 同步写进来的事实」，而 `lib/parse/persist.ts` 的重解析**只清
+--   `source='syllabus'` 的行**，写成 'canvas' 会让漂移写入的旧考试被重解析漏掉。
+--   （`lib/messages/appliers/syllabus-drift.ts` 文件头「红线二」是同一结论。）
 --   `exam_dates.source` 从建表起就放行 ('syllabus','canvas','manual')，
 --   `grade_components.source` 也已于 20260918000000 补平到同一组取值。
 --   同时 `messages.type` 的 CHECK 从 20260917200000 起就含 'syllabus_drift'。
