@@ -2,6 +2,8 @@ import Link from 'next/link'
 
 import { detectExtractableExtension, unsupportedReason } from '@/lib/course-files/extractable'
 import { buildFileTree, formatFileSize } from '@/lib/course-files/grouping'
+import { isKeyLikeName, isKeyLikePath, isExamLike } from '@/lib/practice-test/pairing'
+import { paperHref } from '@/lib/practice-test/paper'
 
 import type { CourseFileNode, CourseFileView } from '@/lib/course-files/grouping'
 
@@ -103,6 +105,8 @@ export function CourseFiles({
           <p className="mt-4 border-t border-border pt-3 text-xs text-ink-faint">
             只有文件名与外链存在 Tempo。要读内容就点回 Canvas；点「一键总结」时，
             Tempo 才会临时读那一份文件来生成要点（不留副本、不进库里）。
+            试卷那一行的「自测卷」同理：读**试卷本身**与自动配到的答案文件，
+            把题目切出来、答案收起来（两份原文同样不留副本）。
           </p>
         </>
       )}
@@ -175,6 +179,16 @@ function FileTable({ courseId, files }: { courseId: string; files: CourseFileVie
 
 function FileRow({ courseId, file }: { courseId: string; file: CourseFileView }) {
   const canSummarize = detectExtractableExtension(file.displayName, file.contentType) !== null
+  /**
+   * 「自测卷」只出现在**像试卷**的文件上（P0-3-23）。
+   *
+   * 判定走 `isExamLike()`（零依赖纯函数，回归脚本直接断言），**答案文件永远不出按钮** ——
+   * 拿答案 key 去"出卷子"没有意义（那道题的答案就是它自己）。
+   * 关键词表刻意取得宽（含 `practice` / `review`），因为**漏判比误判难查得多**：
+   * 误判会走进去被一句"切不出题目"如实挡回来，漏判则是功能凭空消失。
+   */
+  const canMakeTest = isExamLike(file)
+  const isAnswerFile = isKeyLikeName(file.displayName) || isKeyLikePath(file.folderPath)
 
   return (
     <li className="flex items-center gap-3 px-3 py-2">
@@ -190,6 +204,28 @@ function FileRow({ courseId, file }: { courseId: string; file: CourseFileView })
       <span className="shrink-0 text-xs text-ink-faint">
         {[formatFileSize(file.sizeBytes), fileExtension(file)].filter(Boolean).join(' · ')}
       </span>
+
+      {canMakeTest ? (
+        /*
+         * ⚠️ 与「一键总结」同一条纪律：`prefetch={false}` 是**必填**。
+         * 这个路由的渲染会触发一次真实下载（两份文件）+ 一次模型调用 ——
+         * Next 的 `<Link>` 默认进视口就预取，那样列表一滚过去就会偷偷生成好几张卷子。
+         */
+        <Link
+          href={paperHref({ courseId, examFileId: file.id })}
+          target="_blank"
+          rel="noopener noreferrer"
+          prefetch={false}
+          className="shrink-0 rounded-md border border-border px-2 py-1 text-xs text-ink-muted transition-colors hover:bg-muted/50 hover:text-foreground"
+        >
+          自测卷
+        </Link>
+      ) : isAnswerFile && canSummarize ? (
+        // 答案文件：明说为什么没有「自测卷」按钮，而不是留一个空白让人以为没做这个功能。
+        <span className="shrink-0 px-2 py-1 text-xs text-ink-faint" title="这是答案文件 —— 自测卷要选试卷本身">
+          —
+        </span>
+      ) : null}
 
       {canSummarize ? (
         /*
