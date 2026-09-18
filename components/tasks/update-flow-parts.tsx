@@ -9,6 +9,8 @@
  * 顺序固定：`<UpdateComposer/>`（输入）→ `<UpdateReview/>`（识别 + 消歧）→ `<UpdateActions/>`（确认）。
  */
 
+import { useRef } from "react"
+
 import { Button } from "@/components/ui/button"
 import {
   candidateHint,
@@ -20,6 +22,10 @@ import {
 
 /** 课程选择 + 文本 / 截图输入 + 错误与回执。 */
 export function UpdateComposer({ flow }: { flow: CourseUpdateFlow }) {
+  // 选文件的 `<input>` 由本组件持有 —— DOM 引用属于视图，不从状态机里外借
+  // （外借会让 eslint 的 react-hooks/refs 把整个 `flow` 当成 ref，见 hook 里的注释）。
+  const fileInputRef = useRef<HTMLInputElement>(null)
+
   return (
     <>
       <label className="mb-1 block text-sm text-muted-foreground">课程</label>
@@ -29,13 +35,30 @@ export function UpdateComposer({ flow }: { flow: CourseUpdateFlow }) {
         disabled={flow.loadingCourses}
         className="mb-3 w-full rounded-lg border border-input bg-background px-3 py-2 text-sm text-foreground outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
       >
-        <option value="">{flow.loadingCourses ? "加载中…" : "选择课程"}</option>
+        <option value="">
+          {flow.loadingCourses ? "加载中…" : flow.courses.length === 0 ? "还没有课程" : "选择课程"}
+        </option>
         {flow.courses.map((c) => (
           <option key={c.id} value={c.id}>
             {c.courseName}
           </option>
         ))}
       </select>
+
+      {/* 一门课都没有时，下拉里没有可选项 —— 明说去哪儿加，并给一个重试入口
+          （列表可能是没取到，不一定是真的空）。 */}
+      {!flow.loadingCourses && flow.courses.length === 0 && (
+        <p className="mb-3 text-xs text-amber-600 dark:text-amber-400">
+          还没有课程 —— 先去「我的课程」加一门，Tempo 才知道这条更新属于哪门课。
+          <button
+            type="button"
+            onClick={flow.loadCourses}
+            className="ml-1 underline transition hover:text-ink"
+          >
+            重新加载
+          </button>
+        </p>
+      )}
 
       {/* 4 行是 P0-3-8/3-9 验收过的浮窗高度；整页共用这一份渲染，所以两处都是 4 行。 */}
       <textarea
@@ -51,7 +74,7 @@ export function UpdateComposer({ flow }: { flow: CourseUpdateFlow }) {
       {/* P0-3-9 截图档：选图 / 粘贴入口（与文字互斥）。 */}
       <div className="mb-3 flex items-center gap-2">
         <input
-          ref={flow.fileInputRef}
+          ref={fileInputRef}
           type="file"
           accept="image/png,image/jpeg,image/webp"
           className="hidden"
@@ -62,7 +85,7 @@ export function UpdateComposer({ flow }: { flow: CourseUpdateFlow }) {
           variant="outline"
           size="sm"
           disabled={!!flow.image}
-          onClick={() => flow.fileInputRef.current?.click()}
+          onClick={() => fileInputRef.current?.click()}
         >
           选择图片
         </Button>

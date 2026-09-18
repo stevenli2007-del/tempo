@@ -23,17 +23,28 @@ import { Sparkles } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { UpdateActions, UpdateComposer, UpdateReview } from "@/components/tasks/update-flow-parts"
 import { useCourseUpdateFlow } from "@/components/tasks/use-course-update-flow"
+import type { CourseOption } from "@/components/tasks/use-course-update-flow"
 import { MESSAGES_UPDATED_EVENT } from "@/lib/messages/event"
 import { toMessageView, type MessageView } from "@/lib/messages/view"
 
 /** 气泡头像的宽 + 间距（size-7 = 28px，gap-2.5 = 10px）。回执靠它左沿对齐气泡内容。 */
 const RECEIPT_INDENT = "pl-[38px]"
 
-export function MessagesView({ initialViews }: { initialViews: MessageView[] }) {
+export function MessagesView({
+  initialViews,
+  initialCourses,
+}: {
+  initialViews: MessageView[]
+  /**
+   * 服务端预取的课程下拉项。整页的输入区是常驻的（不像浮窗有"点开"这个动作去拉列表），
+   * 不预取的话课程下拉里一个选项都没有 —— 见 `useCourseUpdateFlow` 的 `initialCourses`。
+   */
+  initialCourses: CourseOption[]
+}) {
   const [views, setViews] = useState<MessageView[]>(initialViews)
   const [busyId, setBusyId] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
-  const flow = useCourseUpdateFlow()
+  const flow = useCourseUpdateFlow({ initialCourses })
   const streamRef = useRef<HTMLDivElement | null>(null)
 
   // 旧 → 新：最新的一条落在底部、紧邻输入区，与 ChatGPT / Claude 的会话方向一致。
@@ -79,7 +90,9 @@ export function MessagesView({ initialViews }: { initialViews: MessageView[] }) 
   }
 
   return (
-    <div className="flex h-full flex-col">
+    // `flex-1 min-h-0`（而不是 `h-full`）：父级是固定高度的 flex 列，上面可能还压着一条
+    // 错误横幅 —— 用 `h-full` 会把横幅挤出去、并多出一条滚动条。
+    <div className="flex min-h-0 flex-1 flex-col">
       {/* 唯一的可滚动区：消息流。 */}
       <div ref={streamRef} className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
         <div className="mx-auto w-full max-w-[820px] space-y-2.5 px-1 pb-4 pt-2">

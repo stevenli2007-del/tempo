@@ -22,7 +22,7 @@
  *   可勾选更新；其余只展示并给出「去哪儿改」的提示。
  */
 
-import { useRef, useState } from "react"
+import { useState } from "react"
 import { useRouter } from "next/navigation"
 
 export type CourseOption = { id: string; courseName: string }
@@ -82,15 +82,26 @@ export function candidateHint(candidate: Candidate): { label: string; reason?: s
   return { label: candidate.source, reason: "该来源任务不支持在对话框直接编辑" }
 }
 
-export function useCourseUpdateFlow() {
+/**
+ * @param options.initialCourses 服务端预取好的课程下拉项（可省略）。
+ *
+ * 🔴 整页 `/messages` 的输入区是**常驻**的 —— 那里没有"点开浮窗"这个动作去触发
+ * `loadCourses()`，所以课程列表必须由外壳预取好传进来。不传的话 `courses` 恒为 `[]`，
+ * 下拉里只剩占位项，用户点开是空的（2026-09-17 验收实测：「选择课程」选不了）。
+ * 浮窗是点开才渲染、点开时调 `startSession()` 拉列表，所以不传，行为不变。
+ */
+export function useCourseUpdateFlow(options: { initialCourses?: CourseOption[] } = {}) {
   const router = useRouter()
-  const [courses, setCourses] = useState<CourseOption[]>([])
+  const [courses, setCourses] = useState<CourseOption[]>(options.initialCourses ?? [])
   const [courseId, setCourseId] = useState("")
   const [text, setText] = useState("")
   // P0-3-9 截图档：图片状态（base64 / 预览 URL / 媒体类型）。与 text 二选一。
   const [image, setImage] = useState<{ dataBase64: string; mediaType: string } | null>(null)
   const [imagePreview, setImagePreview] = useState<string | null>(null)
-  const fileInputRef = useRef<HTMLInputElement>(null)
+  // 🔴 这里**刻意不放 DOM ref**（选文件的 `<input>` 归渲染层自己持有，见 update-flow-parts）。
+  // 曾经把 `fileInputRef` 挂在返回对象上，结果 eslint 的 react-hooks/refs 把整个 `flow`
+  // 判成"含 ref 的对象"，渲染期读 `flow.summary` 这类纯数据也被报错（15 处）。
+  // DOM 引用属于视图，不属于状态机。
   const [loadingCourses, setLoadingCourses] = useState(false)
   const [parsing, setParsing] = useState(false)
   const [searching, setSearching] = useState(false)
@@ -471,7 +482,6 @@ export function useCourseUpdateFlow() {
     text,
     image,
     imagePreview,
-    fileInputRef,
     loadingCourses,
     parsing,
     searching,
