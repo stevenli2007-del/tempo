@@ -1,7 +1,7 @@
 'use client'
 
 import { useRouter } from 'next/navigation'
-import { useRef, useState } from 'react'
+import { Fragment, useRef, useState } from 'react'
 
 import { readApiErrorMessage } from '@/lib/api/client-error'
 import { syllabusStatusText } from '@/components/courses/syllabus-status'
@@ -43,6 +43,9 @@ interface SyllabusUploadProps {
 
 type Pending = 'uploading' | 'extracting' | 'downloading' | 'parsing'
 
+/** P0-1-11：解析管线的四个阶段，用于进度条展示。 */
+const PARSE_STAGES = ['上传', '提取文本', '解析板块', '完成'] as const
+
 export function SyllabusUpload({ courseId, syllabus }: SyllabusUploadProps) {
   const router = useRouter()
   const inputRef = useRef<HTMLInputElement>(null)
@@ -56,6 +59,20 @@ export function SyllabusUpload({ courseId, syllabus }: SyllabusUploadProps) {
   const [isConfirmingReparse, setIsConfirmingReparse] = useState(false)
 
   const isBusy = pending !== null
+
+  // P0-1-11：根据当前阶段计算进度条高亮位置（0=上传 1=提取 2=解析 3=完成）。
+  const activeStage =
+    pending === 'uploading'
+      ? 0
+      : pending === 'extracting'
+        ? 1
+        : pending === 'parsing'
+          ? 2
+          : syllabus?.parseStatus === 'completed'
+            ? 3
+            : 0
+  const failedStage =
+    syllabus?.extractStatus === 'failed' ? 1 : syllabus?.parseStatus === 'failed' ? 2 : -1
 
   async function handleUpload(file: File) {
     setError(null)
@@ -282,14 +299,50 @@ export function SyllabusUpload({ courseId, syllabus }: SyllabusUploadProps) {
         </div>
       )}
 
-      {/* 提取中给个明确反馈 —— 20MB 的 PDF 可能要好几秒，静默会让人以为卡死了。 */}
-      {pending === 'extracting' ? (
-        <p className="mt-3 text-xs text-muted-foreground">文件已上传，正在提取文本…</p>
-      ) : null}
-      {pending === 'parsing' ? (
-        <p className="mt-3 text-xs text-muted-foreground">
-          正在解析五个板块（约 3-5 秒），完成后数据会出现在下方「五个板块」里…
-        </p>
+      {/* P0-1-11：四阶段进度条，替代原先散落的单行提示，让用户看清"现在到第几步"。 */}
+      {pending !== null ? (
+        <ol className="mt-3 flex items-center gap-1" aria-label="解析进度">
+          {PARSE_STAGES.map((label, i) => (
+            <Fragment key={label}>
+              <li className="flex items-center gap-1.5">
+                <span
+                  className={[
+                    'flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[10px] font-semibold',
+                    failedStage === i
+                      ? 'bg-destructive text-white'
+                      : i < activeStage
+                        ? 'bg-primary text-primary-foreground'
+                        : i === activeStage
+                          ? 'animate-pulse bg-primary/20 text-primary'
+                          : 'bg-muted text-muted-foreground',
+                  ].join(' ')}
+                >
+                  {failedStage === i ? '!' : i < activeStage ? '✓' : i + 1}
+                </span>
+                <span
+                  className={[
+                    'whitespace-nowrap text-xs',
+                    failedStage === i
+                      ? 'text-destructive'
+                      : i <= activeStage
+                        ? 'text-foreground'
+                        : 'text-muted-foreground',
+                  ].join(' ')}
+                >
+                  {label}
+                </span>
+              </li>
+              {i < PARSE_STAGES.length - 1 ? (
+                <span
+                  className={[
+                    'h-px flex-1',
+                    i < activeStage ? 'bg-primary' : 'bg-border',
+                  ].join(' ')}
+                />
+              ) : null}
+            </Fragment>
+          ))}
+        </ol>
       ) : null}
 
       {isConfirmingReparse ? (
