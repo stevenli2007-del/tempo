@@ -9,7 +9,8 @@ import { getSupabaseEnv } from './env'
  * 新增受保护页面时，在这里加一条即可，不要把判断逻辑散落到各个页面里。
  */
 // '/settings'（P0-3-2）：设置页与总览页一样带用户数据，未登录必须送回登录页。
-const PROTECTED_PREFIXES = ['/dashboard', '/settings']
+// '/messages'（P0-3-18）：消息栏是系统提案出口，带用户数据，未登录必须送回登录页。
+const PROTECTED_PREFIXES = ['/dashboard', '/settings', '/messages']
 
 /** 已登录用户不该再看到的页面（会被送去 /dashboard）。 */
 const AUTH_PAGES = ['/login', '/signup']
