@@ -28,7 +28,11 @@ if not (REPO / "docs" / "Phase-0-MVP.md").exists():
     REPO = Path("/Users/youchengli/Desktop/Tempo")
 
 SRC_REL = "docs/Phase-0-MVP.md"
-BASELINE_REV = "HEAD"          # 拆分**前**的版本（本脚本应在 commit 前跑）
+# 拆分**前**的版本。🔴 **必须写死 commit，绝不能用 "HEAD"**：
+# 拆分一旦提交，HEAD 就变成薄索引（227 行），下方 CONTRACT 里的 1914 行基线
+# 会全部越界 → IndexError 崩溃（2026-09-18 实测）。
+# 将来若再整体重切：把这里改成「新一次拆分前」的 commit，并同步更新 CONTRACT。
+BASELINE_REV = "f625a5a"       # 拆分前最后一版 1914 行清单（= 4881c1d 的父提交）
 
 # 契约：每个输出文件应该承载基线的哪些行范围（1-based 闭区间，按顺序）
 CONTRACT: dict[str, list[tuple[int, int]]] = {
@@ -77,16 +81,39 @@ DECLARED_EDITS: list[tuple[str, str, str, str]] = [
      "| ⚪ |", "| ✅ **Steven 验收通过 2026-09-18** |"),
 ]
 
+# ── 已声明修订（其二）：相对链接 / 页内锚点重定基（2026-09-18，拆分的机械副作用）──
+# 「只搬家不重写」会把原文里**相对 docs/ 的链接**一起搬进 docs/cards/，
+# 于是 `./Decisions.md#adr-0xx` 在新位置指向不存在的 docs/cards/Decisions.md（8 处失效）；
+# 薄索引里两个页内锚点也因为标题改名 / 含 `→` 而失效（2 处）。
+# 这些都是纯路径重定基，**不碰任何文字**。表达为 (文件, 旧子串, 新子串)。
+DECLARED_SUBS: list[tuple[str, str, str]] = [
+    # 8 处 ADR 链接：`./Decisions.md` → `../Decisions.md`
+    ("docs/cards/P0-1.md", "(./Decisions.md#", "(../Decisions.md#"),
+    ("docs/cards/P0-2.md", "(./Decisions.md#", "(../Decisions.md#"),
+    ("docs/cards/progress-pointer-archive.md",
+     "(./Decisions.md#", "(../Decisions.md#"),
+    # 2 处薄索引页内锚点
+    ("docs/Phase-0-MVP.md",
+     "](#p0-4-验证期m4--原-gate-0→1-内容下移)",
+     "](#p0-4-验证期m4-原-gate-01-内容下移)"),
+    ("docs/Phase-0-MVP.md",
+     "](#当前进度指针)",
+     "](./cards/progress-pointer-archive.md#当前进度指针)"),
+]
 
-def declared_edit(rel: str, line: str) -> tuple[str, int | None]:
-    """若该行命中已声明修订，返回 (新行, 声明下标)；否则原样返回 (line, None)。"""
+
+def declared_edit(rel: str, line: str) -> tuple[str, int | None, int | None]:
+    """若该行命中已声明修订，返回 (新行, 后缀修订下标, 子串修订下标)；否则原样返回。"""
     body = line[:-1] if line.endswith("\n") else line
     nl = "\n" if line.endswith("\n") else ""
+    for idx, (f, old_sub, new_sub) in enumerate(DECLARED_SUBS):
+        if f == rel and old_sub in body:
+            return body.replace(old_sub, new_sub) + nl, None, idx
     for idx, (f, prefix, old_sfx, new_sfx) in enumerate(DECLARED_EDITS):
         if f == rel and body.startswith(prefix) and body.endswith(old_sfx):
             cut = len(body) - len(old_sfx) if old_sfx else len(body)
-            return body[:cut] + new_sfx + nl, idx
-    return line, None
+            return body[:cut] + new_sfx + nl, idx, None
+    return line, None, None
 
 failures: list[str] = []
 notes: list[str] = []
@@ -145,7 +172,8 @@ def main() -> int:
     orig_chars_total = 0
     added_chars_total = 0
     edited_delta = 0                            # 已声明修订带来的净字符变化
-    applied_edits: set[int] = set()             # 哪些声明被真正用上
+    applied_edits: set[int] = set()             # 哪些状态修订被真正用上
+    applied_subs: set[int] = set()              # 哪些链接/锚点重定基被真正用上
     added_lines_all: list[str] = []
     consumed_all: list[tuple[str, int]] = []   # (文件名, 基线行号)
     per_file: list[tuple[str, int, int, int]] = []
@@ -165,10 +193,14 @@ def main() -> int:
         for a, b in ranges:
             for ln in range(a, b + 1):
                 t = base_lines[ln - 1]
-                t2, decl = declared_edit(rel, t)
+                t2, decl, sub = declared_edit(rel, t)
                 if decl is not None:
                     edited_delta += len(t2) - len(t)
                     applied_edits.add(decl)
+                    t = t2
+                if sub is not None:
+                    edited_delta += len(t2) - len(t)
+                    applied_subs.add(sub)
                     t = t2
                 expected.append((ln, t))
 
@@ -205,7 +237,8 @@ def main() -> int:
     print("① 字符总量")
     print(f"  拆分前原始行字符总量 : {len(baseline)}")
     print(f"  已声明修订净变化     : {edited_delta:+d}"
-          f"（{len(applied_edits)}/{len(DECLARED_EDITS)} 处状态统一，只改状态标记）")
+          f"（{len(applied_edits)}/{len(DECLARED_EDITS)} 处状态统一；"
+          f"{len(applied_subs)}/{len(DECLARED_SUBS)} 处链接重定基）")
     print(f"  拆分后原文行字符总量 : {orig_chars_total}（应 = {expected_total}）")
     print(f"  新增内容字符总量     : {added_chars_total}"
           f"（{len(added_lines_all)} 行，单独计数，不混入上面两个数）")
@@ -216,13 +249,18 @@ def main() -> int:
     if len(applied_edits) != len(DECLARED_EDITS):
         fail(f"① 声明的 {len(DECLARED_EDITS)} 处修订只命中 {len(applied_edits)} 处"
              f"（未命中下标：{sorted(set(range(len(DECLARED_EDITS))) - applied_edits)}）")
+    if len(applied_subs) != len(DECLARED_SUBS):
+        fail(f"① 声明的 {len(DECLARED_SUBS)} 处链接/锚点重定基只命中 {len(applied_subs)} 处"
+             f"（未命中下标：{sorted(set(range(len(DECLARED_SUBS))) - applied_subs)}）")
     if orig_chars_total != expected_total:
         fail(f"① 字符总量不等：{orig_chars_total} ≠ {expected_total}"
              f"（基线 {len(baseline)}，修订净变化 {edited_delta:+d}）")
     if (not missing and not dup and orig_chars_total == expected_total
-            and len(applied_edits) == len(DECLARED_EDITS)):
+            and len(applied_edits) == len(DECLARED_EDITS)
+            and len(applied_subs) == len(DECLARED_SUBS)):
         print(f"  ✓ 通过（{len(base_lines)} 行全部有且只有一个落点；"
-              f"另有 {len(applied_edits)} 处已声明状态修订）")
+              f"另有 {len(applied_edits)} 处已声明状态修订"
+              f" + {len(applied_subs)} 处已声明链接重定基）")
     print()
 
     # ═══════════ ② 逐卡逐字 ═══════════
@@ -284,7 +322,8 @@ def main() -> int:
         return 1
     print("✅ 校验全部通过")
     print(f"   ① 原文总量 {orig_chars_total} 字符 = 基线 {len(baseline)} "
-          f"{edited_delta:+d}（{len(applied_edits)} 处已声明状态统一）；"
+          f"{edited_delta:+d}（{len(applied_edits)} 处已声明状态统一" 
+          f" + {len(applied_subs)} 处已声明链接重定基）；"
           f"逐行覆盖无遗漏、无重复、无未声明改写")
     print(f"   ② {len(card_ranges)} 张 P0-3 卡原文逐字保留")
     print(f"   ③ 卡号集合相同（{len(before)} 个）")

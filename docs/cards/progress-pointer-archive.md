@@ -158,10 +158,10 @@
 > - **编号保持不动**：`P0-1-x` 是 task 的稳定标识，已出现在 commit message 与 memory 里。重编号会让这些引用全部失效。**顺序以本指针为准，不以编号大小为准。**
 
 > 📌 **同日另两个决策（2026-09-02，Steven 拍板）**
-> 1. **syllabus 上传走「浏览器直传 Supabase Storage」**，不再走服务端 multipart 转发 —— 见 [ADR-009](./Decisions.md#adr-009)。`API-Contract.md` §3 的 multipart 契约将在 P0-1-1 交付时同步改写。
+> 1. **syllabus 上传走「浏览器直传 Supabase Storage」**，不再走服务端 multipart 转发 —— 见 [ADR-009](../Decisions.md#adr-009)。`API-Contract.md` §3 的 multipart 契约将在 P0-1-1 交付时同步改写。
 > 2. **Storage 桶规范**（桶名 / 路径约定 / `storage.objects` RLS 策略）**并入 P0-1-1 一起交付**：先补 `Database.md` 新增 Storage 小节（SSOT 在前），再出迁移文件，不单独拆 task。
 
-> 📌 **领 P0-1-1 时只需读**：`Phase-0-MVP.md` 中 P0-1-1 执行卡 + `TechStack.md` 第 2 节版本矩阵 + `Database.md` Storage 小节 + `API-Contract.md` §1.5 / §3 + [ADR-009](./Decisions.md#adr-009) / [ADR-010](./Decisions.md#adr-010) 即可开工，按 `CodingRules.md` 阅读策略**不重读全部 11 份文档**。
+> 📌 **领 P0-1-1 时只需读**：`Phase-0-MVP.md` 中 P0-1-1 执行卡 + `TechStack.md` 第 2 节版本矩阵 + `Database.md` Storage 小节 + `API-Contract.md` §1.5 / §3 + [ADR-009](../Decisions.md#adr-009) / [ADR-010](../Decisions.md#adr-010) 即可开工，按 `CodingRules.md` 阅读策略**不重读全部 11 份文档**。
 > - 参考 P0-1-7 的既有实现：`lib/courses.ts`（snake_case ↔ camelCase 唯一映射点）+ `lib/api/response.ts`（统一响应）+ `app/api/v1/courses/[id]/route.ts`（资源端点范式，含 ADR-010 落地写法）。
 
 ---
