@@ -106,15 +106,23 @@ const CASES: Case[] = [
     why: '证明 CHECK **确实在拦** —— 没有对照组，"放行"可能只是约束被删了',
   },
 
-  // ---------- 后两张卡的枚举现状（侦察，不作为判据） ----------
+  // ---------- P0-3-25 的枚举：messages.type 加 'announcement' ----------
   {
     label: "messages.type = 'announcement'",
     table: 'messages',
     row: { user_id: BOGUS_UUID, type: 'announcement', payload: {} },
-    expect: 'rejected',
-    why: 'P0-3-25 公告进站要用；现在被拒 = 迁移还没跑（预期如此）',
-    advisory: true,
+    expect: 'accepted',
+    why: 'P0-3-25 公告进站要用。**这是该卡的验收闸**：仍被拒 = 迁移没生效',
   },
+  {
+    label: "messages.type = 'material'（老值）",
+    table: 'messages',
+    row: { user_id: BOGUS_UUID, type: 'material', payload: {} },
+    expect: 'accepted',
+    why: '重写 CHECK 时别把老值弄丢',
+  },
+
+  // ---------- P0-3-26 的枚举（侦察，不作为判据） ----------
   {
     label: "messages.status = 'undone'",
     table: 'messages',
@@ -263,6 +271,7 @@ async function main(): Promise<void> {
 
   // ---------- 结论 ----------
   const canvasCase = results.find((r) => r.c.label.includes("'canvas'"))
+  const announcementCase = results.find((r) => r.c.label.includes("'announcement'"))
   const controlCase = results.find((r) => r.c.label.includes('__bogus__'))
   console.log('\n结论：')
   if (canvasCase?.verdict === 'accepted' && controlCase?.verdict === 'rejected') {
@@ -271,6 +280,14 @@ async function main(): Promise<void> {
     console.log("  ❌ P0-3-24 迁移**未生效**：'canvas' 仍被拒 —— 回到 SQL Editor 重跑那份迁移。")
   } else {
     console.log('  ❌ 对照组异常：CHECK 没有拦下非法值 —— 约束可能被整体删掉了，人工核对。')
+  }
+
+  if (announcementCase?.verdict === 'accepted') {
+    console.log("  ✅ P0-3-25 迁移生效：messages.type 已接受 'announcement'。")
+  } else {
+    console.log(
+      "  ⏳ P0-3-25 迁移**未跑**：'announcement' 仍被拒 —— 跑 `20260919000000_announcements.sql` 后再来。",
+    )
   }
 
   const pending = results.filter((r) => r.c.advisory)
