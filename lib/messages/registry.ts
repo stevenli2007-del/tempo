@@ -58,7 +58,15 @@ export const MESSAGE_STATUSES: readonly MessageStatus[] = ['pending', 'accepted'
  * 所以必须**同时**在 `undo.ts` 的 `UNDOERS` 里补一个撤销器 —— 能写不能撤
  * 比不能写更糟（用户以为回得去）。
  */
-export const APPLIER_READY_TYPES = ['material', 'announcement', 'syllabus_drift'] as const
+export const APPLIER_READY_TYPES = [
+  'material',
+  'announcement',
+  'syllabus_drift',
+  // P0-3-23：自测卷**在生成那一刻就已落库**（`practice_tests`），消息只是
+  // "去用它"的入口 —— 所以它的 applier 是**刻意的空写入**（同 material）。
+  // 真正的行动入口是 `payload.paperPath` 派生成的「打开自测卷 →」，不是确认按钮。
+  'practice_test',
+] as const
 
 export type ApplierReadyType = (typeof APPLIER_READY_TYPES)[number]
 

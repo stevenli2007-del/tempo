@@ -492,6 +492,70 @@ CREATE UNIQUE INDEX course_files_course_file_unique
 
 ---
 
+### 3.17 `practice_tests`（自测卷缓存，P0-3-23 新增）
+
+用户在课程资料区选中一份 past exam（Tempo 自动配对它的 answer key）后，模型**切出来的卷面**
+（题干 + 每题的答案）。一份试卷一行，一次生成永久复用。
+
+> 🔴 **这里没有课件原文**。`paper` 列里只有**切出来的题干与答案**——两份 PDF 的抽取全文
+> 只存在于那次请求的内存里，**不落库、不落盘、不进日志**。3-19 的「不下载内容」管的是
+> **索引路径**（同步仍然零下载）；本卡是**按需路径的第二条开口**（第一条是 3-19b 的一键总结），
+> 读的是**用户自己点的那两份**文件。见 **ADR-027**。
+
+| 字段名 | 类型 | 说明 |
+|---|---|---|
+| `id` | uuid PK | |
+| `course_id` | uuid (FK → courses.id, **ON DELETE CASCADE**) | 归属（本表无 `user_id`，RLS 经 `courses` 反查） |
+| `exam_file_id` | uuid (FK → course_files.id, **ON DELETE CASCADE**, **UNIQUE**) | 试卷本体。唯一键落在这里：**一份试卷永远只有一张当前有效的自测卷** |
+| `answer_key_file_id` | uuid (FK → course_files.id, **ON DELETE SET NULL**) | 配对到的答案文件（可空）。**刻意非 CASCADE** —— 答案被删时卷子不该跟着消失 |
+| `pairing_rule` | text (nullable) | 靠哪条规则配到的（`answer-key-folder` / `solution-folder` / `same-folder-key-name` / `same-stem-anywhere`）。配错时靠它区分「代码错」与「数据长得怪」 |
+| `title` | text | 卷面标题（模型起的；没给就用文件名） |
+| `status` | text | `ok` / `failed`（有 CHECK，因为它是**代码分支**）。`failed` 行保留的意义 = **别再重试** |
+| `paper` | jsonb | `{ title, questions: [{ key, number, text, answer }] }`。`answer: null` = 答案文件里没找到这一题，**绝不用模型推断的答案填** |
+| `exam_source_chars` / `key_source_chars` | integer | 两份文件各抽到多少字符（覆盖率的证据） |
+| `source_truncated` | boolean | 是否因过长被截断 —— 为真时界面**必须**标出来 |
+| `exam_page_count` / `key_page_count` | integer (nullable) | PDF 页数（docx 为 null，**不是 0**） |
+| `extract_method` | text (nullable) | 用了哪个抽取器（`pdf_text` / `docx`）。**不含 `pptx`**：自测卷路径明确拒绝 slides |
+| `exam_modified_at` / `key_modified_at` | timestamptz (nullable) | **生成时**两份文件在 Canvas 的 `modified_at`。**任一不同即重算** —— 老师换掉答案 key（题没变、答案变了）时，旧卷子的答案是**过期的谎话**，比"没有答案"严重得多 |
+| `model` | text (nullable) | 实际服务的模型名（同 `llm_runs` 纪律：记实际值不记别名） |
+| `error_message` | text (nullable) | 失败原因（精简、**不含卷面内容**） |
+| `created_at` / `updated_at` | timestamptz | |
+
+**唯一键**：`UNIQUE (exam_file_id)` —— 并发点开 / 流式渲染重入时靠它收敛。
+配到哪一份 key 记在 `answer_key_file_id` / `pairing_rule` 里（**看得见也说得清**），
+换 key 是同一条记录被重算，不并存两条。
+
+> 🔴 **答案文件读不出来时整张卷子失败**（`status='failed'`），**不降级成「没有答案的卷子」**——
+> 降级版会让用户以为"那道题本来就没有答案"。**假信息比缺失更糟**：它把系统的失败
+> 伪装成数据的属性。判据问句：「这个输入换掉/缺失，用户区分得出来吗？」
+
+### 3.18 `practice_test_explanations`（逐题讲解缓存，P0-3-23 新增）
+
+用户点某一题的「讲解这道题的解法」后，模型给出的步骤与概念。**懒生成**：点哪一题算哪一题。
+
+| 字段名 | 类型 | 说明 |
+|---|---|---|
+| `practice_test_id` | uuid (FK → practice_tests.id, **ON DELETE CASCADE**, PK 之一) | 归属（RLS 经 `practice_tests → courses` **两跳**反查） |
+| `question_key` | text (PK 之一) | 题目键（`q1` / `q2`…，按**切题顺序**生成）。⚠️ 重新生成卷子后键会重排 —— 旧讲解因此不会被错配到新题上（代价是重算一次）。**错配的讲解比没有讲解坏得多** |
+| `locale` | text (PK 之一) | 讲解语言（`zh-CN` / `en`，白名单在 `lib/practice-test/prompt.ts`）。**无 CHECK**（同 `file_summaries`：语言是数据维度不是代码分支） |
+| `status` | text | `ok` / `failed`（有 CHECK）。`failed` 行保留的意义 = **别再重试** |
+| `explanation` | jsonb | `{ steps[], concepts[] }`。**由题干与答案推导**，不允许编造新题或假答案 |
+| `model` | text (nullable) | 实际服务的模型名 |
+| `error_message` | text (nullable) | 失败原因（精简、**不含题目内容**） |
+| `created_at` / `updated_at` | timestamptz | |
+
+**主键**：`PRIMARY KEY (practice_test_id, question_key, locale)`。
+
+> 为什么不把讲解塞进 `practice_tests.paper` 的 jsonb：讲解是**逐题懒生成**的，
+> 一次读-改-写整份 `paper` 会把"并发点两道题"变成互相覆盖。拆表后每题一行、各写各的
+> （与 `message_summaries` / `file_summaries` 同一形态）。
+
+> ⚠️ **P0-3-2 删账号的级联**：`practice_tests` 经 `course_id → courses` 一级 CASCADE；
+> `practice_test_explanations` 再经 `practice_test_id → practice_tests` 二级 CASCADE。
+> 删 `profiles` → 清空两表。
+
+---
+
 ## 4. 同步语义（Tempo 内核的数据层约定）
 
 这一节是「实时检测 + 动态管理」在数据模型上的落点。轮询频率、触发时机、重试策略在 `Sync-Strategy.md` 里定义，本节只规定**数据怎么写**。
@@ -719,4 +783,5 @@ syllabus 可能含教师姓名、office hour 地址、评分细则等个人信�
 | 2026-09-07 | **新增 §3.14 `usage_events`**（P0-3-1）：只为 PRD 8.1 四项指标中的两项（7 日回访 / token 续期完成率）而建 —— 编辑修正率读 `parse_corrections`、人均关联课程数读 `courses.canvas_course_id`，**不重复埋点**。三类事件的写入点、每日去重规则、"埋点失败只告警 / 读数失败必须 500"的反向约定一并写入；§7.1 补索引、§7.2 补 RLS（INSERT 策略不可省，否则埋点静默全失败）；标注 P0-3-2 删账号需级联本表 | P0-3-1、`PRD.md` 8.1 |
 | 2026-09-02 | **P0-1-2 落地后对 §3.3 的补充**：`raw_text` 由 `POST /api/v1/syllabi/:id/extract` 写入，**列表与上传响应一律不读这一列**（可能几 MB，只有 extract 端点读它取前 1000 字符预览）；`extract_method` 的 CHECK 约束取值确认为 `pdf_text` / `docx` / `pptx` / `manual`（**`docx`/`pptx` 没有 `_text` 后缀**，是初版遗留，不为此改生产表）；悬挂行的兜底已实现 —— `createSignedUrl` 对不存在的对象返回 `NoSuchKey`，extract 端点据此置 `failed` + 返回 409 | P0-1-2、`API-Contract.md` §3 |
 | **2026-09-13** | **§3.9 `tasks` 新增 `submission_state` / `submitted_at` 两列**（P0-3-10，ADR-015）：分列的意义是让"外部真相"（Canvas `submission.workflow_state`）与"用户主权"（`status`）**永不互相覆盖** —— 同步只写前者，展示层合并。含 `external_tool` / `not_graded` / `on_paper` 类作业**必须落 `null` 并展示「待确认」**（Canvas 不知道 ≠ 用户没交，显示"待完成"等于诬告用户）。§4.1 同步可覆盖字段集加入这两列；§3.1 补**禁止硬编码 UTC** 的强制约束（dashboard 日期差一天的真 bug） |
+| 2026-09-18 | **新增 §3.17 `practice_tests` + §3.18 `practice_test_explanations` 两张表**（P0-3-23，迁移 `20260924000000_practice_tests.sql`）—— 自测卷与逐题讲解的缓存。`practice_tests` 的唯一键落在 **`exam_file_id`**（一份试卷永远只有一张当前有效的自测卷 → 关掉"同一份试卷两条卷子"这种无法解释的状态）；`answer_key_file_id` 是**第二个刻意的非 CASCADE 例外**（`ON DELETE SET NULL`：答案文件被删时卷子不该跟着消失，只是从此每题都没答案，界面如实标注）；**差量判据是两个 `modified_at`**（试卷 + 答案各一个，任一不同即重算 —— 老师换掉答案 key 时，旧卷子的答案是**过期的谎话**，比"没有答案"严重得多）。`practice_test_explanations` PK `(practice_test_id, question_key, locale)`，`question_key` 跟着**切题顺序**走（重排后旧讲解不会被错配到新题上）。**零枚举变更**（已核实：复用 3-18 建表时就有的 `messages.type='practice_test'`，两张新表的 `status` CHECK 是新建而非改写）。见 **ADR-027** | P0-3-23、**ADR-027** |
 | 2026-09-18 | **§3.2 `courses` 新增 `syllabus_file_id` / `syllabus_seen_modified_at` 两列**（P0-3-20，迁移 `20260923000000_syllabus_drift.sql`）—— 大纲漂移检测的**差量锚点**。`syllabus_file_id` 是**指针**（「这门课认哪份文件」），`ON DELETE SET NULL` 是**刻意的非 CASCADE 例外**（§6 已注明理由：它不拥有那份文件）；`syllabus_seen_modified_at` 存的是**文件版本**（逐字来自 `course_files.modified_at`）**不是核对时刻** —— 存成 `now()` 会让每轮同步都报"大纲变了"（纯噪音），而真变更反而分辨不出来。**只加两列、不动任何枚举、无需补 CHECK**（已核实 `exam_dates.source` 含 `'canvas'`、`grade_components.source` 已由 `20260918000000` 补平、`messages.type` 含 `'syllabus_drift'`）。§6 表关系简图补两条关系线 + 上述例外说明。⚠️ **本表缺 2026-09-14 ~ 09-18 若干行**（3-14 / 3-17 / 3-19 / 3-19b 的表结构变更只在各自章节标注、未回填本表），待单开一次文档回补 | P0-3-20、**ADR-026**、P0-3-19 |

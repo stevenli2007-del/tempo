@@ -21,6 +21,7 @@
  */
 
 import { useEffect, useMemo, useRef, useState } from "react"
+import Link from "next/link"
 import { Sparkles } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
@@ -458,6 +459,26 @@ function ProposalBubble({
         ))}
 
         {/*
+          自测卷入口（P0-3-23）。**这是这条消息的主行动** —— 卷子在生成那一刻就已落库，
+          用户来消息栏要做的就是"去把卷子做了"，所以给一个显眼的一行链接，
+          而不是埋在下面那行「时间 · 原文 ↗」里（那里是元信息，「原文」指向的是
+          Canvas 上那份试卷，用途完全不同）。
+
+          站内跳转用 `<Link>`（客户端导航、不新开窗口）：`paperUrl` 是可空字段，
+          由 `readInternalPath` 守卫出来 —— 只在"单个 `/` 开头的站内路径"时存在。
+        */}
+        {view.paperUrl && (
+          <p className="mt-2 text-sm">
+            <Link
+              href={view.paperUrl}
+              className="font-medium text-ink underline decoration-dotted underline-offset-2 hover:opacity-80"
+            >
+              打开自测卷 →
+            </Link>
+          </p>
+        )}
+
+        {/*
           AI 要点（P0-3-25b）。
 
           🔴 三件事必须同时成立，缺一个这个功能就变成"看起来有用、实际误导"：
@@ -644,6 +665,19 @@ function ResolvedReceipt({
       </div>
       {view.receiptText && <p className="text-ink-muted">{view.receiptText}</p>}
       <div className="flex flex-wrap items-center gap-3">
+        {/*
+          处理完（确认 / 忽略）之后**仍然**给自测卷入口：卷子与这条通知是两回事 ——
+          提案被收走不等于卷子没了，用户随时可能想回去做。这里不显示会让他以为
+          "点完知道了卷子就没了"（而它其实一直在课程页资料区）。
+        */}
+        {view.paperUrl && (
+          <Link
+            href={view.paperUrl}
+            className="text-ink-muted underline decoration-dotted underline-offset-2 hover:text-ink"
+          >
+            打开自测卷 →
+          </Link>
+        )}
         {view.sourceUrl && (
           <a
             href={view.sourceUrl}

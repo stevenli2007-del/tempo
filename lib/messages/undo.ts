@@ -38,11 +38,21 @@ export type MessageUndoer = (ctx: UndoContext) => Promise<UndoOutcome>
 const materialUndoer: MessageUndoer = async () => ({ ok: true })
 
 /**
+ * 同上（P0-3-23）。practice_test 的确认是空写入 → 没有行可回滚。
+ *
+ * ⚠️ 这不是"能撤但撤不出东西"：`appliedCount` 为 0 时界面**根本不显示撤销按钮**
+ * （见 `messages-view.tsx` 的 `canUndo`），这个空撤销器只是为了满足
+ * `satisfies Record<ApplierReadyType, MessageUndoer>` 的键一致。
+ */
+const practiceTestUndoer: MessageUndoer = async () => ({ ok: true })
+
+/**
  * 加载器表（与 APPLIERS 同形）。这里不需要动态 import（撤销只在服务端跑，
  * 不存在"把服务端依赖拖进客户端图"的问题），直接静态引用。
  */
 const UNDOERS = {
   material: materialUndoer,
+  practice_test: practiceTestUndoer,
   announcement: announcementUndoer,
   // ⚠️ 3-20 的撤销器与公告那一个**本质不同**：漂移里有 update（改期），
   // 撤销要按确认时留下的旧值快照写回去，不能按 id 删。见 `undoers/syllabus-drift.ts`。

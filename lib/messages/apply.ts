@@ -74,6 +74,22 @@ const materialApplier: MessageApplier = async () => ({
 })
 
 /**
+ * `practice_test`：自测卷已生成的通知（P0-3-23 产出）。
+ *
+ * 与 `material` 同一性质 —— 卷子**在生成那一刻就已经落库**（`practice_tests`），
+ * 这条消息只是"去用它"的入口。所以「确认」只代表看到了，**刻意空写入**，
+ * 不是"还没实现"（那种情况会像别的未接入类型一样返回明确的失败）。
+ *
+ * 🔴 用户真正的行动是**打开卷子**，不是点这个按钮 —— 入口由视图层从
+ * `payload.paperPath` 派生（`view.ts` 的 `paperUrl`，渲染成「打开自测卷 →」）。
+ * 按钮点完的效果 = 这条通知从"待处理"里收走（少一条占版面的卡片）。
+ */
+const practiceTestApplier: MessageApplier = async () => ({
+  ok: true,
+  summary: '知道了（自测卷已生成，随时可从课程页资料区打开）',
+})
+
+/**
  * 加载器表。
  *
  * `satisfies Record<ApplierReadyType, ApplierLoader>` 是**编译期**保证：
@@ -82,6 +98,8 @@ const materialApplier: MessageApplier = async () => ({
  */
 const APPLIERS = {
   material: async () => materialApplier,
+  // 同样是零依赖的空写入 → 就地定义，不必为它单开一个 appliers/ 文件。
+  practice_test: async () => practiceTestApplier,
   announcement: async () => (await import('./appliers/announcement')).announcementApplier,
   // 3-20 的写入器同样惰性加载：它 import 了 `syncExamToTask` / `loadActiveCourseIds`，
   // 顶层引入会把服务端依赖链拖进任何 import 本文件的调用方（见上方 ①）。

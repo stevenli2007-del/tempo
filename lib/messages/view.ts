@@ -44,8 +44,17 @@ export const MESSAGE_TYPE_LABELS: Record<MessageType, string> = {
 /** 默认的确认按钮文案。 */
 const CONFIRM_LABEL = '确认'
 /**
- * 无落点的公告：「确认」什么都不会写，叫它「知道了」才是诚实的说法
+ * 没有东西可写的提案：「确认」什么都不会写，叫它「知道了」才是诚实的说法
  * （ADR-016 R3：不许让用户以为写进去了）。
+ *
+ * ### 目前谁用它
+ * ① 无落点的公告（P0-3-25）—— 只有一句"本周课取消"可看；
+ * ② 核对完确认没差异的漂移提案（P0-3-20）；
+ * ③ 自测卷通知（P0-3-23）—— 卷子在生成那一刻就落库了，消息只是"去用它"的入口。
+ *
+ * ⚠️ **已知的不一致（留待统一）**：`material`（资料索引通知）同样是空写入，
+ * 按钮却仍是「确认」。改它属于 3-19 的范围（`regress-messages.ts` 有一条断言钉住），
+ * 本卡不动它 —— 但这里记一笔，免得后人以为"空写入 → 知道了"这条规则只在部分类型上生效。
  */
 const ACK_LABEL = '知道了'
 
@@ -166,6 +175,17 @@ export type MessageView = {
    * 只有这一条路能看。**已强制 http(s)**，见 `readSourceUrl`。
    */
   sourceUrl: string | null
+  /**
+   * **站内**页面路径（P0-3-23）：自测卷页 `/courses/<id>/practice-tests/new?exam=…`。
+   *
+   * 与 `sourceUrl` 分两个字段是刻意的：`sourceUrl` 是**外站**（Canvas 上的原文，
+   * 走 http(s) 白名单 + `target="_blank"`），这里是**站内**（用客户端路由跳转、
+   * 不能开新窗口）。混成一个字段早晚会有人给它加 `target="_blank"`，
+   * 或者把相对路径喂给只放行 http(s) 的守卫（→ 链接凭空消失）。
+   *
+   * 🔴 守卫见 `readInternalPath`：`payload` 是 jsonb，只放行"单个 `/` 开头的站内路径"。
+   */
+  paperUrl: string | null
   /**
    * 合并摘要的条目（P0-3-25 C 口径）。**空数组 = 这条不是摘要**，
    * 渲染层据此决定要不要画那个可展开的列表。
@@ -328,14 +348,17 @@ export function toMessageView(
     blockReason,
     timeLabel: TIME_FORMATTER.format(new Date(message.createdAt)),
     sourceUrl: readSafeUrl(message.payload.sourceUrl),
+    paperUrl: readInternalPath(message.payload.paperPath),
     digestItems: readDigest(message.payload),
     digestOverflow: readDigestOverflow(message.payload),
-    // 只有**明确标了**「无落点」的公告、以及**核对完确认没差异**的漂移提案，
-    // 才改按钮文案：这两种情况下确认确实什么都不写，叫「确认」是在含糊其辞。
+    // 只有**确实什么都不写**的三种情况才改按钮文案 —— 叫「确认」是在含糊其辞：
+    // ① 明确标了「无落点」的公告；② 核对完确认没差异的漂移提案；
+    // ③ 自测卷通知（卷子早已落库，消息只是入口）。
     // 其余（含字段缺失）一律按「确认」。
     confirmLabel:
       (message.type === 'announcement' && message.payload.landing === false) ||
-      (message.type === 'syllabus_drift' && driftStatus === 'clean')
+      (message.type === 'syllabus_drift' && driftStatus === 'clean') ||
+      message.type === 'practice_test'
         ? ACK_LABEL
         : CONFIRM_LABEL,
     summaryPoints,
@@ -401,6 +424,36 @@ function readSafeUrl(value: unknown): string | null {
   } catch {
     return null
   }
+}
+
+/**
+ * 读一个**站内**路径字段（P0-3-23 的 `payload.paperPath`）。
+ *
+ * ### 🔴 为什么不能复用 `readSafeUrl`
+ * 那个只放行 http(s)，而这里是相对路径（`/courses/…`）—— 直接喂过去会被判 null，
+ * 症状是"链接凭空消失、零报错"。反过来把 `readSafeUrl` 放宽到"也接受相对路径"更糟：
+ * 外站链接那条路会一起失去白名单。
+ *
+ * ### 🔴 为什么相对路径也要守卫
+ * `//evil.com/x` 在浏览器里是**协议相对 URL** —— 它会跳到 `https://evil.com/x`。
+ * 它长得和 `/courses/…` 只差一个字符，评审时几乎看不出来。
+ * `/\evil.com` 同理：部分浏览器把反斜杠当斜杠处理。
+ * 所以判据是「以**单个** `/` 开头」：`//` 与 `/\` 都必须拒。
+ *
+ * ⚠️ 入参是 `unknown`（`payload` 是 jsonb，没有 schema 约束）：一次手工改库
+ * 或一个还没写的产出方就能塞进 `javascript:…`，而渲染层的 `<a href>` 会照单全收。
+ * 在**唯一**的读取点挡掉，比在每个渲染点各写一遍白名单可靠（与 `readSafeUrl` 同一取舍）。
+ */
+function readInternalPath(value: unknown): string | null {
+  if (typeof value !== 'string') return null
+  const path = value.trim()
+  if (path === '') return null
+  // 必须以单个 `/` 开头：拒绝 `//host`（协议相对）、`/\host`、以及任何带 scheme 的值
+  // （`https://…` / `javascript:…` 都不以 `/` 开头，天然被挡在门外）。
+  if (!path.startsWith('/') || path.startsWith('//') || path.startsWith('/\\')) return null
+  // 控制字符（含换行）：`/a\nb` 这类值进 href 会被浏览器做各种归一化，不如直接拒。
+  if (/[\u0000-\u001f\u007f]/.test(path)) return null
+  return path
 }
 
 /**

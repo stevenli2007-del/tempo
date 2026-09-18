@@ -184,6 +184,82 @@ const CASES: Case[] = [
       '提醒他"你正在把一个已拍板的决定改掉"。',
     deleteBy: `course_file_id=eq.${BOGUS_UUID}`,
   },
+
+  // ---------- P0-3-23 新表：practice_tests / practice_test_explanations ----------
+  // ⚠️ 这两张表的所有列里只有 `course_id` / `exam_file_id` / `practice_test_id` /
+  // `question_key` / `locale` 是必填无默认，其余都有 default —— 所以下面的行只给这几个。
+  //
+  // 🔴 判定手法：喂 `BOGUS_UUID`（那两个外键表里都不存在）→ 合法值会被**外键**拦（23503 = 放行）、
+  // 非法值会被 **CHECK** 先拦（23514 = 拦下）。探针靠这个区分"约束在拦"与"约束被删了"。
+  {
+    label: "practice_tests.status = 'ok'（默认态）",
+    table: 'practice_tests',
+    row: { course_id: BOGUS_UUID, exam_file_id: BOGUS_UUID, status: 'ok' },
+    expect: 'accepted',
+    why: 'P0-3-23 自测卷生成成功的落库态。**这是该卡的验收闸**：仍被拒 = 迁移没生效',
+    deleteBy: `exam_file_id=eq.${BOGUS_UUID}`,
+  },
+  {
+    label: "practice_tests.status = 'failed'（不再重试标记）",
+    table: 'practice_tests',
+    row: { course_id: BOGUS_UUID, exam_file_id: BOGUS_UUID, status: 'failed' },
+    expect: 'accepted',
+    why: '确定性失败要落 failed 行来"记住别再重试"（模拟答案 key 一直读不出来），必须被放行',
+    deleteBy: `exam_file_id=eq.${BOGUS_UUID}`,
+  },
+  {
+    label: "practice_tests.status = '__bogus__'（对照组）",
+    table: 'practice_tests',
+    row: { course_id: BOGUS_UUID, exam_file_id: BOGUS_UUID, status: '__bogus__' },
+    expect: 'rejected',
+    why: '证明 status 的 CHECK **确实在拦** —— 没有对照组，"放行"可能只是约束被整个删了',
+    deleteBy: `exam_file_id=eq.${BOGUS_UUID}`,
+  },
+  {
+    label: "practice_test_explanations.status = 'ok'（默认态）",
+    table: 'practice_test_explanations',
+    row: { practice_test_id: BOGUS_UUID, question_key: 'probe-q1', locale: 'zh-CN', status: 'ok' },
+    expect: 'accepted',
+    why: '逐题讲解生成成功的落库态（懒生成：用户点哪一题算哪一题）',
+    deleteBy: `practice_test_id=eq.${BOGUS_UUID}`,
+  },
+  {
+    label: "practice_test_explanations.status = 'failed'（不再重试标记）",
+    table: 'practice_test_explanations',
+    row: {
+      practice_test_id: BOGUS_UUID,
+      question_key: 'probe-q1',
+      locale: 'zh-CN',
+      status: 'failed',
+    },
+    expect: 'accepted',
+    why: '模型给不出符合 schema 的讲解时落 failed → 下次不再为同一题重打一次模型',
+    deleteBy: `practice_test_id=eq.${BOGUS_UUID}`,
+  },
+  {
+    label: "practice_test_explanations.status = '__bogus__'（对照组）",
+    table: 'practice_test_explanations',
+    row: {
+      practice_test_id: BOGUS_UUID,
+      question_key: 'probe-q1',
+      locale: 'zh-CN',
+      status: '__bogus__',
+    },
+    expect: 'rejected',
+    why: '同上：没有对照组就分不清"放行"与"约束被整体删掉"',
+    deleteBy: `practice_test_id=eq.${BOGUS_UUID}`,
+  },
+  {
+    label: "practice_test_explanations.locale = 'fr'（**应放行**，反向断言）",
+    table: 'practice_test_explanations',
+    row: { practice_test_id: BOGUS_UUID, question_key: 'probe-q1', locale: 'fr', status: 'ok' },
+    expect: 'accepted',
+    why:
+      '与 file_summaries 同一条 ADR-026 决定：locale **不加 CHECK**（语言是数据维度不是代码分支，' +
+      '加一种语言不该被一次迁移卡住），白名单只在 lib/practice-test/prompt.ts。' +
+      '⚠️ 反向断言 —— 哪天有人给它补上 CHECK，这里会变红，提醒他"你正在改一个已拍板的决定"。',
+    deleteBy: `practice_test_id=eq.${BOGUS_UUID}`,
+  },
 ]
 
 type Verdict = 'accepted' | 'rejected' | 'unexpected'
@@ -301,6 +377,8 @@ async function main(): Promise<void> {
     grade_components: `name=eq.probe&course_id=eq.${BOGUS_UUID}`,
     messages: `user_id=eq.${BOGUS_UUID}`,
     file_summaries: `course_file_id=eq.${BOGUS_UUID}`,
+    practice_tests: `exam_file_id=eq.${BOGUS_UUID}`,
+    practice_test_explanations: `practice_test_id=eq.${BOGUS_UUID}`,
   }
   console.log('\n零残留自检（每个哨兵条件都应 0 行）：')
   for (const [table, qs] of Object.entries(RESIDUE)) {
@@ -387,6 +465,34 @@ async function main(): Promise<void> {
     console.log(
       '  ⚠️  file_summaries.locale 被加上了 CHECK —— 这与 ADR-026 的刻意决定相反（语言是数据维度，' +
         '不该被迁移卡住），请人工确认是不是有意改的。',
+    )
+  }
+
+  const paperOkCase = results.find((r) => r.c.label === "practice_tests.status = 'ok'（默认态）")
+  const paperControl = results.find(
+    (r) => r.c.label === "practice_tests.status = '__bogus__'（对照组）",
+  )
+  if (paperOkCase?.verdict === 'accepted' && paperControl?.verdict === 'rejected') {
+    console.log(
+      '  ✅ P0-3-23 迁移生效：practice_tests / practice_test_explanations 已建，' +
+        'status 接受 ok/failed，且 CHECK 仍在拦非法值。',
+    )
+  } else if (paperOkCase?.verdict !== 'accepted') {
+    console.log(
+      '  ❌ P0-3-23 迁移**未生效** —— 回到 SQL Editor 重跑 `20260924000000_practice_tests.sql`。',
+    )
+  } else {
+    console.log(
+      '  ❌ 对照组异常：practice_tests.status 的 CHECK 没有拦下非法值 —— 约束可能被整体删掉了，人工核对。',
+    )
+  }
+  const paperLocaleCase = results.find(
+    (r) => r.c.label === "practice_test_explanations.locale = 'fr'（**应放行**，反向断言）",
+  )
+  if (paperLocaleCase?.verdict === 'rejected') {
+    console.log(
+      '  ⚠️  practice_test_explanations.locale 被加上了 CHECK —— 与 ADR-026 相反（同 file_summaries），' +
+        '请人工确认是不是有意改的。',
     )
   }
 

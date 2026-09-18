@@ -120,11 +120,11 @@ console.log("toMessageView（UI 可用性）")
 
   // 6. 各类型 applier 就绪状态（单一来源，UI 与 API 都读它）。
   //    ⚠️ 每张卡接入自己的 applier 时都要改这一行（3-19 接 material、3-25 接
-  //    announcement、3-20 接 syllabus_drift）。
+  //    announcement、3-20 接 syllabus_drift、3-23 接 practice_test）。
   check(
-    "applier 就绪：material + announcement + syllabus_drift",
+    "applier 就绪：material + announcement + syllabus_drift + practice_test",
     isApplierReady("material") && isApplierReady("announcement") &&
-      isApplierReady("syllabus_drift") && !isApplierReady("practice_test") &&
+      isApplierReady("syllabus_drift") && isApplierReady("practice_test") &&
       !isApplierReady("routine"),
   )
 }
@@ -210,6 +210,58 @@ console.log("公告视图（P0-3-25）")
     "缺 sourceUrl → null",
     toMessageView(makeMessage("announcement", "pending")).sourceUrl === null,
   )
+}
+
+console.log("自测卷入口（P0-3-23）")
+{
+  // 12. 站内路径 → 派生成 `paperUrl`，渲染层据此画「打开自测卷 →」。
+  const ok = toMessageView(
+    makeMessage("practice_test", "pending", {
+      paperPath: "/courses/1555045/practice-tests/new?exam=abc",
+    }),
+  )
+  check("自测卷类型标签", ok.typeLabel === "自测卷", ok.typeLabel)
+  check(
+    "站内路径派生成 paperUrl",
+    ok.paperUrl === "/courses/1555045/practice-tests/new?exam=abc",
+    String(ok.paperUrl),
+  )
+  // 卷子在生成那一刻就已落库（`practice_tests`），消息只是入口 → 确认是**空写入**。
+  check("自测卷 → 可确认（走空写入回执）", ok.canAccept === true, ok.blockReason ?? "null")
+  check("自测卷 → 文案「知道了」（确认什么都不写）", ok.confirmLabel === "知道了", ok.confirmLabel)
+
+  // 13. 缺 paperPath（老数据 / 别的产出方）→ 入口不画，但消息本身照常能处理。
+  const noPath = toMessageView(makeMessage("practice_test", "pending"))
+  check("缺 paperPath → paperUrl 为 null", noPath.paperUrl === null, String(noPath.paperUrl))
+  check("缺 paperPath → 仍可确认", noPath.canAccept === true, noPath.blockReason ?? "null")
+
+  // 14. 处理过之后入口**仍在**：卷子与这条通知是两回事，提案被收走不等于卷子没了。
+  const accepted = toMessageView(
+    makeMessage("practice_test", "accepted", {
+      paperPath: "/courses/1555045/practice-tests/new?exam=abc",
+    }),
+  )
+  check("已确认后入口仍在", accepted.paperUrl !== null, String(accepted.paperUrl))
+  check("已确认后不可再确认", accepted.canAccept === false)
+
+  // 15. 🔴 站内路径白名单：`payload` 是 jsonb，只有"**单个** `/` 开头的站内路径"能过。
+  //     `//evil.com/x` 是**协议相对 URL** —— 浏览器会当 `https://evil.com/x` 处理，
+  //     而它和 `/courses/…` 只差一个字符，评审时几乎看不出来。
+  //     `/\evil.com/x` 同理（部分浏览器把反斜杠当斜杠）。
+  const badPaths = [
+    "//evil.com/x",
+    "/\\evil.com/x",
+    "https://evil.com/x",
+    "javascript:alert(1)",
+    "courses/1555045/x",
+    "",
+    "   ",
+    "/ok\n/x",
+  ]
+  for (const p of badPaths) {
+    const v = toMessageView(makeMessage("practice_test", "pending", { paperPath: p }))
+    check(`拒绝非站内路径：${JSON.stringify(p).slice(0, 24)}`, v.paperUrl === null, String(v.paperUrl))
+  }
 }
 
 console.log("合并摘要视图（P0-3-25 C 口径）")

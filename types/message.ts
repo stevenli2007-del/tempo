@@ -212,6 +212,23 @@ export type MessagePayload = {
   drift?: MessageDrift
   /** 核对失败的人话原因（`driftStatus='failed'` 时必有）。机器可读的那一份。 */
   driftError?: string
+  /**
+   * 自测卷账的 id（`practice_tests.id`，P0-3-23）。
+   *
+   * 与下面的 `paperPath` 是一对：这个是**数据**（去重键 `contains('payload', …)`
+   * 靠它认人，见 `findPracticeTestMessageId`），那个是**给用户点的入口**。
+   */
+  practiceTestId?: string
+  /**
+   * 自测卷页的**站内路径**（P0-3-23），如 `/courses/<id>/practice-tests/new?exam=<fileId>`。
+   *
+   * 🔴 是**路径**不是外链。读取侧由 `readInternalPath` 守卫（只放行单个 `/` 开头的
+   * 站内路径，挡掉 `//host` 这种协议相对 URL），渲染层用 `<Link>` 走客户端导航。
+   * 与 `sourceUrl`（外站 → http(s) 白名单 + `target="_blank"`）**刻意分成两个字段**：
+   * 混成一个早晚会有人把相对路径喂给只放行 http(s) 的守卫（链接凭空消失），
+   * 或者给站内路径加上 `target="_blank"`。
+   */
+  paperPath?: string
   [key: string]: unknown
 }
 
