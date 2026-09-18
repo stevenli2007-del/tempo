@@ -34,6 +34,11 @@ export type MessageView = {
   typeLabel: string
   /** 原始状态。UI 用它区分"已确认"与"已忽略"（两者都是非 pending）。 */
   status: MessageStatus
+  /**
+   * 原始时间戳（ISO）。会话版面要按时间排，**必须显式排**——
+   * 不能靠 `loadMessages` 的返回顺序（那是数据层的实现细节，改个 order 就会静默错排）。
+   */
+  createdAt: string
   title: string
   lines: string[]
   courseLabel: string | null
@@ -80,6 +85,7 @@ export function toMessageView(message: Message): MessageView {
     type: message.type,
     typeLabel: MESSAGE_TYPE_LABELS[message.type],
     status: message.status,
+    createdAt: message.createdAt,
     title: readTitle(message.payload),
     lines: readDetails(message.payload),
     courseLabel:

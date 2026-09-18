@@ -80,6 +80,8 @@ console.log("toMessageView（UI 可用性）")
   check("dismissed 非 pending", v5.isPending === false)
   check("dismissed 不可确认", v5.canAccept === false)
   check("dismissed 状态字段透传", v5.status === "dismissed")
+  // 会话版面按 createdAt 排序，这个字段丢了就会静默错排（且构建/类型全绿）。
+  check("createdAt 透传", v5.createdAt === "2026-09-17T18:00:00Z", v5.createdAt)
 
   // 5. 缺标题 → 如实占位，不编假标题。
   const v6 = toMessageView(makeMessage("material", "pending", { title: "" }))
