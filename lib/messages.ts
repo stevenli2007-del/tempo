@@ -1,6 +1,15 @@
 import { MESSAGE_STATUSES, MESSAGE_TYPES } from '@/lib/messages/registry'
+import { DEFAULT_SUMMARY_LOCALE } from '@/lib/messages/summary/locale'
+import { loadSummaries } from '@/lib/messages/summary/store'
 import { createClient } from '@/lib/supabase/server'
-import type { Message, MessagePayload, MessageRow, MessageStatus, MessageType } from '@/types/message'
+import type {
+  Message,
+  MessagePayload,
+  MessageRow,
+  MessageStatus,
+  MessageSummary,
+  MessageType,
+} from '@/types/message'
 
 /**
  * `messages` 表的读写（P0-3-18 消息栏的数据源）。
@@ -30,8 +39,12 @@ export const MESSAGE_COLUMNS = 'id, user_id, type, payload, status, created_at'
  * （把未知类型塞给 UI 只会让渲染层被迫瞎猜），而是由调用方处理未知行 ——
  * `toMessage()` 返回 `null`，`loadMessages` 会把它过滤掉并 `console.warn`。
  * 新增枚举取值时，这个函数与迁移的 CHECK 约束必须同时改（CodingRules §10.1 第 16 条）。
+ *
+ * @param summary AI 要点（P0-3-25b）。默认 null：要点存在**另一张表**里，
+ *   只有列表读取会顺带查出来（`loadMessage` / `updateMessageStatus` 不带 ——
+ *   已处理的提案只画一行回执，要点在那儿没有位置）。见 `types/message.ts`。
  */
-export function toMessage(row: MessageRow): Message | null {
+export function toMessage(row: MessageRow, summary: MessageSummary | null = null): Message | null {
   if (!MESSAGE_TYPES.includes(row.type as MessageType)) return null
   if (!MESSAGE_STATUSES.includes(row.status as MessageStatus)) return null
 
@@ -42,6 +55,7 @@ export function toMessage(row: MessageRow): Message | null {
     payload,
     status: row.status as MessageStatus,
     createdAt: row.created_at,
+    summary,
   }
 }
 
@@ -73,6 +87,27 @@ export async function loadMessages(
       console.warn('[messages] 跳过无法识别的行:', row.id, row.type, row.status)
     }
   }
+
+  /**
+   * 顺带查要点缓存（P0-3-25b）。
+   *
+   * ### 为什么在服务端一次查完，而不是让客户端逐条补
+   * 首屏要直接画出**已有的**要点。留给客户端补的话，缓存命中的那些也会先渲染成空白、
+   * 再被替换 —— 每次打开都闪一下，而它们明明早就算好了。
+   * 客户端那一趟（`POST /api/v1/messages/summaries`）只负责**补缺**。
+   *
+   * `loadSummaries` 失败时返回空 Map 并留日志（见 `summary/store.ts` 文件头）：
+   * 要点读不出来不该让整个消息栏打不开。
+   */
+  const summaries = await loadSummaries(
+    supabase,
+    messages.map((message) => message.id),
+    DEFAULT_SUMMARY_LOCALE,
+  )
+  for (const message of messages) {
+    message.summary = summaries.get(message.id) ?? null
+  }
+
   return { messages, error: null }
 }
 

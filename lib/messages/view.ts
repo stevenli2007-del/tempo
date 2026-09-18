@@ -3,6 +3,14 @@ import { SCHOOL_TIME_ZONE } from '@/lib/time'
 // （messages-view.tsx → 这里），而 apply 的动态 import 会在构建期把
 // `next/headers` 拖进客户端图，整个 build 直接失败。详见 `registry.ts` 的注释。
 import { isApplierReady } from '@/lib/messages/registry'
+// 摘要的文案（纯模块，零 import）—— 同样是为了别把重依赖拖进客户端图。
+import {
+  DEFAULT_SUMMARY_LOCALE,
+  coverageLabel,
+  summaryLabel,
+  summaryPendingLabel,
+  type SummaryLocale,
+} from '@/lib/messages/summary/locale'
 import type { Message, MessagePayload, MessageStatus, MessageType } from '@/types/message'
 
 /**
@@ -153,6 +161,93 @@ export type MessageView = {
   digestOverflow: number
   /** 「确认」按钮的文案。无落点的公告是「知道了」。 */
   confirmLabel: string
+  /**
+   * AI 要点（P0-3-25b）。空数组 = 没有要显示的东西（还没生成 / 生成失败 /
+   * 模型认为正文没有实质信息）—— **三种情况在界面上长得一样，也应该是**：
+   * 要点是增强，原文才是主体。
+   */
+  summaryPoints: string[]
+  /** 「AI 总结」归因标签。**只要有要点就必须显示** —— 要点不是老师的原话。 */
+  summaryLabel: string
+  /** 覆盖率文案（"基于最新 20 条 / 共 40 条"）；覆盖完整时是 null。 */
+  summaryCoverage: string | null
+  /**
+   * 这条**还可以去生成要点**（公告 + 仍待处理 + 还没有任何结论）。
+   *
+   * 🔴 客户端只按这一个字段决定"要不要请求生成"。判定放在这里（与
+   * `canAccept` 同一取向）而不是散在组件里，否则"什么时候该请求"会变成两处各写一遍
+   * —— P0-3-15 那类分叉的预备队。
+   */
+  needsSummary: boolean
+  /** 「生成中」的占位文案（真在请求中时由组件决定要不要画）。 */
+  summaryBusyLabel: string
+}
+
+export function toMessageView(
+  message: Message,
+  locale: SummaryLocale = DEFAULT_SUMMARY_LOCALE,
+): MessageView {
+  const isPending = message.status === 'pending'
+  const applierReady = isApplierReady(message.type)
+  const confidence = message.payload.confidence === 'low' ? 'low' : 'high'
+
+  // 抽成变量再派生 tone：色必须跟着**同一个**判定走。
+  // 两处各判一遍（一处判空、一处判色）就是 P0-3-15 那类分叉的预备队。
+  const courseLabel =
+    typeof message.payload.courseName === 'string' && message.payload.courseName !== ''
+      ? message.payload.courseName
+      : null
+
+  let blockReason: string | null = null
+  if (!isPending) {
+    blockReason = '已经处理过了'
+  } else if (confidence === 'low') {
+    blockReason = '置信度低：请先去课程页核对原文，这条不允许一键接受'
+  } else if (!applierReady) {
+    blockReason = '这类提案的写入逻辑还没接入，现在只能「忽略」'
+  }
+
+  // 摘要只对**公告**有意义（别的类型没有公告正文可提炼），且只对仍在等待处理的
+  // 消息有意义 —— 已处理的消息在界面上只剩一行回执，要点没有位置（见 `ResolvedReceipt`）。
+  // `summary === null`（而不是"没有要点"）才是"还没问过模型"：
+  // status='failed' 的行同样会带过来（points 为空），语义是"别再问了"。
+  const summary = message.summary ?? null
+  const summaryPoints = summary?.points ?? []
+  const needsSummary = message.type === 'announcement' && isPending && summary === null
+
+  return {
+    id: message.id,
+    type: message.type,
+    typeLabel: MESSAGE_TYPE_LABELS[message.type],
+    status: message.status,
+    createdAt: message.createdAt,
+    title: readTitle(message.payload),
+    lines: readDetails(message.payload),
+    courseLabel,
+    courseTone: courseLabel === null ? null : courseToneClass(courseLabel),
+    confidence,
+    isPending,
+    applierReady,
+    canAccept: isPending && confidence === 'high' && applierReady,
+    blockReason,
+    timeLabel: TIME_FORMATTER.format(new Date(message.createdAt)),
+    sourceUrl: readSafeUrl(message.payload.sourceUrl),
+    digestItems: readDigest(message.payload),
+    digestOverflow: readDigestOverflow(message.payload),
+    // 只有**明确标了**「无落点」的公告才改文案。`landing` 缺失（老数据 / 其他类型）
+    // 一律按「确认」—— 不能因为字段没写就让按钮含糊其辞。
+    confirmLabel:
+      message.type === 'announcement' && message.payload.landing === false
+        ? ACK_LABEL
+        : CONFIRM_LABEL,
+    summaryPoints,
+    summaryLabel: summaryLabel(locale),
+    // 覆盖率的判定是纯函数（`coverageLabel`），渲染层不重算 ——
+    // "基于最新 20 条 / 共 40 条"这句话在两种语言下都要一致，只该有一处实现。
+    summaryCoverage: coverageLabel(summary?.itemsUsed ?? 0, summary?.itemsTotal ?? 0, locale),
+    needsSummary,
+    summaryBusyLabel: summaryPendingLabel(locale),
+  }
 }
 
 /** 载荷是 `jsonb`，读的时候**每个字段都要当"可能不存在"**（3-19/3-20/3-23 各自产出）。 */
@@ -242,53 +337,4 @@ function readDigestOverflow(payload: MessagePayload): number {
   const value = payload.digestOverflow
   if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) return 0
   return Math.floor(value)
-}
-
-export function toMessageView(message: Message): MessageView {
-  const isPending = message.status === 'pending'
-  const applierReady = isApplierReady(message.type)
-  const confidence = message.payload.confidence === 'low' ? 'low' : 'high'
-
-  // 抽成变量再派生 tone：色必须跟着**同一个**判定走。
-  // 两处各判一遍（一处判空、一处判色）就是 P0-3-15 那类分叉的预备队。
-  const courseLabel =
-    typeof message.payload.courseName === 'string' && message.payload.courseName !== ''
-      ? message.payload.courseName
-      : null
-
-  let blockReason: string | null = null
-  if (!isPending) {
-    blockReason = '已经处理过了'
-  } else if (confidence === 'low') {
-    blockReason = '置信度低：请先去课程页核对原文，这条不允许一键接受'
-  } else if (!applierReady) {
-    blockReason = '这类提案的写入逻辑还没接入，现在只能「忽略」'
-  }
-
-  return {
-    id: message.id,
-    type: message.type,
-    typeLabel: MESSAGE_TYPE_LABELS[message.type],
-    status: message.status,
-    createdAt: message.createdAt,
-    title: readTitle(message.payload),
-    lines: readDetails(message.payload),
-    courseLabel,
-    courseTone: courseLabel === null ? null : courseToneClass(courseLabel),
-    confidence,
-    isPending,
-    applierReady,
-    canAccept: isPending && confidence === 'high' && applierReady,
-    blockReason,
-    timeLabel: TIME_FORMATTER.format(new Date(message.createdAt)),
-    sourceUrl: readSafeUrl(message.payload.sourceUrl),
-    digestItems: readDigest(message.payload),
-    digestOverflow: readDigestOverflow(message.payload),
-    // 只有**明确标了**「无落点」的公告才改文案。`landing` 缺失（老数据 / 其他类型）
-    // 一律按「确认」—— 不能因为字段没写就让按钮含糊其辞。
-    confirmLabel:
-      message.type === 'announcement' && message.payload.landing === false
-        ? ACK_LABEL
-        : CONFIRM_LABEL,
-  }
 }

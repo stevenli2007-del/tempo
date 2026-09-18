@@ -17,7 +17,9 @@
     "regress:announcements": "npx -y tsx scripts/regress-announcements.ts",
     "probe:course-parse": "npx -y tsx scripts/probe-course-parse.ts",
     "probe:schema": "npx -y tsx scripts/probe-schema-constraints.ts",
-    "probe:announcements": "npx -y tsx scripts/probe-announcements.ts"
+    "probe:announcements": "npx -y tsx scripts/probe-announcements.ts",
+    "regress:message-summaries": "npx -y tsx scripts/regress-message-summaries.ts",
+    "probe:message-summaries": "npx -y tsx scripts/probe-message-summaries.ts"
   },
   "dependencies": {
     "@base-ui/react": "^1.7.0",

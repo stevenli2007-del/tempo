@@ -7,8 +7,6 @@ import { COURSE_COLUMNS, toCourse } from "@/lib/courses"
 import type { CourseRow } from "@/lib/courses"
 import { createClient } from "@/lib/supabase/server"
 import { loadMessages } from "@/lib/messages"
-import { toMessageView } from "@/lib/messages/view"
-import type { MessageView } from "@/lib/messages/view"
 
 export const metadata = {
   title: "消息栏 · Tempo",
@@ -24,7 +22,15 @@ export const dynamic = "force-dynamic"
  *
  * 服务端只负责：鉴权 + 拉当前用户的提案列表（RLS 按 `user_id` 收口，用用户级客户端）。
  * 渲染与交互（确认 / 忽略、内嵌的「告诉 Tempo 一个 Update」流程）交给客户端
- * `MessagesView` —— 它接收服务端预取的 `initialViews`，避免首屏空白与 hydration mismatch。
+ * `MessagesView` —— 它接收服务端预取的 `initialMessages`，避免首屏空白与 hydration mismatch。
+ *
+ * ### 为什么现在下发的是 `Message` 而不是 `MessageView`（P0-3-25b）
+ * 要点是**异步补进来**的（客户端打开后再去生成，见 `summary/generate.ts`），
+ * 所以视图必须能在客户端从"消息 + 新到的要点"重新派生 —— 下发已算好的视图就没法重算了。
+ * 派生仍然是**同一个纯函数** `toMessageView()`（服务端与客户端各算一遍、结果一致，
+ * 时间格式固定时区、课程色是散列，所以不存在 hydration mismatch）。
+ * 顺带的好处：要点**已缓存**的那些仍然由服务端一次查出来（`loadMessages`），
+ * 首屏直接画出来，不会先显示空白再被替换。
  *
  * ### 版面：会话式（2026-09-17 验收修正）
  * 页面不再是"文档流里排一列卡片"，而是**整块占满视口**：中间消息流独占滚动、底部输入区常驻。
@@ -50,7 +56,6 @@ export default async function MessagesPage() {
       .eq('is_archived', false)
       .order('created_at', { ascending: true }),
   ])
-  const initialViews: MessageView[] = messages.map(toMessageView)
 
   /**
    * 课程下拉项**必须**在服务端一起下发。
@@ -95,7 +100,7 @@ export default async function MessagesPage() {
             <p className="mt-1 text-sm text-muted-foreground">{error}</p>
           </div>
         ) : (
-          <MessagesView initialViews={initialViews} initialCourses={initialCourses} />
+          <MessagesView initialMessages={messages} initialCourses={initialCourses} />
         )}
       </div>
     </AppShell>

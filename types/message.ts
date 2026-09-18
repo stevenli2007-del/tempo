@@ -90,6 +90,30 @@ export type MessagePayload = {
   [key: string]: unknown
 }
 
+/**
+ * 一条消息的 AI 要点（P0-3-25b，缓存表 `message_summaries`）。
+ *
+ * ### 🔴 它是**缓存**，不是消息的一部分
+ * 要点由模型从公告原文提炼，生成一次就永久复用（公告正文不可变：老师改了内容
+ * 会是一条新公告）。所以它不写进 `payload`：payload 是同步的产物，
+ * 而这是"事后补上的派生物"，两者混在一起会让"重放同步"和"重算要点"互相踩。
+ *
+ * ### `status: 'failed'` 的语义是"别再问了"
+ * `failed` 的行照样会出现在这里（`points` 为空数组）—— 界面上什么都不画，
+ * 但**要点的生成方能看到"这条已经问过了"**，于是不会每次打开消息栏都重打一次模型。
+ * 这与 `points: []`（模型说"这条公告没有实质信息"）在界面上长得一样，
+ * 但语义不同，所以两个字段都留着。
+ */
+export type MessageSummary = {
+  points: string[]
+  /** 实际喂给模型的公告条数。 */
+  itemsUsed: number
+  /** 这条消息挂着的公告总数。两者不等时界面必须标出覆盖率。 */
+  itemsTotal: number
+  status: 'ok' | 'failed'
+  createdAt: string
+}
+
 /** 提案（camelCase，供 UI 使用；snake_case 的列名只出现在 `lib/messages.ts`）。 */
 export type Message = {
   id: string
@@ -97,6 +121,13 @@ export type Message = {
   payload: MessagePayload
   status: MessageStatus
   createdAt: string
+  /**
+   * AI 要点（P0-3-25b）。**可选**，因为两条读取路径的取法不同：
+   * - 列表（`loadMessages`）会一并查出来附上 —— 打开消息栏时要立刻看到缓存里的要点，
+   *   而不是先画一遍空白再等客户端补（那会闪一下）；
+   * - 单条 / PATCH 的返回值不带 —— 已处理的提案只画一行回执，要点在那儿没有位置。
+   */
+  summary?: MessageSummary | null
 }
 
 /** `messages` 表在数据库中的行（与 Database.md / 迁移一致）。 */

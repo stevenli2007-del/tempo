@@ -37,6 +37,7 @@ function makeMessage(
   type: MessageType,
   status: MessageStatus,
   payload: Partial<MessagePayload> = {},
+  summary: Message["summary"] = null,
 ): Message {
   return {
     id: "test-id",
@@ -47,6 +48,7 @@ function makeMessage(
       title: "测试提案",
       ...payload,
     },
+    summary,
   }
 }
 
@@ -345,6 +347,82 @@ console.log("planDecision（API 写入判定）")
   // 11. 忽略路径 applier 是否就绪都不影响（忽略就是什么都不发生）。
   const r5 = planDecision({ currentStatus: "pending", decision: "dismissed", applierReady: true })
   check("忽略就绪→仍 dismissed 不调 applier", r5.kind === "update" && r5.callApplier === false)
+}
+
+console.log("toMessageView（AI 要点，P0-3-25b）")
+{
+  const okSummary: Message["summary"] = {
+    points: ["要交 HW7", "Quiz 1 答案已发布"],
+    itemsUsed: 1,
+    itemsTotal: 1,
+    status: "ok",
+    createdAt: "2026-09-18T00:00:00Z",
+  }
+
+  // 12. 「该不该去生成」只看一个字段：公告 + 待处理 + 还没问过。
+  check(
+    "公告 pending 无要点 → needsSummary",
+    toMessageView(makeMessage("announcement", "pending")).needsSummary,
+  )
+  check(
+    "非公告类型 → 不请求要点",
+    !toMessageView(makeMessage("material", "pending")).needsSummary,
+  )
+  check(
+    "已处理（accepted）→ 不请求要点",
+    !toMessageView(makeMessage("announcement", "accepted")).needsSummary,
+  )
+  check(
+    "已有要点 → 不重复请求",
+    !toMessageView(makeMessage("announcement", "pending", {}, okSummary)).needsSummary,
+  )
+  // 🔴 status='failed' 的行必须**终止请求**（否则每次打开消息栏都重打一次模型），
+  // 但又不能画任何东西（points 由 store 强制为空）。
+  check(
+    "failed 行 → 不再请求、也不显示要点",
+    (() => {
+      const view = toMessageView(
+        makeMessage("announcement", "pending", {}, { ...okSummary, points: [], status: "failed" }),
+      )
+      return !view.needsSummary && view.summaryPoints.length === 0
+    })(),
+  )
+
+  // 13. 要点的呈现：归因标签 + 覆盖率（两处都来自纯函数，不许组件自己拼）。
+  const view = toMessageView(makeMessage("announcement", "pending", {}, okSummary))
+  check("要点原样带出来", view.summaryPoints.join("|") === "要交 HW7|Quiz 1 答案已发布")
+  check("归因标签是「AI 总结」", view.summaryLabel === "AI 总结", view.summaryLabel)
+  check("覆盖完整时不标覆盖率", view.summaryCoverage === null, String(view.summaryCoverage))
+  check("生成中文案可读", view.summaryBusyLabel.includes("生成中"), view.summaryBusyLabel)
+
+  const partial = toMessageView(
+    makeMessage("announcement", "pending", {}, { ...okSummary, itemsUsed: 20, itemsTotal: 40 }),
+  )
+  check(
+    "覆盖不全 → 如实标出",
+    partial.summaryCoverage === "基于最新 20 条 / 共 40 条",
+    String(partial.summaryCoverage),
+  )
+
+  // 14. 英文版（未来）：同一份数据、同一处判定，只是语言换掉。
+  const en = toMessageView(makeMessage("announcement", "pending", {}, okSummary), "en")
+  check("en：归因标签", en.summaryLabel === "AI summary", en.summaryLabel)
+  const enPartial = toMessageView(
+    makeMessage("announcement", "pending", {}, { ...okSummary, itemsUsed: 20, itemsTotal: 40 }),
+    "en",
+  )
+  check("en：覆盖率文案", enPartial.summaryCoverage === "newest 20 of 40", String(enPartial.summaryCoverage))
+
+  // 15. 缺 summary 字段（老数据 / PATCH 返回里没有它）必须等价于"没有要点"，
+  //     而不是崩掉 —— 这条走的是 `message.summary === undefined` 的分支。
+  const legacy = toMessageView({
+    id: "legacy",
+    type: "announcement",
+    status: "pending",
+    createdAt: "2026-09-17T18:00:00Z",
+    payload: { title: "老消息" },
+  })
+  check("summary 字段缺失 → 当作没有要点", legacy.summaryPoints.length === 0 && legacy.needsSummary)
 }
 
 console.log("")
