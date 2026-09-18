@@ -12,7 +12,12 @@
 import { isApplierReady } from "@/lib/messages/apply"
 import { planDecision } from "@/lib/messages/decide"
 import { MESSAGE_STATUSES, MESSAGE_TYPES } from "@/lib/messages/registry"
-import { MESSAGE_TYPE_LABELS, toMessageView } from "@/lib/messages/view"
+import {
+  COURSE_TONES,
+  MESSAGE_TYPE_LABELS,
+  courseToneClass,
+  toMessageView,
+} from "@/lib/messages/view"
 import type { Message, MessagePayload, MessageStatus, MessageType } from "@/types/message"
 
 let passed = 0
@@ -42,6 +47,23 @@ function makeMessage(
       title: "测试提案",
       ...payload,
     },
+  }
+}
+
+/**
+ * 一条载荷**不过类型**的消息构造器。
+ *
+ * `payload` 是 `jsonb`，库里真的可能存在 `null` / 字符串 / 缺字段 ——
+ * 而 `Partial<MessagePayload>` 过不了这些值。所有守卫逻辑都得能被这样测，
+ * 否则测的只是"我喂得进类型的东西"，不是"库里可能有的东西"。
+ */
+function makeRawPayload(payload: Record<string, unknown>): Message {
+  return {
+    id: "raw-id",
+    type: "announcement",
+    status: "pending",
+    createdAt: "2026-09-17T18:00:00Z",
+    payload: { title: "6 门课的 40 条通知类公告", ...payload } as MessagePayload,
   }
 }
 
@@ -181,21 +203,8 @@ console.log("公告视图（P0-3-25）")
 
 console.log("合并摘要视图（P0-3-25 C 口径）")
 {
-  // `makeMessage` 的载荷参数是 `Partial<MessagePayload>`，故意非法的值（`null` / 字符串）
-  // 过不了类型 —— 而 jsonb 里这些**真的可能出现**，所以这里用一条不过类型的构造器。
-  function makeRaw(payload: Record<string, unknown>): Message {
-    return {
-      id: "raw-id",
-      type: "announcement",
-      status: "pending",
-      createdAt: "2026-09-17T18:00:00Z",
-      payload: { title: "6 门课的 40 条通知类公告", ...payload } as MessagePayload,
-    }
-  }
-
-  // 12. 摘要项逐项守卫：坏的丢掉、好的照常渲染（少显示一条 << 整份看不到）。
   const v = toMessageView(
-    makeRaw({
+    makeRawPayload({
       landing: false,
       digest: [
         {
@@ -225,7 +234,7 @@ console.log("合并摘要视图（P0-3-25 C 口径）")
   // 🔴 摘要里也有链接，必须走**同一个**白名单函数，不能因为"这是内部数据"就免检。
   check("摘要项拒绝 javascript: 链接", v.digestItems[1].sourceUrl === null, String(v.digestItems[1].sourceUrl))
   check("发布时间透传", v.digestItems[0].postedAtLabel === "发布于 2026-09-10")
-  check("缺课程名 → null", toMessageView(makeRaw({ digest: [{ title: "x" }] })).digestItems[0].courseLabel === null)
+  check("缺课程名 → null", toMessageView(makeRawPayload({ digest: [{ title: "x" }] })).digestItems[0].courseLabel === null)
   check("overflow 透传", v.digestOverflow === 7, String(v.digestOverflow))
   check("摘要按钮是「知道了」", v.confirmLabel === "知道了", v.confirmLabel)
   check("摘要仍可确认（走空写入回执）", v.canAccept === true)
@@ -234,18 +243,76 @@ console.log("合并摘要视图（P0-3-25 C 口径）")
   const plainMessage = toMessageView(makeMessage("material", "pending"))
   check("非摘要 → digestItems 为空", plainMessage.digestItems.length === 0)
   check("非摘要 → digestOverflow 为 0", plainMessage.digestOverflow === 0)
-  check("digest 非数组 → 空列表", toMessageView(makeRaw({ digest: "nope" })).digestItems.length === 0)
+  check("digest 非数组 → 空列表", toMessageView(makeRawPayload({ digest: "nope" })).digestItems.length === 0)
 
   // 14. overflow 守卫：负数 / NaN / 字符串 / Infinity 一律归 0。
   //     显示"还有 -3 条"或"还有 NaN 条"比不显示更糟。
   for (const bad of [-1, 0, Number.NaN, "3", null, undefined, Number.POSITIVE_INFINITY]) {
-    const b = toMessageView(makeRaw({ digestOverflow: bad }))
+    const b = toMessageView(makeRawPayload({ digestOverflow: bad }))
     check(`非法 overflow 归 0：${String(bad)}`, b.digestOverflow === 0, String(b.digestOverflow))
   }
 
   // 15. 渲染侧独立上限：payload 是 jsonb，一次手工改库就能塞进几千项。
-  const huge = toMessageView(makeRaw({ digest: Array.from({ length: 500 }, (_, i) => ({ title: `N${i}` })) }))
+  const huge = toMessageView(makeRawPayload({ digest: Array.from({ length: 500 }, (_, i) => ({ title: `N${i}` })) }))
   check("渲染侧上限 100 条", huge.digestItems.length === 100, String(huge.digestItems.length))
+}
+
+console.log("课程身份色（P0-3-25 验收反馈：颜色高亮）")
+{
+  // 2026-09-18 Steven：「课程分类做明显一点，可以给个不同的颜色高亮一下」。
+  // 色板见 `lib/messages/view.ts` 的 `COURSE_TONES`。
+
+  check("同名 → 同色（确定性）", courseToneClass("MATH 53") === courseToneClass("MATH 53"))
+  check("返回值非空", courseToneClass("MATH 53").length > 0)
+
+  // 🔴 这一条最要紧：**逐条通道与摘要通道必须是同一个颜色**。
+  // 逐条通道的载荷里有 `courseId`，摘要通道只有 `courseName` ——
+  // 如果哪天有人给逐条通道改用 courseId 当 seed，同一门课在两条通道里就是两个色，
+  // 而那正是 P0-3-15「同一个判定写两遍」那类分叉（两处都绿、肉眼才看得出）。
+  const perItem = toMessageView(
+    makeMessage("announcement", "pending", { courseName: "PHYSICS 7A", landing: true }),
+  )
+  const inDigest = toMessageView(
+    makeRawPayload({ digest: [{ title: "x", courseName: "PHYSICS 7A" }] }),
+  )
+  check(
+    "逐条与摘要同一门课同色",
+    perItem.courseTone === inDigest.digestItems[0].courseTone,
+    `${perItem.courseTone} vs ${inDigest.digestItems[0].courseTone}`,
+  )
+
+  // 分布性：真实课名集合不该全落到同一格（否则"高亮"等于没做）。
+  const realCourses = ["CHEM 1A", "CHEM 1AL", "MATH 53", "PHYSICS 7A", "R4A", "CS 61A"]
+  const tones = new Set(realCourses.map((name) => courseToneClass(name)))
+  check(
+    `真实课名分布到 ≥2 种颜色（实际 ${tones.size} 种）`,
+    tones.size >= 2,
+    [...tones].join(" | "),
+  )
+  check(
+    "每门课的颜色都在合法色板里（没有 undefined）",
+    realCourses.every((name) => (COURSE_TONES as readonly string[]).includes(courseToneClass(name))),
+  )
+
+  // 没有课程名 → 没有色（渲染层据此决定画不画那个徽标）。
+  check(
+    "缺课程名 → courseTone 为 null",
+    toMessageView(makeMessage("announcement", "pending", { landing: true })).courseTone === null,
+  )
+  check(
+    "摘要项缺课程名 → courseTone 为 null",
+    toMessageView(makeRawPayload({ digest: [{ title: "x" }] })).digestItems[0].courseTone === null,
+  )
+
+  // 🔴 类名必须是**完整字面量**：Tailwind v4 只扫源码里出现过的完整类名，
+  // `bg-${tone}` 这种拼接**扫不到、CSS 不生成** —— 表现是"徽标没颜色"，
+  // 而 tsc / eslint / build 全绿。所以每个色板项都必须同时带底色与前景色两段。
+  check(
+    "色板每项都是完整的 bg-* + text-* 字面量（防被改成拼接）",
+    COURSE_TONES.every((tone) => /^bg-\S+ text-\S+$/.test(tone)),
+    COURSE_TONES.join(" | "),
+  )
+  check("色板不重复", new Set(COURSE_TONES).size === COURSE_TONES.length)
 }
 
 console.log("planDecision（API 写入判定）")

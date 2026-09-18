@@ -25,6 +25,13 @@ import type { getCurrentUser } from '@/lib/api/response'
  * 于是"不重复进消息栏"必须由数据保证：
  * `course_announcements` 的 `(course_id, canvas_announcement_id)` 唯一键。
  *
+ * ### 🔴 窗口长度是动态的（2026-09-18 Steven 拍板收窄）
+ * 起点 = **上次成功同步那天**（`windowAnchor`），常态落在"当天 + 昨天"，最多 14 天。
+ * 第一版写死 14 天，实测真账号一轮 **48 条**历史存量全灌进消息栏 ——
+ * Steven 原话"抓的有点太多了"。但不能直接改成"只抓当天"（cron 15:00 跑完、
+ * 老师 17:00 发的公告就永久丢了）。完整推演见 `lib/canvas/announcements.ts`
+ * 的 `announcementWindow`。窗口经 `windowStart` / `windowEnd` 透出，便于对账。
+ *
  * 为什么键是 **Canvas 公告 id** 而不是标题 / 时间：
  * 标题会被老师改（改完就成了"新公告"？），时间是 `posted_at` 带时区与精度差异，
  * 用它们去重会在某次编辑之后**重复投递**。重复进消息栏是最伤信任的一类 bug：
@@ -247,8 +254,19 @@ export async function syncCourseAnnouncements(input: {
   startedAtMs: number
   /** 本轮同步的统一时间戳（ISO），与作业同步用同一个，便于对账。 */
   now: string
+  /**
+   * 窗口起点的锚点 = **上次成功同步的时间**（ISO）。
+   *
+   * 调用方取所有已关联课程 `last_synced_at` 里**最早**的那个
+   * （见 `lib/sync/canvas-sync.ts`）。null = 从没成功同步过 → 用上限兜底。
+   * 语义与取值理由见 `lib/canvas/announcements.ts` 的 `announcementWindow`。
+   */
+  windowAnchor?: string | null
 }): Promise<SyncAnnouncementSummary> {
-  const { supabase, userId, domain, token, targets, budget, startedAtMs, now } = input
+  const { supabase, userId, domain, token, targets, budget, startedAtMs, now, windowAnchor = null } = input
+
+  // ---------- 1) 拉（批量端点 + 显式两端日期，见 lib/canvas/announcements.ts 文件头） ----------
+  const window = announcementWindow(new Date(now), windowAnchor)
 
   const empty: SyncAnnouncementSummary = {
     status: 'success',
@@ -256,13 +274,13 @@ export async function syncCourseAnnouncements(input: {
     created: 0,
     digested: 0,
     seen: 0,
+    windowStart: window.startDate,
+    windowEnd: window.endDate,
     incomplete: false,
     error: null,
   }
   if (targets.length === 0) return empty
 
-  // ---------- 1) 拉（批量端点 + 显式两端日期，见 lib/canvas/announcements.ts 文件头） ----------
-  const window = announcementWindow(new Date(now))
   const fetched = await fetchCanvasPages<CanvasAnnouncement>({
     domain,
     token,
@@ -448,6 +466,10 @@ export async function syncCourseAnnouncements(input: {
   }
 
   return {
+    // 用 `...empty` 而不是重列一遍字段：`windowStart` / `windowEnd` 这类
+    // 新增字段漏在这里时，`tsc` 会拦（本次就拦下了一次），
+    // 但让每个 return 都以同一个基准展开更省心。
+    ...empty,
     status: 'success',
     scanned: fetched.items.length,
     created,

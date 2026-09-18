@@ -3,6 +3,7 @@ import {
   MAX_PAGES_PER_COURSE,
   toCanvasAssignments,
 } from '@/lib/canvas/assignments'
+import { pickWindowAnchor } from '@/lib/canvas/announcements'
 import {
   loadDecryptedCredential,
   markCredentialFailed,
@@ -106,7 +107,7 @@ export async function runCanvasSync(
   // 用户级客户端下这一行是冗余但无害的，等于把隐式保证变成显式。
   let query = supabase
     .from('courses')
-    .select('id, course_name, canvas_course_id')
+    .select('id, course_name, canvas_course_id, last_synced_at')
     .eq('user_id', userId)
     .eq('is_archived', false)
     .not('canvas_course_id', 'is', null)
@@ -118,17 +119,31 @@ export async function runCanvasSync(
     throw courseError
   }
 
-  const targets: CourseTarget[] = ((courseRows ?? []) as {
+  const courseRowList = (courseRows ?? []) as {
     id: string
     course_name: string
     canvas_course_id: string | null
-  }[])
+    last_synced_at: string | null
+  }[]
+
+  const targets: CourseTarget[] = courseRowList
     .filter((row) => row.canvas_course_id !== null)
     .map((row) => ({
       id: row.id,
       courseName: row.course_name,
       canvasCourseId: row.canvas_course_id as string,
     }))
+
+  // ---------- 3b) 公告窗口的锚点 = 上次成功同步 ----------
+  //
+  // 🔴 必须在这里取（作业循环**之前**）：循环里 `writeCourseState` 会把成功的课
+  // 推进到 `now`，之后再读就永远是"刚刚同步过" → 窗口退化成固定 2 天，
+  // 那门课真实断更多久就看不出来了。
+  //
+  // 取**最早**的那个（min）而不是最晚：锚点是"批量拉取的下界"，取 min 是保守方向
+  // —— 某门课三天没同步成功，窗口就往外长三天，代价只是多扫几条已被唯一键挡住的
+  // 公告；取 max 则会**静默漏掉**那门课三天里的公告。
+  const windowAnchor = pickWindowAnchor(courseRowList.map((row) => row.last_synced_at))
 
   if (targets.length === 0) {
     return { skipped: 'no_courses', retryAfterSeconds: null }
@@ -254,6 +269,7 @@ export async function runCanvasSync(
           budget,
           startedAtMs: startedAt.getTime(),
           now,
+          windowAnchor,
         })
 
   if (announcements?.error) {
@@ -325,6 +341,8 @@ function fetchCourseAssignments(
     map: toCanvasAssignments,
   })
 }
+
+// ---------- 内部：公告窗口的锚点 ----------
 
 /**
  * 写回一门课的同步状态。失败不抛 —— 记账失败不该把已经同步好的数据说成失败。

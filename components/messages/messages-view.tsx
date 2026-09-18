@@ -160,7 +160,20 @@ function ProposalBubble({
           <span className="rounded-badge bg-surface2 px-1.5 py-0.5 text-xs text-ink-muted">
             {view.typeLabel}
           </span>
-          {view.courseLabel && <span className="text-xs text-ink-muted">{view.courseLabel}</span>}
+          {/*
+            课程身份色（2026-09-18 验收反馈）。原来是灰字，与「课程公告」那个灰徽标
+            连在一起看不清界限 —— 消息栏里的主问题是"这是哪门课的事"，
+            所以给它一个稳定的彩色徽标。
+            🔴 类名来自 `courseToneClass()` 的**字面量色板**，不是运行时拼的
+            （Tailwind v4 扫不到拼出来的类名，见 `lib/messages/view.ts`）。
+          */}
+          {view.courseLabel && (
+            <span
+              className={`rounded-badge px-1.5 py-0.5 text-xs font-medium ${view.courseTone ?? ""}`}
+            >
+              {view.courseLabel}
+            </span>
+          )}
           {view.confidence === "low" && (
             <span className="rounded-badge bg-amber-bg px-1.5 py-0.5 text-xs text-amber">
               低置信度
@@ -190,7 +203,11 @@ function ProposalBubble({
               {view.digestItems.map((item, i) => (
                 <li key={i} className="flex items-baseline gap-2 text-xs">
                   {item.courseLabel && (
-                    <span className="shrink-0 text-ink-faint">{item.courseLabel}</span>
+                    <span
+                      className={`shrink-0 rounded-badge px-1 py-px text-[11px] font-medium ${item.courseTone ?? ""}`}
+                    >
+                      {item.courseLabel}
+                    </span>
                   )}
                   <span className="min-w-0 flex-1 text-ink-muted">{item.title}</span>
                   {item.postedAtLabel && (

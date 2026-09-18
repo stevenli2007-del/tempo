@@ -3,21 +3,24 @@
  *
  * 运行：`npm run regress:announcements`
  *
- * 钉死五件事：
+ * 钉死六件事：
  * 1. **HTML 清洗的顺序**（先剥标签、后解实体）—— 顺序反了就是把消毒做成"先开门再上锁"；
  * 2. **两端日期都进查询串** —— 只传 start_date 会静默漏掉最近一个月（实测 2 条 vs 71 条）；
- * 3. **落点判定的宽窄** —— 判窄了能力被藏起来，判宽了最多多点一次确认；
- * 4. **消息载荷**：原文链接、落点标记、「知道了」文案的触发条件；
- * 5. **C 口径的分流与摘要**（2026-09-18 拍板）：两条通道**不重不漏**、
+ * 3. **窗口起点的动态推导**（2026-09-18 收窄）—— 常态只抓当天、断更自动回补、
+ *    上限封顶、坏锚点不许把窗口搞反（"只抓当天"会静默漏掉跨零点发布的公告）；
+ * 4. **落点判定的宽窄** —— 判窄了能力被藏起来，判宽了最多多点一次确认；
+ * 5. **消息载荷**：原文链接、落点标记、「知道了」文案的触发条件；
+ * 6. **C 口径的分流与摘要**（2026-09-18 拍板）：两条通道**不重不漏**、
  *    摘要**截断但计数不撒谎**、标题报总数、排序不依赖 Canvas 返回顺序。
  */
 
 import {
-  ANNOUNCEMENT_WINDOW_DAYS,
+  ANNOUNCEMENT_WINDOW_MAX_DAYS,
   announcementCourseExternalId,
   announcementWindow,
   announcementsPath,
   decodeHtmlEntities,
+  pickWindowAnchor,
   stripHtml,
   toCanvasAnnouncements,
 } from "@/lib/canvas/announcements"
@@ -110,28 +113,83 @@ console.log("stripHtml（HTML → 纯文本）")
   check("空输入 → 空串", stripHtml("") === "")
 }
 
-console.log("announcementWindow / announcementsPath（日期陷阱）")
+console.log("announcementWindow / announcementsPath（日期陷阱 + 动态窗口）")
 {
   // 固定时刻：LA 时间是 2026-09-17 22:00（UTC 已经 9/18）——
   // 按用户本地日历日算，不是 UTC。
   const now = new Date("2026-09-18T05:00:00Z")
-  const w = announcementWindow(now)
+
+  // ---------- 常态：锚点 = 今天已同步过 → 只抓「昨天 → 今天」 ----------
+  // 这是 2026-09-18 Steven 收窄窗口后的**常态**：每天登录看到的都只是当天的量，
+  // 而不是 14 天的历史存量（实测真账号一轮 48 条）。
+  const w = announcementWindow(now, "2026-09-17T05:00:00Z")
   check("终点到明天（防 end_date 为 exclusive 时漏掉今天）", w.endDate === "2026-09-18", w.endDate)
+  check("常态起点是昨天（含昨天的冗余，见 WINDOW_BASE_DAYS）", w.startDate === "2026-09-16", w.startDate)
+
+  // ---------- 断更：锚点在几天前 → 窗口自动往外长 ----------
+  // 🔴 这条是"不能直接改成只抓当天"的**证据**：
+  // cron 在 PDT 15:00 跑完、老师 17:00 发的公告，若窗口死钉在"当天"，
+  // 次日那轮的"当天"已经是次日 → **昨天 17:00 那条永久丢失**。
+  // 跟着锚点走就不丢：次日那轮的起点还是"上次成功同步那天"。
+  const stale = announcementWindow(now, "2026-09-14T20:00:00Z")
+  check("断更 3 天 → 起点回到 9/14（自动回补，不漏）", stale.startDate === "2026-09-14", stale.startDate)
+
+  // ---------- 上限：长期没同步时不许无限往回拉 ----------
+  const ancient = announcementWindow(now, "2026-08-01T00:00:00Z")
   check(
-    `起点是 ${ANNOUNCEMENT_WINDOW_DAYS} 天前`,
-    w.startDate === "2026-09-03",
-    w.startDate,
+    `锚点极旧 → 夹到 ${ANNOUNCEMENT_WINDOW_MAX_DAYS} 天上限`,
+    ancient.startDate === "2026-09-03",
+    ancient.startDate,
   )
+  // ---------- 首次同步：**也走常态窗口**（不许灌历史存量） ----------
+  // 🔴 这条是 Steven 收窄窗口的**核心诉求**：刚关联 Canvas 时若按上限拉 14 天，
+  // 用户第一次打开消息栏就是 40 多条历史公告 —— 那正是"抓太多"。
+  // 历史公告要看：每条消息的「原文 ↗」回跳 Canvas 就是路。
+  check("没锚点（首次同步）→ 常态窗口，不灌历史存量", announcementWindow(now).startDate === "2026-09-16")
+  check("锚点 null → 同上", announcementWindow(now, null).startDate === "2026-09-16")
+  check("锚点空串 → 同上", announcementWindow(now, "").startDate === "2026-09-16")
+
+  // ---------- 坏输入不许把窗口搞反 ----------
+  // 一个坏时间戳若退回上限，会让某一次同步突然拉回 14 天（量级突变）；
+  // 若算出"起点 > 终点"，Canvas 会返回空数组 —— 那才是静默漏数据。
+  check(
+    "锚点不可解析 → 留在常态窗口（不突变成上限）",
+    announcementWindow(now, "not-a-date").startDate === "2026-09-16",
+  )
+  const future = announcementWindow(now, "2026-12-01T00:00:00Z")
+  check("锚点在未来（时钟漂移）→ 不产生起点 > 今天 的畸形窗口", future.startDate === "2026-09-16", future.startDate)
+  check("任何情况下起点都早于终点", future.startDate < future.endDate)
 
   const path = announcementsPath(["111", "222"], w)
   // 🔴 这条是本卡的**核心防御**：两个日期参数缺一个就会静默漏数据。
-  check("查询串含 start_date", path.includes("start_date=2026-09-03"), path)
+  check("查询串含 start_date", path.includes("start_date=2026-09-16"), path)
   check("查询串含 end_date", path.includes("end_date=2026-09-18"), path)
   check("两端日期都不是默认值（都显式传了）", /start_date=/.test(path) && /end_date=/.test(path))
   check("context_codes 每门课一个", (path.match(/context_codes%5B%5D=/g) ?? []).length === 2, path)
   check("课程前缀是 course_", path.includes("course_111") && path.includes("course_222"), path)
   check("显式要求 latest_only=false", path.includes("latest_only=false"), path)
   check("路径以 /api/v1 开头", path.startsWith("/api/v1/announcements?"), path)
+}
+
+console.log("pickWindowAnchor（多门课取最早的那个）")
+{
+  // 取 min 是保守方向：某门课三天没同步成功，窗口就往外长三天（多扫几条被唯一键
+  // 挡住的公告）；取 max 会**静默漏掉**那门课三天里的公告。
+  check(
+    "取最早的那个",
+    pickWindowAnchor(["2026-09-17T00:00:00Z", "2026-09-14T00:00:00Z", "2026-09-16T00:00:00Z"]) ===
+      "2026-09-14T00:00:00Z",
+  )
+  check("全是 null → null（调用方给常态窗口）", pickWindowAnchor([null, null]) === null)
+  check("空数组 → null", pickWindowAnchor([]) === null)
+  // 有课刚关联、还没同步过（null）不该拖累所有人的窗口 —— 那门新课本来就没有历史要补。
+  check(
+    "null 与非 null 混在一起 → 只算非 null 的",
+    pickWindowAnchor([null, "2026-09-17T00:00:00Z", "2026-09-16T00:00:00Z"]) === "2026-09-16T00:00:00Z",
+  )
+  check("坏值被跳过，不改变结果", pickWindowAnchor(["oops", "2026-09-17T00:00:00Z"]) === "2026-09-17T00:00:00Z")
+  check("只有坏值 → null", pickWindowAnchor(["oops", ""]) === null)
+  check("单值原样返回", pickWindowAnchor(["2026-09-17T00:00:00Z"]) === "2026-09-17T00:00:00Z")
 }
 
 console.log("toCanvasAnnouncements（映射与守卫）")

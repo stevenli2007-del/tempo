@@ -35,6 +35,60 @@ const CONFIRM_LABEL = '确认'
  */
 const ACK_LABEL = '知道了'
 
+/**
+ * 课程身份色 —— 让"这是哪门课的"一眼可辨（2026-09-18 Steven 验收反馈：
+ * 「课程分类做明显一点，可以给个不同的颜色高亮」）。
+ *
+ * ### 为什么用 hash，而不是"按课程表顺序分配"
+ * 视图层是**纯函数**，拿不到用户的课程列表；而"按顺序"还有个更糟的后果：
+ * 顺序一变（归档一门、新关联一门）所有课的颜色集体错位，
+ * 用户会以为课程被换了。`hash(课程名)` 保证**同一门课永远同一个颜色**，
+ * 跨会话、跨设备、跨"逐条 / 摘要"两条通道都一致。
+ *
+ * ### 为什么 seed 是课程名，不是 `courseId`
+ * 摘要项（`payload.digest[i]`）的载荷里**只有 `courseName`**，没有 id。
+ * 逐条通道用 id、摘要通道用名字的话，同一门课在两条通道里会是两个颜色 ——
+ * 那正是 P0-3-15「同一个判定写两遍、两处都绿、肉眼才看得出」的变体。
+ * 统一用课程名。代价：课程改名后颜色会变（罕见，不值得为它建映射表）。
+ *
+ * ### 为什么只有 5 组
+ * 设计令牌里有 `-bg` 配对色的就这 5 组（`app/globals.css` 的「课程 / 状态色」）。
+ * 5 门课以上必然有撞色 —— 可接受：徽标旁边就是课程名，颜色是辅助识别而非唯一依据。
+ * 剩下的品牌色 `lime` 刻意不用（它是主按钮色，拿来当课程色会误导）。
+ *
+ * ### 🔴 类名必须是**静态字面量**
+ * Tailwind v4 只扫源码里出现过的完整类名。`bg-${tone}` 这种运行时拼接
+ * **扫不到、CSS 不会生成**，表现是"徽标没颜色"，而 `tsc` / `eslint` / `build`
+ * 全绿（本项目 P0-3-15 已踩过一次，见 `docs/CodingRules.md` §10）。
+ * 所以这里是字面量数组，**不许改成拼接**。
+ *
+ * ⚠️ 验证改动是否真的生效：build 后 grep 产物 CSS，
+ * 五个类都应出现，如 `grep -o "\.text-blue{[^}]*}" .next/static/chunks/*.css`。
+ */
+export const COURSE_TONES = [
+  'bg-blue-bg text-blue',
+  'bg-purple-bg text-purple',
+  'bg-green-bg text-green',
+  'bg-coral-bg text-coral',
+  'bg-amber-bg text-amber',
+] as const
+
+/**
+ * 课程名 → 稳定的色板下标（FNV-1a 32 位散列）。
+ *
+ * 不是什么密码学散列，只要"同样输入同样输出、不同输入尽量散开"。
+ * 手写而不引依赖：这是 10 行纯函数，为它加一个包不划算（CodingRules：不擅自加依赖）。
+ */
+export function courseToneClass(courseName: string): string {
+  let hash = 0x811c9dc5
+  for (let i = 0; i < courseName.length; i += 1) {
+    hash ^= courseName.charCodeAt(i)
+    hash = Math.imul(hash, 0x01000193)
+  }
+  // `>>> 0`：`Math.imul` 的结果可能为负，负数取模会得到负下标 → `undefined` 类名。
+  return COURSE_TONES[(hash >>> 0) % COURSE_TONES.length]
+}
+
 /** 用学校本地时区渲染（与 `lib/tasks/format.ts` 同一理由：服务端/浏览器不能各算一遍）。 */
 const TIME_FORMATTER = new Intl.DateTimeFormat('zh-CN', {
   month: 'numeric',
@@ -53,6 +107,8 @@ const TIME_FORMATTER = new Intl.DateTimeFormat('zh-CN', {
 export type DigestItemView = {
   title: string
   courseLabel: string | null
+  /** 课程身份色的 Tailwind 类（`courseLabel` 为 null 时是 null）。 */
+  courseTone: string | null
   postedAtLabel: string | null
   sourceUrl: string | null
 }
@@ -71,6 +127,8 @@ export type MessageView = {
   title: string
   lines: string[]
   courseLabel: string | null
+  /** 课程身份色的 Tailwind 类（`courseLabel` 为 null 时是 null）。 */
+  courseTone: string | null
   /** `low` = 抽取来源不可靠（扫描件等）→ 不许一键接受。 */
   confidence: 'high' | 'low'
   isPending: boolean
@@ -171,6 +229,7 @@ function readDigest(payload: MessagePayload): DigestItemView[] {
     items.push({
       title,
       courseLabel: courseName === '' ? null : courseName,
+      courseTone: courseName === '' ? null : courseToneClass(courseName),
       postedAtLabel,
       sourceUrl: readSafeUrl(record.sourceUrl),
     })
@@ -190,6 +249,13 @@ export function toMessageView(message: Message): MessageView {
   const applierReady = isApplierReady(message.type)
   const confidence = message.payload.confidence === 'low' ? 'low' : 'high'
 
+  // 抽成变量再派生 tone：色必须跟着**同一个**判定走。
+  // 两处各判一遍（一处判空、一处判色）就是 P0-3-15 那类分叉的预备队。
+  const courseLabel =
+    typeof message.payload.courseName === 'string' && message.payload.courseName !== ''
+      ? message.payload.courseName
+      : null
+
   let blockReason: string | null = null
   if (!isPending) {
     blockReason = '已经处理过了'
@@ -207,10 +273,8 @@ export function toMessageView(message: Message): MessageView {
     createdAt: message.createdAt,
     title: readTitle(message.payload),
     lines: readDetails(message.payload),
-    courseLabel:
-      typeof message.payload.courseName === 'string' && message.payload.courseName !== ''
-        ? message.payload.courseName
-        : null,
+    courseLabel,
+    courseTone: courseLabel === null ? null : courseToneClass(courseLabel),
     confidence,
     isPending,
     applierReady,

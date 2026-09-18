@@ -63,6 +63,16 @@ export type SyncAnnouncementSummary = {
   digested: number
   /** 已在账上、本轮重复覆盖的条数（滚动窗口的正常现象）。 */
   seen: number
+  /**
+   * 本轮的查询窗口（`YYYY-MM-DD`，含端点）。
+   *
+   * 为什么要透出来：窗口是**动态**的（起点 = 上次成功同步那天，见
+   * `lib/canvas/announcements.ts` 的 `announcementWindow`），
+   * 而"这一轮到底抓了哪一段"是验收与排障时第一个要问的问题。
+   * 只报条数的话，"今天怎么只有 2 条"和"窗口算错了"分不开。
+   */
+  windowStart: string
+  windowEnd: string
   /** 拉取没拿全（翻页 / 预算 / 时间触顶）。 */
   incomplete: boolean
   /** 失败说明；null = 成功。 */

@@ -38,34 +38,118 @@ export const ANNOUNCEMENTS_PER_PAGE = 50
 export const MAX_ANNOUNCEMENT_PAGES = 3
 
 /**
- * 滚动窗口长度（天）。
+ * 常态窗口往回看几天。
  *
- * 为什么是"滚动窗口"而不是"上次同步到现在"：
- * - **幂等**：窗口必然反复覆盖同一批公告，重复靠 `course_announcements` 的唯一键挡；
- * - **漏跑自愈**：连续十几天没同步（用户没打开、cron 挂了），窗口仍能补回来，
- *   而"从上次同步到现在"一旦有一轮记错了时间戳，那段区间就**永久丢失**。
+ * **1 天，即"当天 + 昨天"** —— 为什么不干脆只有当天：窗口边界与客户端的
+ * "今天"不是同一件事。Canvas 侧的日期过滤用的是**课程时区 / UTC**，
+ * 我们的 `schoolDayKey()` 用的是学校本地时区，两者在零点前后会错开一格；
+ * 再叠上 cron 恰好跑在 23:5x 的可能，"当天"会稳定漏掉跨零点那一两条。
+ * 多带一天的成本是**零**（重复被唯一键挡掉），漏一条是真的丢。
  */
-export const ANNOUNCEMENT_WINDOW_DAYS = 14
+const WINDOW_BASE_DAYS = 1
+
+/**
+ * 窗口最多能往回看多少天（**兜底上限**，不是常态值）。
+ *
+ * 起点由「上次成功同步那天」决定，正常情况下就是 1 天前；只有在
+ * 长时间没同步（用户没打开 + cron 也挂了）时才会一路往回长到这个上限。
+ * 设上限是为了不让一个几个月没登录的账号在恢复时一次拉回上千条公告
+ * （单次同步只有 3 页 / 20 请求的预算，拉爆了反而整轮失败）。
+ */
+export const ANNOUNCEMENT_WINDOW_MAX_DAYS = 14
 
 export type AnnouncementWindow = {
   /** `YYYY-MM-DD`（Canvas 接受的日期格式，同时给日志用）。 */
   startDate: string
+  /** 固定为"明天"，见下方注释。 */
   endDate: string
 }
 
 /**
  * 计算查询窗口。
  *
- * ⚠️ 两端**各往外让一天**（起点再早一天、终点到明天）：
- * `start_date` / `end_date` 的边界是包含还是排除，Canvas 没有明确文档，
- * 而多让一天的成本是**零**（重复会被唯一键挡掉），漏掉一条却是真的丢公告。
+ * ### 🔴 起点 = 「上次成功同步那天」，不是固定的 14 天
+ * 第一版写死往回 14 天。实测（2026-09-18）真账号一轮窗口内 **48 条公告**，
+ * 用户一打开消息栏就被灌一屏历史存量 —— Steven 的原话是"抓的有点太多了"。
+ *
+ * 但直接改成"只抓当天"会**静默漏数据**：
+ * cron 在 UTC 10:00 / 22:00（PDT 03:00 / 15:00）各跑一轮。15:00 那轮抓到的
+ * 是"当天截至 15:00"；老师 17:00 又发了一条，用户不再登录 →
+ * 次日 03:00 那轮的"当天"已经是次日 → **昨天 17:00 那条永久丢失**。
+ *
+ * 所以起点跟着**锚点**（`courses.last_synced_at` 里最早的那个，见
+ * `pickWindowAnchor`）走，效果是：
+ * | 情形 | 窗口 |
+ * |---|---|
+ * | 今天已经同步过（绝大多数轮次） | 昨天 → 明天（**2 天**） |
+ * | 上次同步是 3 天前（断更） | 3 天前 → 明天，自动补回来 |
+ * | 从没同步过（刚关联 Canvas） | 昨天 → 明天（**刻意不拉历史存量**） |
+ * | 断更超过 14 天 | 夹到 14 天 |
+ *
+ * 于是：**常态只抓当天（+1 天冗余），断更自动回补，长期离线封顶，永不静默漏**。
+ * 幂等性不受影响 —— 靠的始终是 `course_announcements` 的唯一键。
+ *
+ * ⚠️ **首次同步也走常态窗口**（不看历史）：存量导入是 Steven 明确不想要的
+ * （那正是"抓太多"的来源）。历史公告要看，每条的「原文 ↗」回跳 Canvas 就是路。
+ *
+ * ⚠️ 终点固定到**明天**：`end_date` 的边界包含还是排除 Canvas 没有明确文档，
+ * 多让一天成本为零，漏掉今天的公告却是灾难。
+ *
+ * @param anchorIso 上次成功同步的时间（ISO）。null / 空 / 不可解析 → 都留在常态窗口。
  */
-export function announcementWindow(now: Date, days: number = ANNOUNCEMENT_WINDOW_DAYS): AnnouncementWindow {
+export function announcementWindow(now: Date, anchorIso?: string | null): AnnouncementWindow {
   const today = schoolDayKey(now)
-  return {
-    startDate: addDays(today, -days),
-    endDate: addDays(today, 1),
+
+  let start = addDays(today, -WINDOW_BASE_DAYS)
+
+  if (typeof anchorIso === 'string' && anchorIso !== '') {
+    const anchorMs = Date.parse(anchorIso)
+    // 锚点不可解析时**留在常态窗口**而不是退回上限：一个坏时间戳不该让下一次同步
+    // 突然拉回 14 天。真断更了，下一轮锚点会是好的（last_synced_at 只在成功时写）。
+    if (Number.isFinite(anchorMs)) {
+      const anchorDay = schoolDayKey(new Date(anchorMs))
+      // `YYYY-MM-DD` 定长，字典序即时间序。
+      // 未来日期（时钟漂移）不会命中这个分支 → 窗口保持常态，不产生"起点 > 终点"。
+      if (anchorDay < start) start = anchorDay
+    }
   }
+
+  const floor = addDays(today, -ANNOUNCEMENT_WINDOW_MAX_DAYS)
+  if (start < floor) start = floor
+
+  return { startDate: start, endDate: addDays(today, 1) }
+}
+
+/**
+ * 从各门课的 `last_synced_at` 里挑出公告窗口的锚点 = **最早**的那个。
+ *
+ * 放在这里而不是 `lib/sync/canvas-sync.ts`：那是个重量级模块（拉起凭证 / LLM /
+ * `next/headers` 的模块图），而本函数是**纯函数**，回归脚本要直接断言它。
+ *
+ * ### 为什么是 min
+ * 锚点是"批量拉取的下界"。取 min 是保守方向：只要有一门课三天没同步成功，
+ * 窗口就往外长三天 —— 代价只是多扫几条已被唯一键挡住的公告；
+ * 取 max 会**静默漏掉**那门课的公告，那是真的丢数据。
+ *
+ * ### 三种输入都要有确定行为
+ * - 全部为 null（从没成功同步过）→ `null`，调用方回退到上限窗口（首次安装的存量导入）；
+ * - 部分为 null（有课刚关联、还没同步过）→ 忽略 null 只算非 null 的：那门新课
+ *   本来就没有历史公告要补，不该让所有人的窗口都退回 14 天；
+ * - 有坏值（不可解析 / 空串）→ 跳过。坏时间戳不该让窗口凭空变化。
+ *
+ * @param values 各门课的 `last_synced_at`（未清洗）
+ */
+export function pickWindowAnchor(values: (string | null)[]): string | null {
+  const valid = values.filter((value): value is string => {
+    if (typeof value !== 'string' || value === '') return false
+    return Number.isFinite(Date.parse(value))
+  })
+  if (valid.length === 0) return null
+  // 按 `Date.parse` 比较而不是字典序：ISO 8601 带不同时区偏移时
+  // （`2026-09-16T20:00:00-07:00` vs `2026-09-17T00:00:00Z`）字典序会给出错误答案。
+  return valid.reduce((earliest, current) =>
+    Date.parse(current) < Date.parse(earliest) ? current : earliest,
+  )
 }
 
 /**
