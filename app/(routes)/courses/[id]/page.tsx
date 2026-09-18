@@ -3,6 +3,7 @@ import { notFound, redirect } from 'next/navigation'
 
 import { AssignmentDetail } from '@/components/courses/assignment-detail'
 import { CanvasLink } from '@/components/courses/canvas-link'
+import { CourseFiles } from '@/components/courses/course-files'
 import { CourseActions } from '@/components/courses/course-actions'
 import { GradePie } from '@/components/courses/grade-pie'
 import { SyllabusUpload } from '@/components/courses/syllabus-upload'
@@ -11,6 +12,7 @@ import { AppShell } from '@/components/shell/app-shell'
 import { UUID_PATTERN } from '@/lib/api/params'
 import { loadCredentialMeta } from '@/lib/canvas/credentials'
 import { loadCourseDetail } from '@/lib/course-detail'
+import { loadCourseFiles } from '@/lib/course-files/load'
 import { createClient } from '@/lib/supabase/server'
 import { loadTasks } from '@/lib/tasks'
 
@@ -27,7 +29,7 @@ import { loadTasks } from '@/lib/tasks'
  * 新顺序按**问题**排，而不是按数据表排：
  *   概览（Canvas 关联 / 成绩构成 / 作业概况，宽屏三栏一屏看完）
  *   → 作业详情（**折叠**，含分数条与 Canvas 外链）
- *   → 资料（Phase 1 占位）
+ *   → 资料（P0-3-19：Canvas 文件夹结构分组 + 外链回 Canvas，**只存目录不存内容**）
  *   → 课程板块（原来的五板块编辑器，含 syllabus 上传）
  *
  * ### 作业数据为什么单独取，而不塞进 `loadCourseDetail`
@@ -75,12 +77,13 @@ export default async function CourseDetailPage({ params }: PageProps) {
     notFound()
   }
 
-  // 两路查询互不依赖，并行发（详情 + 该课全部任务）。
+  // 三路查询互不依赖，并行发（详情 + 该课全部任务 + 资料索引）。
   // `now` 服务端算一次注入纯函数，避免与客户端各算一遍导致 hydration mismatch。
   const now = new Date()
-  const [{ found, detail, error }, courseTasks] = await Promise.all([
+  const [{ found, detail, error }, courseTasks, courseFiles] = await Promise.all([
     loadCourseDetail(supabase, id),
     loadTasks(supabase, { courseIds: [id], until: null, limit: COURSE_TASK_LIMIT, offset: 0 }),
+    loadCourseFiles(supabase, id),
   ])
 
   // 查询失败必须让用户看见，不能降级成「课程不存在」（CodingRules 7）。
@@ -189,14 +192,8 @@ export default async function CourseDetailPage({ params }: PageProps) {
           </div>
         </details>
 
-        {/* ---------- 资料（Phase 1 占位，P0-3-19） ---------- */}
-        <section className="rounded-xl border border-dashed border-border p-5">
-          <h2 className="text-sm font-medium text-foreground">资料</h2>
-          <p className="mt-1.5 text-xs text-ink-faint">
-            Canvas 里的课件、复习卷、答案会按文件夹结构列在这里（`P0-3-19`）。
-            Tempo 只存文件名与外链，**不下载内容** —— 需要看时点开回 Canvas。
-          </p>
-        </section>
+        {/* ---------- 资料（P0-3-19）：按 Canvas 文件夹结构分组，点开回 Canvas ---------- */}
+        <CourseFiles files={courseFiles.files} error={courseFiles.error} />
 
         {/* ---------- 课程板块（原「五个板块」，含 syllabus 上传） ---------- */}
         <section className="rounded-xl border border-border bg-card p-5 shadow-sm">

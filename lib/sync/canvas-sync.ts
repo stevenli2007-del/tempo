@@ -19,6 +19,7 @@ import {
   type CanvasFetchResult,
 } from '@/lib/sync/canvas-request'
 import { applyCanvasTasks } from '@/lib/sync/canvas-tasks'
+import { syncCourseFiles, type FileTarget } from '@/lib/sync/canvas-files'
 import { findLastRunStartedAt, findRunningRun, finishRun, startRun } from '@/lib/sync/runs'
 import type { CanvasAssignment } from '@/types/canvas'
 import type { SyncFailure, SyncOutcome, SyncStatus, SyncTrigger, SyncSummary } from '@/types/sync'
@@ -107,7 +108,8 @@ export async function runCanvasSync(
   // 用户级客户端下这一行是冗余但无害的，等于把隐式保证变成显式。
   let query = supabase
     .from('courses')
-    .select('id, course_name, canvas_course_id, last_synced_at')
+    // `files_scanned_at`（P0-3-19）：资料区走 24h 独立节奏，与 `last_synced_at` 分开。
+    .select('id, course_name, canvas_course_id, last_synced_at, files_scanned_at')
     .eq('user_id', userId)
     .eq('is_archived', false)
     .not('canvas_course_id', 'is', null)
@@ -124,6 +126,7 @@ export async function runCanvasSync(
     course_name: string
     canvas_course_id: string | null
     last_synced_at: string | null
+    files_scanned_at: string | null
   }[]
 
   const targets: CourseTarget[] = courseRowList
@@ -148,6 +151,16 @@ export async function runCanvasSync(
   if (targets.length === 0) {
     return { skipped: 'no_courses', retryAfterSeconds: null }
   }
+
+  // P0-3-19 资料区的目标：与作业同一批课程，多带一个「上次什么时候扫过」。
+  const fileTargets: FileTarget[] = courseRowList
+    .filter((row) => row.canvas_course_id !== null)
+    .map((row) => ({
+      id: row.id,
+      courseName: row.course_name,
+      canvasCourseId: row.canvas_course_id as string,
+      filesScannedAt: row.files_scanned_at,
+    }))
 
   // ---------- 4) 节流：服务端独立校验，不靠前端置灰（§6.4） ----------
   //
@@ -278,6 +291,33 @@ export async function runCanvasSync(
     console.error('[sync] 公告同步失败（作业同步不受影响）:', announcements.error)
   }
 
+  // ---------- 8) 资料索引（P0-3-19，Sync-Strategy §14） ----------
+  //
+  // 排在**最后**：它是三块里最不紧急的（课件目录 24 小时才扫一次），
+  // 而单次同步只有 20 个 Canvas 请求预算 —— 作业 > 公告 > 资料，这个顺序不能倒。
+  //
+  // 🔴 凭证已失效时一个请求都不发（与公告同一条纪律，§8）。
+  const files =
+    credentialBroken || fileTargets.length === 0
+      ? null
+      : await syncCourseFiles({
+          supabase,
+          userId,
+          domain: credential.canvasDomain,
+          token: credential.token,
+          targets: fileTargets,
+          budget,
+          startedAtMs: startedAt.getTime(),
+          now,
+          // 手动刷新时无视 24h 门槛：用户点了刷新就该立刻看到（T2 放宽的同一条纪律）。
+          force: trigger === 'manual',
+        })
+
+  if (files?.error) {
+    // 同上：资料区是附加能力，它失败不代表作业没同步上，但也**不吞**。
+    console.error('[sync] 资料索引失败（作业同步不受影响）:', files.error)
+  }
+
   // ---------- 7) 收尾 ----------
   if (!credentialBroken) {
     await touchCredentialSuccess(supabase, credential.id)
@@ -287,7 +327,7 @@ export async function runCanvasSync(
     failures.length === 0 ? 'success' : coursesSynced === 0 ? 'failed' : 'partial'
   // 作业的失败优先（它更严重）；只有作业全好、公告出错时才把公告的错误写进账。
   const errorMessage =
-    failures.length > 0 ? failures[0].message : (announcements?.error ?? null)
+    failures.length > 0 ? failures[0].message : (announcements?.error ?? files?.error ?? null)
 
   await finishRun(supabase, runId, {
     status,
@@ -307,6 +347,7 @@ export async function runCanvasSync(
     tasksDeleted: deleted,
     failures,
     announcements,
+    files,
     startedAt: startedAt.toISOString(),
     finishedAt: new Date().toISOString(),
   }

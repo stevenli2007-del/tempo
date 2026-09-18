@@ -55,6 +55,7 @@
 | `llm_runs` | LLM 调用审计（可插拔 provider 的度量基础） | ✅ |
 | `parse_corrections` | 用户修正记录（存 diff） | ✅ |
 | `usage_events` | 行为事件埋点（7 日回访 / token 续期完成率） | ✅（P0-3-1 新增） |
+| `course_files` | 课程资料索引（Canvas 文件**元数据**，P0-3-19） | ✅（P0-3-19 新增） |
 | Phase 2+ 预留表 | 规划能力、多数据源 | ❌ 见第 8 节 |
 
 > 相比初版，`sync_runs` / `llm_runs` / `parse_corrections` 是新增的三张表。它们不是"锦上添花"：
@@ -99,7 +100,16 @@ Supabase Auth 的 `auth.users` 管认证，本表放业务扩展字段，`id` �
 | `last_synced_at` | timestamptz (nullable) | **该课程最后一次成功同步的时间**（同步状态 UI 直接展示它） |
 | `sync_status` | text | `never` / `success` / `failed`，默认 `never` |
 | `sync_error` | text (nullable) | 最近一次同步失败的原因（给用户看的简短文案，不是堆栈） |
+| **`files_scanned_at`** | timestamptz (nullable) | **资料区（`course_files`）最后一次被扫描的时间**（P0-3-19 新增），见下方说明 |
 | `created_at` / `updated_at` | timestamptz | |
+
+> 🔴 **`files_scanned_at` 与 `last_synced_at` 不是一个东西，别混用**：
+> - `last_synced_at` = 「数据停留在什么时候」，**只在同步成功时推进**（UI 直接展示它）；
+> - `files_scanned_at` = 「资料区上次**扫过**是什么时候」，是**扫描节流**时间戳 ——
+>   它不承诺数据新鲜（实测 14 门课里 8 门压根没有 Files 区，扫了也是空）。
+>   命名刻意叫 "scanned" 而不是 "synced"，就是为了不被读成前者的同类。
+>   资料区每门课 2 个 Canvas 请求，而单次同步只有 20 个预算（Sync-Strategy §5），
+>   所以走 **24 小时**独立节奏（手动刷新除外），详见 `lib/sync/canvas-files.ts`。
 
 > `last_synced_at` / `sync_status` / `sync_error` 是**为用户可见性服务的**，不是给运维看的。总览页和课程页必须显示"最后同步于 X"，失败时显示原因 —— 这是 PRD F4 的硬性要求，静默展示旧数据是被明令禁止的（静默的旧数据比明确的错误更危险）。
 >
@@ -378,6 +388,45 @@ submission_state text CHECK (submission_state IN
 >
 > ⚠️ **P0-3-2 删账号的级联范围要带上本表**（`user_id` 已 `ON DELETE CASCADE`，删 `profiles` 行即清空；此处显式写出，避免 P0-3-2 只照着旧清单删而漏掉它）。
 
+### 3.15 `course_files`（课程资料索引，P0-3-19 新增）
+
+Canvas 课程 Files 区的**目录**：文件名、所在文件夹、外链、大小、内容修改时间。
+
+| 字段名 | 类型 | 说明 |
+|---|---|---|
+| `id` | uuid (PK) | |
+| `course_id` | uuid (FK → courses.id, **ON DELETE CASCADE**) | 所属课程（本表无 `user_id`，RLS 通过 `courses` 反查） |
+| `canvas_file_id` | text | Canvas 侧文件 ID，去重的唯一依据 |
+| `display_name` | text | 展示名（Canvas `display_name`；**不是** URL 编码的 `filename`） |
+| `content_type` | text (nullable) | MIME；null = Canvas 没给（**不是"未知类型"**） |
+| `size_bytes` | bigint (nullable) | 字节数，只用于展示；null = Canvas 没给（**不是 0**） |
+| `folder_path` | text | Canvas 文件夹相对路径（已剥根前缀 `course files/`）；**空串 = 根目录** |
+| `file_url` | text | 指回 Canvas 的文件**预览页**（不是下载链，理由见下） |
+| `modified_at` | timestamptz (nullable) | Canvas `modified_at`，**3-20 / 3-23 按需抓内容的差量依据** |
+| `is_deleted` | boolean | 默认 `false`。Canvas 上被删 → 软删除，不物理删 |
+| `created_at` / `updated_at` | timestamptz | |
+
+**唯一性约束（去重的关键，必须建）**：
+
+```sql
+CREATE UNIQUE INDEX course_files_course_file_unique
+  ON course_files (course_id, canvas_file_id);
+```
+
+> 🔴 **只存元数据，绝不存内容**。本表**没有任何一列**能装文件内容：没有 bytea、没有正文 text、没有 storage 路径。
+> 要读某个文件的内容是 3-20（大纲漂移）/ 3-23（practice test）的事，且那时才按 `modified_at` 差量去取那**一个**文件。
+>
+> 🔴 **`file_url` 必须是拼出来的预览页，不能用 Canvas 返回的 `url`**。
+> `/files` 给的 `url` 形如 `/files/{id}/download?...&verifier=<uuid>` —— **需 Bearer token**，用户在浏览器里点开是 401
+> （2026-09-18 实测）。正确形态是 `https://{domain}/courses/{canvas_course_id}/files/{file_id}`（实测 200）。
+> 四个候选的实测对照见 `lib/canvas/files.ts` 的 `filePreviewUrl`。
+>
+> 🔴 **学生看不见的不索引**：`locked` / `hidden` / `locked_for_user` / `hidden_for_user` 任一为真的文件，
+> 以及落在不可见文件夹里的文件（实测 Chem 1AL：55 个文件夹里 24 个 hidden、57 个文件里 2 个 restricted）。
+> ⚠️ Canvas 的 `hidden` 实测是 **`null` 而不是 `false`**（表示未隐藏），必须判 `=== true`。
+>
+> ⚠️ **P0-3-2 删账号的级联**：`course_id` 已 `ON DELETE CASCADE`，删课程即清空本课程的资料索引。
+
 ---
 
 ## 4. 同步语义（Tempo 内核的数据层约定）
@@ -502,6 +551,13 @@ CREATE INDEX idx_outline_items_course_id ON course_outline_items(course_id);
 
 -- 同步日志按用户 + 时间倒序
 CREATE INDEX idx_sync_runs_user_started ON sync_runs(user_id, started_at DESC);
+
+-- 资料（P0-3-19）：按课程取未删除的文件并按路径排序（课程页「资料」区的主查询）
+CREATE INDEX idx_course_files_course_path
+  ON course_files(course_id, folder_path) WHERE is_deleted = false;
+-- 去重唯一索引：没有它，同步重试会产生重复条目（资料区出现两个一模一样的 HW1）
+CREATE UNIQUE INDEX course_files_course_file_unique
+  ON course_files(course_id, canvas_file_id);
 
 -- 埋点：按「用户 + 事件类型」取时间窗（7 日回访）或取最近一条（提醒每日去重）
 CREATE INDEX idx_usage_events_user_event_time ON usage_events(user_id, event_type, created_at DESC);

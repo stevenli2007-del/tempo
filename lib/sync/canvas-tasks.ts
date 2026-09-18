@@ -1,4 +1,5 @@
 import { sameNumber } from '@/lib/numbers'
+import { sameInstant } from '@/lib/time'
 import type { CanvasAssignment } from '@/types/canvas'
 
 import type { getCurrentUser } from '@/lib/api/response'
@@ -174,16 +175,6 @@ type ExistingRow = {
 /** 同步读取这三列时用的 select（与 `TASK_COLUMNS` 分开：这里只需要"用来比对"的列）。 */
 const EXISTING_COLUMNS =
   'id, source_id, title, due_date, external_updated_at, is_deleted, submission_state, submitted_at, canvas_url, points_possible, submission_score'
-
-/** 时间值比较：两边都是 null 算相同；有一边解析不出来算不同（保守地重写一次）。 */
-function sameInstant(a: string | null, b: string | null): boolean {
-  if (a === null && b === null) return true
-  if (a === null || b === null) return false
-  const ta = Date.parse(a)
-  const tb = Date.parse(b)
-  if (Number.isNaN(ta) || Number.isNaN(tb)) return false
-  return ta === tb
-}
 
 /**
  * 判断一条已存在的任务是否需要写入。

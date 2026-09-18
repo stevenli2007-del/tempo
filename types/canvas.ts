@@ -131,6 +131,73 @@ export type CanvasAnnouncement = {
   postedAt: string | null
 }
 
+/**
+ * Canvas 文件夹（P0-3-19 资料索引的输入形状，`GET /api/v1/courses/:id/folders` 的映射结果）。
+ *
+ * ### 为什么只要 4 个字段
+ * `/folders` 返回 22 个字段（含 `files_url` / `can_upload` / `position` …），
+ * 我们只关心"**这个文件该归到哪个文件夹下**"。其余一概不要 —— 最小权限，
+ * 多拿一个字段就多一处合规义务（Security-Privacy §6）。
+ *
+ * ### `path` 直接来自 Canvas 的 `full_name`
+ * 实测（2026-09-18，Chem 1A）：`full_name` = `course files/Lecture Slides/Unit 1`，
+ * Canvas **直接给了全路径**，不用我们自己沿着 `parent_folder_id` 拼父子链
+ * （拼链要在翻页不完整时处理断链，还多一处出错的地方）。
+ * 根文件夹的 `full_name` 就是 `course files`，剥掉前缀后 `path` 为空串 = 根目录。
+ */
+export type CanvasFolder = {
+  /** 源侧文件夹 ID（字符串）。文件的 `folder_id` 靠它找到自己的路径。 */
+  externalId: string
+  /** 文件夹名（末段），UI 分组标题用它。 */
+  name: string
+  /** 相对路径（`/` 分隔，已剥根前缀 `course files/`）。空串 = 课程文件根目录。 */
+  path: string
+  /**
+   * 学生是否看得见这个文件夹。
+   *
+   * 🔴 实测（Chem 1AL）：55 个文件夹里 **24 个**是 hidden 的（教师区 / 未发布）。
+   * 学生端根本看不到它们，把它们下面的文件索引进来 = 凭空造出一批"哪来的资料"。
+   * 判据：`hidden` / `locked` / `hidden_for_user` / `locked_for_user` 任一为真。
+   * ⚠️ Canvas 的 `hidden` 实测是 **`null` 而不是 `false`**（未隐藏），
+   *    所以必须判 `=== true`，判 truthy 之外的写法都要小心。
+   */
+  visible: boolean
+}
+
+/**
+ * Canvas 文件（P0-3-19 资料索引的输入形状，`GET /api/v1/courses/:id/files` 的映射结果）。
+ *
+ * ### 🔴 这里**没有**也绝不该有 `content` / `text` / `body` 之类的字段
+ * 本卡只建**目录**：文件名、类型、大小、所在文件夹、回 Canvas 的链接、`modified_at`。
+ * 文件内容一个字节都不下载 —— 要读某个文件时（3-20 大纲漂移 / 3-23 practice test）
+ * 才按 `modified_at` 差量去取那一个文件。
+ *
+ * ### 没有 `htmlUrl`，外链是**拼**出来的
+ * `/files` 返回的 `url` 形如 `/files/{id}/download?...&verifier=...` ——
+ * **带 Bearer token 才能取**，用户在浏览器里点开是 401（2026-09-18 实测）。
+ * 所以 `lib/canvas/files.ts` 的 `filePreviewUrl()` 拼
+ * `https://{domain}/courses/{courseId}/files/{fileId}`（实测 200，Canvas 的文件预览页）。
+ */
+export type CanvasFile = {
+  /** 源侧文件 ID（字符串），落库为 `course_files.canvas_file_id`，去重的唯一依据。 */
+  externalId: string
+  /** 所在文件夹的源侧 ID；`folder_id` 缺失时为 null（映射后会被跳过，见下）。 */
+  folderId: string | null
+  /** 展示名（Canvas `display_name`）。**不是** `filename`（后者是 URL 编码的原始名）。 */
+  displayName: string
+  /** MIME（Canvas `content-type` 用的就是这个带连字符的键名）。null = Canvas 没给。 */
+  contentType: string | null
+  /** 字节数。null = Canvas 没给（**不是 0**）。只用于展示，不参与任何判定。 */
+  sizeBytes: number | null
+  /**
+   * 内容最后修改时间（Canvas `modified_at`）。
+   * **3-20 / 3-23 按需抓内容的差量依据**：它没变就不重新下载、不重新解析、不再花模型钱。
+   * ⚠️ 不要用 `updated_at` 顶替：实测同一个文件 `modified_at=00:28Z` 而 `updated_at=01:56Z`
+   *    （改的是元数据，不是内容）—— 拿 `updated_at` 当"内容变了"会白跑一次解析。
+   */
+  modifiedAt: string | null
+}
+
 /** 内联提交对象里 Tempo 用到的字段（P0-3-10，Canvas `submission` 的子集）。 */
 export type CanvasSubmission = {
   /** `unsubmitted` / `submitted` / `pending_review` / `graded` / … */

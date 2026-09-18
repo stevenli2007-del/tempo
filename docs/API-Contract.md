@@ -885,10 +885,20 @@
   "coursesFailed": 1,
   "tasksCreated": 3, "tasksUpdated": 2, "tasksDeleted": 0,
   "failures": [ { "courseId": "…", "courseName": "…", "message": "Canvas 返回 401" } ],
+  // 公告（P0-3-25）与资料（P0-3-19）是**附加能力**，各自的成败记在这两块，
+  // 不进 failures —— 它们挂掉不代表作业没同步上（误报比沉默更伤）。
+  "announcements": { "status": "success", "scanned": 5, "created": 9, "digested": 40, "seen": 0, "windowStart": "…", "windowEnd": "…", "incomplete": false, "error": null },
+  "files": { "status": "success", "coursesScanned": 5, "coursesSkipped": 1, "created": 37, "updated": 0, "deleted": 0, "hiddenSkipped": 0, "incomplete": false, "error": null },
   "startedAt": "2026-09-04T20:00:47.614Z",
   "finishedAt": "2026-09-04T20:00:52.179Z"
 }
 ```
+
+> **`files.coursesSkipped` 通常不是故障**：实测 14 门课里 8 门 `/files` 返回 403
+> —— 那些课压根没开 Files 区（同一个 token 打它们的作业与文件夹全是 200）。
+> 所以「跳过」是资料索引的**常态结果**，只有 `files.error` 才是真要报的错
+> （详见 Sync-Strategy §8 的那条例外说明）。
+> 资料区走 **24 小时**独立节奏（手动刷新除外），所以多数轮次 `coursesScanned` 会是 0。
 
 | 情况 | 状态码 | `error.code` | 说明 |
 |---|---|---|---|

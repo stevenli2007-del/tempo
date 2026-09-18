@@ -127,6 +127,8 @@ Authorization: Bearer ${CRON_SECRET}
 | 陈旧告警阈值 | **> 24 小时**未成功同步 → 总览页顶部警告 | S1 原则 |
 | Token 过期提醒 | **T-14 / T-7 / T-3 / T-1 / 当天** | 给学生足够的重新生成窗口 |
 | 并发度 | **1（严格串行）** | Canvas 对并发有 pre-flight 惩罚 |
+| 资料区（P0-3-19）单课请求数 | **2 个**（`/files` + `/folders`，先 files 后 folders） | 实测 6 门课 = 12 个，在 20 预算内 |
+| 资料区重扫间隔 | **24 小时**（手动刷新除外） | 目录低频变化，保住 20 请求预算给作业 |
 
 ### 用量估算（Phase 0，6 名用户）
 
@@ -198,6 +200,16 @@ await upsertTask(incoming);
 | 404 | ❌ | 跳过该资源，不影响本次同步其他部分 |
 | **401 / 403（凭证失效）** | ❌ **绝不重试** | 立即 `canvas_credentials.status='error'`，UI 引导重新生成 token。**停止该用户的定时同步**，不浪费请求 |
 | 解析异常（JSON 结构不符预期） | ❌ | 记录 `error_message`，标记 `failed`。**不允许吞掉异常后当作"没有作业"** |
+
+> 🔴 **上表的 401/403 规则只对「作业」生效 —— 资料区（P0-3-19）是唯一例外，且必须例外。**
+> 实测（2026-09-18，Steven 真账号）：**14 门课里 8 门** `/files` 返回 **403**
+> （Assessment Pilot / GBA / Hazing Prevention / PartySafe / SHAPE …），
+> 而同一个 token 打它们的 `/assignments` 与 `/folders` 全是 200 —— **这些课压根没开 Files 区**。
+> 若把这条 403 也判成"凭证失效"，就会立刻 `markCredentialFailed` 并停掉该用户全部同步：
+> **凭证明明有效，却被一门没开 Files 的课连坐。**
+> 故：`lib/sync/canvas-files.ts` 里的 401/403 **只跳过那门课，绝不写凭证状态**；
+> **凭证有效性只由作业同步判定**（作业跑在最前面，token 真失效时轮不到资料区）。
+> 同理，资料区的失败不进 `failures`、不改同步 `status`，只记在 `SyncFileSummary.error`。
 
 **课程级隔离**：单门课程失败不得影响其他课程。整体状态判定：全部成功 = `success`；部分成功 = `partial`；全部失败 = `failed`。
 
@@ -330,7 +342,7 @@ Phase 0 不搭监控系统，**每周人工看一次 `sync_runs` 表**即可。�
 
 ## 14. Phase 0 同步范围
 
-**同步两类带结构的数据**：
+**同步三类带结构的数据**：
 
 1. **带 due date 的作业（assignments）** —— 主同步目标（§4 Pipeline）。
 2. **Canvas 公告（announcements）** —— **2026-09-17 晚 Steven 拍板纳入 Phase 0（ADR-021），原 Non-Goal 撤销**。批量端点 `GET /api/v1/announcements?context_codes[]=course_…` + **显式两端日期**（**绕过 `end_date` 默认 +28 天陷阱**，见下）+ **窗口起点跟锚点走的动态滚动窗口**（ADR-023：起点 = 上次成功同步那天，常态"当天 + 昨天"，断更自动回补，14 天上限）幂等（P0-3-25）。公告 `message` 是 HTML → 必须剥标签/消毒，禁 `dangerouslySetInnerHTML`（stored XSS）。落点规则：**有结构化落点（quiz/exam/作业变更）→ 进消息栏出可确认提案**；**无结构化落点（如 office hours 变更、本周课取消）→ 只给「知道了」回执，不写任何字段**（Steven 拍板去掉 OH 结构化落点，避免造一个没人维护的 OH 模型）。
@@ -372,6 +384,22 @@ Phase 0 不搭监控系统，**每周人工看一次 `sync_runs` 表**即可。�
 - ❌ 成绩（grades / submissions 的权威分）—— 3-17 只**读** `submission.score`/`points_possible` 展示，不写、不同步权威课程总分（Canvas `enrollments.grades` 对本人 null）。
 - ❌ 讨论区（discussions，非 announcement 部分）
 - ❌ 课程文件**内容** —— P0-3-19 只抓**元数据**（文件名/文件夹/外链），不下载内容。
+
+**🔴 第三类：Canvas 文件元数据（P0-3-19，2026-09-18 落地）**
+
+只建**目录**，不下载内容：`/courses/:id/files` + `/folders` → `course_files` 表 →
+课程页「资料」区按 Canvas 文件夹结构分组、点开外链回 Canvas。要点：
+
+- **只存目录**：表里没有任何一列能装文件内容。3-20（大纲漂移）/ 3-23（practice test）
+  才按需 `GET` 那**一个**文件，用 `modified_at` 做差量。
+- **每课 2 个请求，走 24 小时独立节奏**（手动刷新除外）—— 单次同步只有 20 个请求预算，
+  每轮都扫会把作业挤掉。字段是 `courses.files_scanned_at`（**扫描节流**，非新鲜度承诺）。
+- **顺序是先 `/files` 后 `/folders`**：403 的课（实测 8/14）在花第二个请求之前就收工。
+- **学生看不见的不索引**：locked / hidden / `*_for_user` 的文件，以及落在不可见文件夹里的
+  （实测 Chem 1AL：55 个文件夹里 24 个 hidden）。⚠️ Canvas 的 `hidden` 未隐藏时是 **`null` 不是 `false`**。
+- **外链必须拼**：`https://{domain}/courses/{cid}/files/{fid}`（实测 200）。
+  Canvas 返回的 `url` 是 `/files/{id}/download?...&verifier=...`，**需 Bearer**，浏览器点开 401。
+- **删除判定只在拉取完整时做**（§7 同一条铁律）。
 - ❌ 花名册
 
 理由三条：① 最小权限原则（ADR-002 / ADR-008）—— 请求的数据越少，ToS 暴露面越小；② 少一处数据少一处合规义务；③ Phase 0 只接"有结构落点"的数据，无落点的只给回执。

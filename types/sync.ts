@@ -79,6 +79,52 @@ export type SyncAnnouncementSummary = {
   error: string | null
 }
 
+/**
+ * 资料索引（Canvas 文件元数据）的记账（P0-3-19）。
+ *
+ * ### 为什么又是一块独立的 summary
+ * 与 `SyncAnnouncementSummary` 同一个道理：资料区是**附加能力**，且它的失败
+ * **绝大多数是正常的**（详见下）—— 塞进 `failures` 会让 `coursesFailed` 虚高，
+ * 用户看到"6 门课里 5 门同步失败"，而其实作业全好。
+ *
+ * ### 🔴 `coursesSkipped` 通常**不是**故障
+ * 实测（2026-09-18，Steven 真账号）：14 门课里 **8 门** `/files` 返回 **403**
+ * —— 这些课压根没开 Files 区（Assessment Pilot / GBA / Hazing Prevention /
+ * PartySafe / SHAPE …），同一个 token 打它们的 `/assignments` 与 `/folders` 全是 200。
+ * 所以「跳过」是本功能的**常态结果**，不是错误。真正要报警的是
+ * `error`（端点整片挂掉 / 写库失败），而不是"有几门课没资料"。
+ */
+export type SyncFileSummary = {
+  status: 'success' | 'failed'
+  /** 本轮真正扫了资料的课程数。 */
+  coursesScanned: number
+  /**
+   * 被跳过的课程数（**正常现象，不是失败**）：
+   * ① 这门课没开 Files 区（`/files` 403）；
+   * ② 24 小时内刚扫过（预算保护，见 `FILES_SCAN_INTERVAL_MS`）。
+   */
+  coursesSkipped: number
+  /** 新索引到的文件数。 */
+  created: number
+  /** 元数据有变化而更新的文件数（改名 / 移动 / 内容更新）。 */
+  updated: number
+  /**
+   * 因为**落在学生看不见的文件夹里**而没被索引的文件数。
+   * Chem 1AL 实测 55 个文件夹里 24 个是 hidden（教师区）——
+   * 这批数字不为 0 是**正常且正确**的，不是漏数据。
+   */
+  hiddenSkipped: number
+  /** 老师在 Canvas 上删掉而软删除的文件数（不是物理删除）。 */
+  deleted: number
+  /**
+   * 是否有课程的拉取**不完整**（翻页触顶 / 预算耗尽）。
+   * 为 true 时那一门课**不做删除判定** —— 不完整的拉取会把没拿到的行误判成"已删除"。
+   */
+  incomplete: boolean
+  /** 失败说明；`null` = 成功。 */
+  error: string | null
+}
+
 export type SyncSummary = {
   status: SyncStatus
   /** 成功同步的课程数。 */
@@ -96,6 +142,11 @@ export type SyncSummary = {
    * 与 `failures` 分开的理由见 `SyncAnnouncementSummary`。
    */
   announcements: SyncAnnouncementSummary | null
+  /**
+   * 资料索引结果。`null` = 本轮没跑资料区（凭证失效 / 没有已关联课程）。
+   * 与 `failures` 分开的理由见 `SyncFileSummary`。
+   */
+  files: SyncFileSummary | null
   startedAt: string
   finishedAt: string
 }

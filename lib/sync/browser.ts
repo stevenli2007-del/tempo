@@ -94,6 +94,21 @@ function announcementLine(summary: SyncSummary): string {
   return `；${a.created} 条新公告进了消息栏`
 }
 
+/**
+ * 资料索引那一步的结果压成一句话（P0-3-19）。
+ *
+ * ⚠️ 与公告相反：**这里只在出错时才出声**。
+ * 实测 14 门课里 8 门 `/files` 是 403（压根没开 Files 区）——
+ * 「跳过」是本功能的常态结果，说出来只会让用户以为出事了。
+ * 只有 `error`（端点真的挂了 / 写库失败）才需要让人看见（ADR-016 R3 防静默失败）。
+ */
+function filesLine(summary: SyncSummary): string {
+  const f = summary.files
+  if (!f) return ''
+  if (f.error) return `；资料索引失败（${f.error}）`
+  return ''
+}
+
 /** 把一次成功的同步结果压成一行人话。 */
 export function summarize(summary: SyncSummary): string {
   if (summary.coursesSynced === 0 && summary.coursesFailed === 0) {
@@ -108,5 +123,5 @@ export function summarize(summary: SyncSummary): string {
     summary.failures.length > 0
       ? `；${summary.failures.length} 门失败（${summary.failures[0].courseName}：${summary.failures[0].message}）`
       : ''
-  return `已同步 ${summary.coursesSynced} 门课，${changeLine}${failureLine}${announcementLine(summary)}`
+  return `已同步 ${summary.coursesSynced} 门课，${changeLine}${failureLine}${announcementLine(summary)}${filesLine(summary)}`
 }
