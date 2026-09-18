@@ -127,6 +127,14 @@ export type MessageView = {
   typeLabel: string
   /** 原始状态。UI 用它区分"已确认"与"已忽略"（两者都是非 pending）。 */
   status: MessageStatus
+  /** 是否已被撤销（P0-3-26，终态）。 */
+  isUndone: boolean
+  /** 确认 / 撤销那一刻（P0-3-26）。未处理过为 null。 */
+  decidedAt: string | null
+  /** 确认回执文案（P0-3-26，持久化的人话）。无回执为 null。 */
+  receiptText: string | null
+  /** 本次确认写入的业务数据行数（P0-3-26；为 0 = 无可撤销内容）。 */
+  appliedCount: number
   /**
    * 原始时间戳（ISO）。会话版面要按时间排，**必须显式排**——
    * 不能靠 `loadMessages` 的返回顺序（那是数据层的实现细节，改个 order 就会静默错排）。
@@ -220,6 +228,13 @@ export function toMessageView(
     type: message.type,
     typeLabel: MESSAGE_TYPE_LABELS[message.type],
     status: message.status,
+    isUndone: message.status === 'undone',
+    decidedAt: message.decidedAt,
+    receiptText:
+      typeof message.payload.receipt === 'string' && message.payload.receipt.trim() !== ''
+        ? message.payload.receipt
+        : null,
+    appliedCount: countApplied(message.payload),
     createdAt: message.createdAt,
     title: readTitle(message.payload),
     lines: readDetails(message.payload),
@@ -251,6 +266,13 @@ export function toMessageView(
 }
 
 /** 载荷是 `jsonb`，读的时候**每个字段都要当"可能不存在"**（3-19/3-20/3-23 各自产出）。 */
+function countApplied(payload: MessagePayload): number {
+  const applied = (payload.applied ?? {}) as { examDateIds?: unknown; gradeComponentIds?: unknown }
+  const exams = Array.isArray(applied.examDateIds) ? applied.examDateIds.length : 0
+  const components = Array.isArray(applied.gradeComponentIds) ? applied.gradeComponentIds.length : 0
+  return exams + components
+}
+
 function readTitle(payload: MessagePayload): string {
   const title = payload.title
   if (typeof title === 'string' && title.trim() !== '') return title

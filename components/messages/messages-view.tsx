@@ -35,6 +35,9 @@ import type { Message, MessageSummary } from "@/types/message"
 /** 气泡头像的宽 + 间距（size-7 = 28px，gap-2.5 = 10px）。回执靠它左沿对齐气泡内容。 */
 const RECEIPT_INDENT = "pl-[38px]"
 
+/** 撤销窗口（毫秒）：与路由端一致。前端只管 UX，真正的闸在 API。 */
+const UNDO_WINDOW_MS = 24 * 60 * 60 * 1000
+
 /**
  * 要点请求最多跑几轮。
  *
@@ -72,6 +75,7 @@ export function MessagesView({
   /** 正在请求要点的消息 id（只用来画「生成中」那一行）。 */
   const [summaryBusyIds, setSummaryBusyIds] = useState<string[]>([])
   const [busyId, setBusyId] = useState<string | null>(null)
+  const [busyUndoId, setBusyUndoId] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const flow = useCourseUpdateFlow({ initialCourses })
   const streamRef = useRef<HTMLDivElement | null>(null)
@@ -193,6 +197,36 @@ export function MessagesView({
     }
   }
 
+  async function undo(id: string) {
+    setBusyUndoId(id)
+    setError(null)
+    try {
+      const res = await fetch(`/api/v1/messages/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "undo" }),
+      })
+      const data = await res.json()
+      if (!res.ok) {
+        setError(data?.error?.message ?? "撤销失败，请重试")
+        return
+      }
+      // 同上：PATCH 不回要点表，要点手动带上（撤销后那行 AI 要点要重新显示）。
+      setMessages((prev) =>
+        prev.map((message) =>
+          message.id === id
+            ? { ...(data.data as Message), summary: liveSummaries[id] ?? message.summary ?? null }
+            : message,
+        ),
+      )
+      window.dispatchEvent(new Event(MESSAGES_UPDATED_EVENT))
+    } catch {
+      setError("网络错误，请重试")
+    } finally {
+      setBusyUndoId(null)
+    }
+  }
+
   return (
     // `flex-1 min-h-0`（而不是 `h-full`）：父级是固定高度的 flex 列，上面可能还压着一条
     // 错误横幅 —— 用 `h-full` 会把横幅挤出去、并多出一条滚动条。
@@ -213,8 +247,21 @@ export function MessagesView({
                   onAccept={() => void decide(view.id, "accepted")}
                   onDismiss={() => void decide(view.id, "dismissed")}
                 />
+              ) : view.isUndone ? (
+                <ProposalBubble
+                  key={view.id}
+                  view={view}
+                  busy={busyId === view.id}
+                  summaryBusy={summaryBusyIds.includes(view.id)}
+                  undone
+                />
               ) : (
-                <ResolvedReceipt key={view.id} view={view} />
+                <ResolvedReceipt
+                  key={view.id}
+                  view={view}
+                  busyUndo={busyUndoId === view.id}
+                  onUndo={() => void undo(view.id)}
+                />
               ),
             )
           )}
@@ -267,6 +314,7 @@ function ProposalBubble({
   view,
   busy,
   summaryBusy,
+  undone = false,
   onAccept,
   onDismiss,
 }: {
@@ -274,8 +322,10 @@ function ProposalBubble({
   busy: boolean
   /** 正在后台生成这条的 AI 要点（只影响那一行占位文案）。 */
   summaryBusy: boolean
-  onAccept: () => void
-  onDismiss: () => void
+  /** 已撤销（P0-3-26）：只读、不显示操作按钮，改为说明已回滚。 */
+  undone?: boolean
+  onAccept?: () => void
+  onDismiss?: () => void
 }) {
   return (
     <div className="flex items-start gap-2.5">
@@ -431,18 +481,26 @@ function ProposalBubble({
         </p>
 
         <div className="mt-3 flex items-center justify-end gap-2 border-t border-line pt-3">
-          {!view.canAccept && view.blockReason && (
-            <span className="mr-auto max-w-[60%] text-xs text-ink-muted" title={view.blockReason}>
-              {view.blockReason}
+          {undone ? (
+            <span className="ml-auto text-xs text-ink-muted">
+              已撤销 · 写入的内容已回滚
             </span>
+          ) : (
+            <>
+              {!view.canAccept && view.blockReason && (
+                <span className="mr-auto max-w-[60%] text-xs text-ink-muted" title={view.blockReason}>
+                  {view.blockReason}
+                </span>
+              )}
+              <Button variant="outline" size="sm" disabled={busy} onClick={onDismiss}>
+                忽略
+              </Button>
+              {/* 文案来自 `toMessageView`：无落点的公告是「知道了」—— 它确实什么都不会写。 */}
+              <Button size="sm" disabled={busy || !view.canAccept} onClick={onAccept}>
+                {view.confirmLabel}
+              </Button>
+            </>
           )}
-          <Button variant="outline" size="sm" disabled={busy} onClick={onDismiss}>
-            忽略
-          </Button>
-          {/* 文案来自 `toMessageView`：无落点的公告是「知道了」—— 它确实什么都不会写。 */}
-          <Button size="sm" disabled={busy || !view.canAccept} onClick={onAccept}>
-            {view.confirmLabel}
-          </Button>
         </div>
       </div>
     </div>
@@ -454,16 +512,75 @@ function ProposalBubble({
  *
  * `status` 一离开 pending 就"就地降级"成这一行：忽略掉的内容不再占版面，
  * 也没有真的丢 —— 想回溯还看得见，且随会话继续向上滚走。
+ *
+ * P0-3-26：确认的那行多显示**回执**（写了什么）+ 「原文 ↗」+ 24h 内的「撤销」。
+ * 撤销按钮的可见性在**挂载后**才算（用 `mounted` 闸门），避免服务端/客户端
+ * 因 `now` 不同出现 hydration mismatch —— 首屏两者都看不到按钮，挂载后客户端再补。
  */
-function ResolvedReceipt({ view }: { view: MessageView }) {
+function ResolvedReceipt({
+  view,
+  busyUndo,
+  onUndo,
+}: {
+  view: MessageView
+  busyUndo: boolean
+  onUndo: () => void
+}) {
   const accepted = view.status === "accepted"
+
+  /**
+   * 撤销按钮的可见性只在**挂载后**才算（`now` 来自客户端，且 `Date.now()` 不进 render）。
+   * 首屏（SSR 与首次客户端渲染）一律看不到按钮 → 与服务端输出一致，无 hydration mismatch；
+   * 挂载后客户端补算 24h 窗口，该显示的才显示。
+   * `react-hooks/set-state-in-effect` 对本处的豁免：这是 client-only 闸门的标准写法，
+   * 初始值 false 已与服务端一致，effect 里的 setState 不会造成"两帧不一致"。
+   */
+  const [canUndo, setCanUndo] = useState(false)
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setCanUndo(
+      accepted &&
+        view.appliedCount > 0 &&
+        view.decidedAt != null &&
+        Date.now() - new Date(view.decidedAt).getTime() <= UNDO_WINDOW_MS,
+    )
+  }, [accepted, view.appliedCount, view.decidedAt])
+
   return (
-    <div className={`flex items-baseline gap-2 pr-1 text-xs text-ink-faint ${RECEIPT_INDENT}`}>
-      <span className={accepted ? "shrink-0 text-green" : "shrink-0"}>
-        {accepted ? "✓ 已确认" : "— 已忽略"}
-      </span>
-      <span className="min-w-0 flex-1 truncate text-ink-muted">{view.title}</span>
-      <span className="shrink-0 tabular-nums">{view.timeLabel}</span>
+    <div className={`flex flex-col gap-1 pr-1 text-xs text-ink-faint ${RECEIPT_INDENT}`}>
+      <div className="flex items-baseline gap-2">
+        <span className={accepted ? "shrink-0 text-green" : "shrink-0"}>
+          {accepted ? "✓ 已确认" : "— 已忽略"}
+        </span>
+        <span className="min-w-0 flex-1 truncate text-ink-muted">{view.title}</span>
+        <span className="shrink-0 tabular-nums">{view.timeLabel}</span>
+      </div>
+      {view.receiptText && <p className="text-ink-muted">{view.receiptText}</p>}
+      <div className="flex flex-wrap items-center gap-3">
+        {view.sourceUrl && (
+          <a
+            href={view.sourceUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-ink-muted underline decoration-dotted underline-offset-2 hover:text-ink"
+          >
+            原文 ↗
+          </a>
+        )}
+        {canUndo && (
+          <button
+            type="button"
+            onClick={onUndo}
+            disabled={busyUndo}
+            className="text-destructive underline decoration-dotted underline-offset-2 hover:opacity-80 disabled:opacity-50"
+          >
+            {busyUndo ? "撤销中…" : "撤销"}
+          </button>
+        )}
+        {!canUndo && accepted && view.appliedCount > 0 && (
+          <span className="text-ink-faint">已超 24 小时撤销窗口</span>
+        )}
+      </div>
     </div>
   )
 }

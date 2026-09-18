@@ -25,7 +25,7 @@
 export type MessageType = 'syllabus_drift' | 'practice_test' | 'routine' | 'material' | 'announcement'
 
 /** 提案状态。同上，与迁移的 CHECK 约束一致。 */
-export type MessageStatus = 'pending' | 'accepted' | 'dismissed'
+export type MessageStatus = 'pending' | 'accepted' | 'dismissed' | 'undone'
 
 /**
  * 合并摘要里的一条公告（P0-3-25 C 口径，2026-09-18 Steven 拍板）。
@@ -79,6 +79,20 @@ export type MessagePayload = {
   /** 有没有结构化落点。 */
   landing?: boolean
   /**
+   * 确认后写入的业务数据行 id（P0-3-26 撤销用）。
+   *
+   * 只在 applier 真正写了东西时才有值；无落点公告（"知道了"）或写入失败都是 undefined。
+   * 撤销时按这些 id 精准回滚（考试还要重跑派生链移除派生任务），**绝不**整表清空。
+   */
+  applied?: MessageApplied
+  /**
+   * 确认后的回执文案（P0-3-26，持久化的人话，刷新后仍在）。
+   *
+   * 由 applier 产出（如「已写入 2 条考试，该课现在共 7 条」），确认那一刻落库。
+   * 与 `summary` 表是两回事：这里是确认动作的回执，那里是公告的 AI 要点。
+   */
+  receipt?: string
+  /**
    * 「通知类公告」的合并摘要（P0-3-25 C 口径）。
    *
    * 只有**无落点**的公告走这条路：它们合并成一条消息，逐条列在这里。
@@ -121,6 +135,8 @@ export type Message = {
   payload: MessagePayload
   status: MessageStatus
   createdAt: string
+  /** 确认 / 撤销那一刻（P0-3-26，供 24h 撤销窗口判定）。未处理过为 null。 */
+  decidedAt: string | null
   /**
    * AI 要点（P0-3-25b）。**可选**，因为两条读取路径的取法不同：
    * - 列表（`loadMessages`）会一并查出来附上 —— 打开消息栏时要立刻看到缓存里的要点，
@@ -138,4 +154,17 @@ export type MessageRow = {
   payload: unknown
   status: string
   created_at: string
+  decided_at: string | null
+}
+
+/**
+ * 确认后写入的业务数据行 id（P0-3-26 撤销用）。
+ *
+ * 只记"这次确认新写入了哪些行"，撤销按 id 精准回滚。
+ * 考试删除后还要重跑 `syncExamToTask` 移除对应的派生任务（ADR-004 唯一派生实现）；
+ * 成绩构成没有派生任务，直接删。
+ */
+export type MessageApplied = {
+  examDateIds?: string[]
+  gradeComponentIds?: string[]
 }

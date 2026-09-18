@@ -44,6 +44,7 @@ function makeMessage(
     type,
     status,
     createdAt: "2026-09-17T18:00:00Z",
+    decidedAt: null,
     payload: {
       title: "测试提案",
       ...payload,
@@ -65,6 +66,7 @@ function makeRawPayload(payload: Record<string, unknown>): Message {
     type: "announcement",
     status: "pending",
     createdAt: "2026-09-17T18:00:00Z",
+    decidedAt: null,
     payload: { title: "6 门课的 40 条通知类公告", ...payload } as MessagePayload,
   }
 }
@@ -147,8 +149,9 @@ console.log("枚举白名单（CodingRules §10.1 第 16 条：四处同改）")
   // 但"多出一个 tsc 管不到的键"它不会报，所以这里也查反向。
   check("标签表没有多余的键", labelKeys.length === runtimeTypes.length)
   check(
-    "状态白名单是 pending/accepted/dismissed",
-    JSON.stringify([...MESSAGE_STATUSES].sort()) === JSON.stringify(["accepted", "dismissed", "pending"]),
+    "状态白名单是 pending/accepted/dismissed/undone",
+    JSON.stringify([...MESSAGE_STATUSES].sort()) ===
+      JSON.stringify(["accepted", "dismissed", "pending", "undone"]),
     `[${MESSAGE_STATUSES}]`,
   )
 }
@@ -420,9 +423,63 @@ console.log("toMessageView（AI 要点，P0-3-25b）")
     type: "announcement",
     status: "pending",
     createdAt: "2026-09-17T18:00:00Z",
+    decidedAt: null,
     payload: { title: "老消息" },
   })
   check("summary 字段缺失 → 当作没有要点", legacy.summaryPoints.length === 0 && legacy.needsSummary)
+}
+
+console.log("撤销回执视图（P0-3-26）")
+{
+  // 1. 已撤销 → isUndone 透传、appliedCount 统计、receiptText 透传。
+  const undone = toMessageView(
+    makeMessage("announcement", "undone", {
+      landing: true,
+      receipt: "已写入 2 条考试（该课现在共 7 条）",
+      applied: { examDateIds: ["a", "b"], gradeComponentIds: [] },
+    }),
+  )
+  check("undone 状态 → isUndone=true", undone.isUndone === true)
+  check("isUndone 透传 status", undone.status === "undone")
+  check("appliedCount 统计考试行", undone.appliedCount === 2, `count=${undone.appliedCount}`)
+  check(
+    "receiptText 透传",
+    undone.receiptText === "已写入 2 条考试（该课现在共 7 条）",
+    String(undone.receiptText),
+  )
+
+  // 2. 已确认但无写入（如"知道了"）→ appliedCount=0，仍不是 undone。
+  const ack = toMessageView(
+    makeMessage("announcement", "accepted", {
+      landing: false,
+      receipt: "知道了（3 条通知类公告，没有要写入的字段）",
+    }),
+  )
+  check("accepted 非 undone", ack.isUndone === false)
+  check("无落点 → appliedCount=0", ack.appliedCount === 0, `count=${ack.appliedCount}`)
+
+  // 3. 撤销后不再请求要点（needsSummary 只看 pending）。
+  const okSummary: Message["summary"] = {
+    points: ["要交 HW7"],
+    itemsUsed: 1,
+    itemsTotal: 1,
+    status: "ok",
+    createdAt: "2026-09-18T00:00:00Z",
+  }
+  check(
+    "undone → 不再请求要点",
+    !toMessageView(makeMessage("announcement", "undone", {}, okSummary)).needsSummary,
+  )
+
+  // 4. 缺 receipt / applied → 容错为 null / 0（jsonb 可能任意形状，不能崩）。
+  const messy = toMessageView(
+    makeMessage("announcement", "accepted", {
+      receipt: 123 as unknown as string,
+      applied: "nope" as unknown as object,
+    }),
+  )
+  check("receipt 非字符串 → null", messy.receiptText === null)
+  check("applied 非对象 → 0", messy.appliedCount === 0, `count=${messy.appliedCount}`)
 }
 
 console.log("")

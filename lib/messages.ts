@@ -27,7 +27,7 @@ import type {
 type ServerSupabase = Awaited<ReturnType<typeof createClient>>
 
 /** 查询列（列表与单条共用，避免两处 list 漂移 —— 与 `TASK_COLUMNS` 同一理由）。 */
-export const MESSAGE_COLUMNS = 'id, user_id, type, payload, status, created_at'
+export const MESSAGE_COLUMNS = 'id, user_id, type, payload, status, created_at, decided_at'
 
 // 枚举白名单在 `lib/messages/registry.ts`（纯模块，回归脚本可断言）——
 // 放在这里的话，测试 import 本文件就会拖进 `next/headers`，第 ② 处漏改永远测不出来。
@@ -55,6 +55,7 @@ export function toMessage(row: MessageRow, summary: MessageSummary | null = null
     payload,
     status: row.status as MessageStatus,
     createdAt: row.created_at,
+    decidedAt: row.decided_at,
     summary,
   }
 }
@@ -159,6 +160,35 @@ export async function updateMessageStatus(
   const { data, error } = await supabase
     .from('messages')
     .update({ status })
+    .eq('id', id)
+    .select(MESSAGE_COLUMNS)
+    .maybeSingle()
+
+  if (error) return { message: null, error: error.message }
+  if (!data) return { message: null, error: null }
+  return { message: toMessage(data as MessageRow), error: null }
+}
+
+/**
+ * 确认成功后落库回执（P0-3-26）。
+ *
+ * applier 跑完、确认这一步才把「写了什么」写进消息本身，刷新后仍在：
+ * - `decided_at`：确认时刻（24h 撤销窗口的基准）；
+ * - `payload.applied`：本次新写入的业务数据行 id（撤销按它精准回滚）；
+ * - `payload.receipt`：人话回执文案（如「已写入 2 条考试，该课现在共 7 条」）。
+ *
+ * 与 `updateMessageStatus` 分开：前者先改状态、后者在 applier 成功后才补这两列，
+ * 避免"状态已改、回执却没写进去"的半截状态。
+ */
+export async function finalizeConfirmation(
+  supabase: ServerSupabase,
+  id: string,
+  payload: MessagePayload,
+  decidedAt: string,
+): Promise<{ message: Message | null; error: string | null }> {
+  const { data, error } = await supabase
+    .from('messages')
+    .update({ decided_at: decidedAt, payload })
     .eq('id', id)
     .select(MESSAGE_COLUMNS)
     .maybeSingle()

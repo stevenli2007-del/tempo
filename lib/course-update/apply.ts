@@ -49,6 +49,8 @@ export type ApplySectionResult = {
   total: number
   /** 新增条目的名称（回执里逐条点名，用户才能核对写对了没）。 */
   names: string[]
+  /** 本次新增行的 id（P0-3-26 撤销按它精准回滚）。 */
+  ids: string[]
 }
 
 export type CourseUpdateApplyResult = {
@@ -56,6 +58,8 @@ export type CourseUpdateApplyResult = {
   gradeComponents: ApplySectionResult | null
   /** 写入后按 source 分组的占比合计校验（≠100 时带人话报警）。 */
   weightWarnings: string[]
+  /** 本次写入的全部业务数据行 id（P0-3-26 撤销用）。 */
+  applied: { examDateIds: string[]; gradeComponentIds: string[] }
 }
 
 /** 课程归属：只接受当前用户未归档的课程（ADR-010：越权与不存在统一 404）。 */
@@ -82,6 +86,7 @@ async function insertExams(
   if ((data ?? []).length !== rows.length) {
     throw new Error(`exam_dates: 插入 ${rows.length} 行但只返回 ${(data ?? []).length} 行`)
   }
+  const ids = ((data ?? []) as { id: string }[]).map((row) => row.id)
 
   // 派生前重新拉全量：`syncExamToTask` 的契约是"该课程当前全部考试行"，
   // 传本次新增的几条等于告诉它"别的都没了" → 会把其余派生任务删掉。
@@ -97,6 +102,7 @@ async function insertExams(
   return {
     created: rows.length,
     total: stored.length,
+    ids,
     names: exams.map((exam) =>
       exam.examDate === null ? `${exam.examName}（日期待定）` : `${exam.examName} · ${exam.examDate}`,
     ),
@@ -114,6 +120,7 @@ async function insertGradeComponents(
   if ((data ?? []).length !== rows.length) {
     throw new Error(`grade_components: 插入 ${rows.length} 行但只返回 ${(data ?? []).length} 行`)
   }
+  const ids = ((data ?? []) as { id: string }[]).map((row) => row.id)
 
   const { data: all, error: loadError } = await supabase
     .from('grade_components')
@@ -125,6 +132,7 @@ async function insertGradeComponents(
   return {
     created: rows.length,
     total: stored.length,
+    ids,
     names: components.map((item) =>
       item.weightPercent === null
         ? `${item.name}（未标占比）`
@@ -171,7 +179,15 @@ export async function applyCourseUpdate(
     warnings = weightWarnings(stored)
   }
 
-  return { exams, gradeComponents, weightWarnings: warnings }
+  return {
+    exams,
+    gradeComponents,
+    weightWarnings: warnings,
+    applied: {
+      examDateIds: exams?.ids ?? [],
+      gradeComponentIds: gradeComponents?.ids ?? [],
+    },
+  }
 }
 
 /**

@@ -2,6 +2,8 @@ import type { MessagePayload, MessageType } from '@/types/message'
 
 import type { getCurrentUser } from '@/lib/api/response'
 
+import type { MessageApplied } from '@/types/message'
+
 import { isApplierReady, type ApplierReadyType } from './registry'
 
 /**
@@ -42,7 +44,7 @@ import { isApplierReady, type ApplierReadyType } from './registry'
 export type ApplierSupabase = Awaited<ReturnType<typeof getCurrentUser>>['supabase']
 
 export type ApplyOutcome =
-  | { ok: true; summary: string }
+  | { ok: true; summary: string; applied?: MessageApplied }
   | { ok: false; code: string; message: string }
 
 export type ApplyContext = {

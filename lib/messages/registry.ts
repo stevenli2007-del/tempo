@@ -29,7 +29,7 @@ export const MESSAGE_TYPES: readonly MessageType[] = [
 ]
 
 /** 所有合法的 `messages.status`。与迁移的 CHECK 约束必须一致。 */
-export const MESSAGE_STATUSES: readonly MessageStatus[] = ['pending', 'accepted', 'dismissed']
+export const MESSAGE_STATUSES: readonly MessageStatus[] = ['pending', 'accepted', 'dismissed', 'undone']
 
 /**
  * 已接入「确认后写入」逻辑的提案类型（P0-3-25 从 `apply.ts` 挪过来的）。

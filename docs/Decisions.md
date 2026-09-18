@@ -869,7 +869,7 @@ P0-3-18 消息栏验收后，Steven 提出三项"信息入站"需求：① 老�
 **后果**
 
 - 三个迁移均【Steven 手动】走 Supabase SQL Editor（**先 SQL 后部署**，否则 42703 全挂）。
-- 枚举扩展（3-26 `messages.status` / 3-25 `messages.type`）须过 CodingRules §10.1 第 16 条：四处同改 `types/message.ts` / `lib/messages/view.ts` / SQL CHECK / 回归脚本，否则 `toMessage()` 遇未知值返回 null = 消息静默消失。
+- 枚举扩展（3-26 `messages.status` / 3-25 `messages.type`）须过 CodingRules §10.1 第 16 条：四处同改 `types/message.ts` / `lib/messages/registry.ts`（运行时白名单 `MESSAGE_TYPES` / `MESSAGE_STATUSES`）/ SQL CHECK / 回归脚本，否则 `toMessage()` 遇未知值返回 null = 消息静默消失。
 - 3-25 公告进站叠加在现有 T3（每日 2 次）上，不新增 cron（Steven 拍板④）；用量仍在熔断预算内（批量端点 1 请求覆盖全课）。
 
 **复审条件**

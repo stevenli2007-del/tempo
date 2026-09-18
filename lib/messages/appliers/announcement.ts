@@ -200,5 +200,13 @@ export const announcementApplier: MessageApplier = async (
     parts.push(`另有 ${taskCount} 条作业类信息未写入，请用对话框确认`)
   }
 
-  return { ok: true, summary: parts.join(' · ') }
+  // 透传本次写入的行 id：撤销（P0-3-26）按它精准回滚，绝不整表清空。
+  const applied = result.applied
+  const hasApplied =
+    (applied.examDateIds?.length ?? 0) > 0 || (applied.gradeComponentIds?.length ?? 0) > 0
+  return {
+    ok: true,
+    summary: parts.join(' · '),
+    ...(hasApplied ? { applied } : {}),
+  }
 }

@@ -122,17 +122,16 @@ const CASES: Case[] = [
     why: '重写 CHECK 时别把老值弄丢',
   },
 
-  // ---------- P0-3-26 的枚举（侦察，不作为判据） ----------
+  // ---------- P0-3-26 的枚举：messages.status 加 'undone' ----------
   {
     label: "messages.status = 'undone'",
     table: 'messages',
     row: { user_id: BOGUS_UUID, type: 'material', payload: {}, status: 'undone' },
-    expect: 'rejected',
-    why: 'P0-3-26 撤销回执要用；现在被拒 = 迁移还没跑（预期如此）',
-    advisory: true,
+    expect: 'accepted',
+    why: 'P0-3-26 撤销回执要用。**这是该卡的验收闸**：仍被拒 = 迁移没生效',
   },
   {
-    label: "messages.type = '__bogus__'（对照组）",
+    label: "messages.status = '__bogus__'（对照组）",
     table: 'messages',
     row: { user_id: BOGUS_UUID, type: '__bogus__', payload: {} },
     expect: 'rejected',
@@ -288,6 +287,16 @@ async function main(): Promise<void> {
     console.log(
       "  ⏳ P0-3-25 迁移**未跑**：'announcement' 仍被拒 —— 跑 `20260919000000_announcements.sql` 后再来。",
     )
+  }
+
+  const undoneCase = results.find((r) => r.c.label.includes("'undone'"))
+  const undoneControl = results.find((r) => r.c.label.includes('__bogus__'))
+  if (undoneCase?.verdict === 'accepted' && undoneControl?.verdict === 'rejected') {
+    console.log("  ✅ P0-3-26 迁移生效：messages.status 已接受 'undone'，且 CHECK 仍在拦非法值。")
+  } else if (undoneCase?.verdict !== 'accepted') {
+    console.log("  ❌ P0-3-26 迁移**未生效**：'undone' 仍被拒 —— 回到 SQL Editor 重跑 `20260918000000_message_undo.sql`。")
+  } else {
+    console.log('  ❌ 对照组异常：status CHECK 没有拦下非法值 —— 约束可能被整体删掉了，人工核对。')
   }
 
   const pending = results.filter((r) => r.c.advisory)

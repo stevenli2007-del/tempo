@@ -1,8 +1,12 @@
 import { UUID_PATTERN } from '@/lib/api/params'
 import { getCurrentUser, internalError, jsonError, jsonOk } from '@/lib/api/response'
-import { loadMessage, updateMessageStatus } from '@/lib/messages'
+import { finalizeConfirmation, loadMessage, updateMessageStatus } from '@/lib/messages'
 import { applyMessage, isApplierReady } from '@/lib/messages/apply'
+import { undoMessage } from '@/lib/messages/undo'
 import { planDecision } from '@/lib/messages/decide'
+
+/** 撤销窗口（毫秒）：确认后 24h 内可撤销。 */
+const UNDO_WINDOW_MS = 24 * 60 * 60 * 1000
 
 /**
  * 提案的「确认 / 忽略」（P0-3-18）。
@@ -41,6 +45,13 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
     if (typeof body !== 'object' || body === null) {
       return jsonError(request, 400, 'bad_request', '请求体必须是 JSON 对象')
     }
+    const action = (body as Record<string, unknown>).action
+
+    // ---------- 撤销分支（P0-3-26） ----------
+    if (action === 'undo') {
+      return await handleUndo(request, supabase, id, user.id)
+    }
+
     const nextStatus = (body as Record<string, unknown>).status
     if (nextStatus !== 'accepted' && nextStatus !== 'dismissed') {
       return jsonError(request, 400, 'validation_failed', 'status 只接受 accepted 或 dismissed')
@@ -96,8 +107,88 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
       return jsonError(request, 502, outcome.code, outcome.message)
     }
 
-    return jsonOk(request, { data: updated, applied: true, summary: outcome.summary })
+    // 确认成功：把回执 / 写入行 id / 确认时刻落库（刷新后仍在，撤销按 id 精准回滚）。
+    const decidedAt = new Date().toISOString()
+    const mergedPayload = {
+      ...updated.payload,
+      ...(outcome.applied ? { applied: outcome.applied } : {}),
+      receipt: outcome.summary,
+    }
+    const { message: finalized, error: finalizeError } = await finalizeConfirmation(
+      supabase,
+      id,
+      mergedPayload,
+      decidedAt,
+    )
+    if (finalizeError) {
+      // 回执没落库不算致命：业务数据已写入、状态已 accepted。但必须报出来，
+      // 否则出现"显示已确认、回执却丢了"的半截状态。
+      console.error('[messages] 确认回执落库失败:', finalizeError)
+    }
+
+    return jsonOk(request, {
+      data: finalized ?? updated,
+      applied: true,
+      summary: outcome.summary,
+    })
   } catch (error) {
     return internalError(request, error)
   }
+}
+
+/**
+ * 撤销（P0-3-26）：把确认那一刻写入的考试 / 成绩构成回滚，并同步移除派生任务。
+ *
+ * 🔴 这是不可逆操作的最后一道闸，规则比确认更严：
+ * - 只有 `accepted` 能撤（pending / dismissed / 已 undone 都拒绝）；
+ * - **服务端卡 24h 窗口**：超窗返回 403，不依赖前端隐藏按钮（前端只是 UX）；
+ * - 没有 `decided_at`（本功能上线前确认的老消息）直接拒绝 —— 它们本就没有可撤销的数据；
+ * - 撤销器失败 → 502，**绝不**把状态改成 undone 假装成功（ADR-016 R3）。
+ */
+async function handleUndo(
+  request: Request,
+  supabase: Awaited<ReturnType<typeof getCurrentUser>>['supabase'],
+  id: string,
+  userId: string,
+): Promise<Response> {
+  const { message, error } = await loadMessage(supabase, id)
+  if (error) {
+    throw new Error(error)
+  }
+  if (!message) {
+    return jsonError(request, 404, 'not_found', '提案不存在或无权访问')
+  }
+  if (message.status !== 'accepted') {
+    return jsonError(request, 409, 'not_undoable', '这条提案当前不可撤销')
+  }
+  if (!message.decidedAt) {
+    // 本功能上线前确认的老消息：没有可撤销的数据，且无法判定窗口。
+    return jsonError(request, 409, 'not_undoable', '这条提案没有可撤销的写入记录')
+  }
+
+  const now = Date.now()
+  const decided = new Date(message.decidedAt).getTime()
+  if (Number.isNaN(decided) || now - decided > UNDO_WINDOW_MS) {
+    return jsonError(request, 403, 'undo_window_expired', '已超过 24 小时撤销窗口，无法撤销')
+  }
+
+  const outcome = await undoMessage({
+    type: message.type,
+    payload: message.payload,
+    supabase,
+    userId,
+  })
+  if (!outcome.ok) {
+    return jsonError(request, 502, outcome.code, outcome.message)
+  }
+
+  // 撤销成功才改终态。payload 里的 applied / receipt 保留（对账与回放用）。
+  const { message: undone, error: updateError } = await updateMessageStatus(supabase, id, 'undone')
+  if (updateError) {
+    throw new Error(updateError)
+  }
+  if (!undone) {
+    return jsonError(request, 404, 'not_found', '提案不存在或无权访问')
+  }
+  return jsonOk(request, { data: undone, undone: true })
 }
