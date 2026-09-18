@@ -27,14 +27,35 @@ import type { Task } from '@/types/task'
  * - 没分（`submissionScore === null`）→ **不在这一区出现**（见上）；
  * - 0 分（`submissionScore === 0`）→ 有条，长度 0，右侧明确写 `0 / 20`。
  *
- * ### 颜色不带判断
- * 分数条用中性的 `--chart-2`，**不**按"90% 绿 / 70% 黄"上色 ——
- * 多少分算好取决于曲线、班级分布、drop 政策，那是我们不知道的事；
- * 把 75% 画成黄色就已经在替用户下结论了（ADR-013 的同一取向）。
+ * ### 颜色按分段变化（2026-09-17 Steven 定，替换原先的"单一中性色"）
+ * 满分绿 → 90 段蓝 → 80 段紫 → 70 段珊瑚 → 其余琥珀，见 `scoreTone()`。
+ * 色值全部走主题令牌（`--chart-*` → `--purple`/`--blue`/… ），亮/暗主题自动跟随。
+ *
+ * ⚠️ **最低档刻意不用 `--red`** —— 那是全站「缺交 / 逾期」的警示色。
+ * 拿它画分数会把"这次没考好"和"出事了"混成一件事；
+ * 琥珀 / 珊瑚只是"另一档颜色"，不是"你完了"（ADR-013 的同一取向）。
  */
 function formatScore(value: number): string {
   // 2.25 / 2.5 这类小数原样显示；整数不带小数点。
   return Number.isInteger(value) ? String(value) : String(Math.round(value * 100) / 100)
+}
+
+/**
+ * 分数条的档位配色（P0-3-17，2026-09-17 Steven 定）。
+ *
+ * 档位：`>=100%` 绿 ｜ `90–99%` 蓝 ｜ `80–89%` 紫 ｜ `70–79%` 珊瑚 ｜ `<70%` 琥珀。
+ *
+ * - 全部返回**主题令牌**（`--chart-1..5` → `--purple`/`--blue`/`--green`/`--coral`/`--amber`），
+ *   亮/暗主题各自有一套色值，自动跟随；**绝不写死 hex**。
+ * - 参数 `ratio` 已由调用方夹在 `[0, 1]`，所以"满分"就是恰好 `1`（加分项 `5/4` 也归满分档）。
+ * - 只在能画出条时调用（`ratio !== null`），所以不必处理"分母未知"。
+ */
+function scoreTone(ratio: number): string {
+  if (ratio >= 1) return 'var(--chart-3)' // 满分 → 绿
+  if (ratio >= 0.9) return 'var(--chart-2)' // 90–99% → 蓝
+  if (ratio >= 0.8) return 'var(--chart-1)' // 80–89% → 紫
+  if (ratio >= 0.7) return 'var(--chart-4)' // 70–79% → 珊瑚
+  return 'var(--chart-5)' // < 70% → 琥珀
 }
 
 function ScoreBar({ score, possible }: { score: number; possible: number }) {
@@ -59,7 +80,7 @@ function ScoreBar({ score, possible }: { score: number; possible: number }) {
         >
           <div
             className="h-full rounded-full"
-            style={{ width: `${ratio * 100}%`, backgroundColor: 'var(--chart-2)' }}
+            style={{ width: `${ratio * 100}%`, backgroundColor: scoreTone(ratio) }}
           />
         </div>
       )}
