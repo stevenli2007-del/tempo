@@ -73,6 +73,13 @@ type Case = {
    * 用于那些"迁移还没跑"的表（后两张卡的枚举），报出来是给人看现状的。
    */
   advisory?: boolean
+  /**
+   * 兜底删除用的 query string。默认按 `id` 删（大多数表都有 surrogate key）；
+   * **没有 `id` 列的表必须显式给** —— 如 `file_summaries`（PK 是复合键
+   * `(course_file_id, locale)`，一张表可以完全没有 `id`）。
+   * 不给且拿不到 `id` 时，兜底删除会失败 → 报告里会写明"请人工核对"。
+   */
+  deleteBy?: string
 }
 
 const CASES: Case[] = [
@@ -137,6 +144,46 @@ const CASES: Case[] = [
     expect: 'rejected',
     why: '证明 messages 的 CHECK 在正常工作（探针本身可信）',
   },
+
+  // ---------- P0-3-19b 新表：file_summaries ----------
+  // ⚠️ 这张表**没有 `id` 列**（PK 是复合键 `(course_file_id, locale)`），
+  // 所以每条都要带 `deleteBy`，否则兜底删除拿不到条件。
+  {
+    label: "file_summaries.status = 'ok'（默认态）",
+    table: 'file_summaries',
+    row: { course_file_id: BOGUS_UUID, locale: 'zh-CN', status: 'ok' },
+    expect: 'accepted',
+    why: 'P0-3-19b 一键总结跑通时的落库态。**这是该卡的验收闸**：仍被拒 = 迁移没生效',
+    deleteBy: `course_file_id=eq.${BOGUS_UUID}`,
+  },
+  {
+    label: "file_summaries.status = 'failed'（不再重试标记）",
+    table: 'file_summaries',
+    row: { course_file_id: BOGUS_UUID, locale: 'zh-CN', status: 'failed' },
+    expect: 'accepted',
+    why: '确定性失败要落 failed 行来"记住别再重试"（模拟模型持续调不通），必须被放行',
+    deleteBy: `course_file_id=eq.${BOGUS_UUID}`,
+  },
+  {
+    label: "file_summaries.status = '__bogus__'（对照组）",
+    table: 'file_summaries',
+    row: { course_file_id: BOGUS_UUID, locale: 'zh-CN', status: '__bogus__' },
+    expect: 'rejected',
+    why: '证明 status 的 CHECK **确实在拦** —— 没有对照组，"放行"可能只是约束被整个删了',
+    deleteBy: `course_file_id=eq.${BOGUS_UUID}`,
+  },
+  {
+    label: "file_summaries.locale = 'fr'（**应放行**，反向断言）",
+    table: 'file_summaries',
+    row: { course_file_id: BOGUS_UUID, locale: 'fr', status: 'ok' },
+    expect: 'accepted',
+    why:
+      'ADR-026 刻意的设计：locale **不加 CHECK**（语言是数据维度不是代码分支，' +
+      '加一种语言不该被一次迁移卡住），白名单只在 lib/course-files/summary/locale.ts。' +
+      '⚠️ 这条是**反向断言** —— 哪天有人给 locale 补上 CHECK，它会在这里变红，' +
+      '提醒他"你正在把一个已拍板的决定改掉"。',
+    deleteBy: `course_file_id=eq.${BOGUS_UUID}`,
+  },
 ]
 
 type Verdict = 'accepted' | 'rejected' | 'unexpected'
@@ -200,8 +247,10 @@ async function main(): Promise<void> {
       // 真写进去了 —— 立刻删掉，且这是一条必须被看见的告警。
       const row = Array.isArray(body) ? body[0] : body
       const id = row?.id ?? null
-      if (id) {
-        await fetch(`${url}/rest/v1/${c.table}?id=eq.${id}`, {
+      // 优先用 case 显式给的 deleteBy（没有 `id` 列的表只能这么删），其次按 id。
+      const filter = c.deleteBy ?? (id ? `id=eq.${id}` : null)
+      if (filter) {
+        await fetch(`${url}/rest/v1/${c.table}?${filter}`, {
           method: 'DELETE',
           headers: { apikey: key, Authorization: `Bearer ${key}` },
         })
@@ -209,7 +258,9 @@ async function main(): Promise<void> {
       results.push({
         c,
         verdict: 'unexpected',
-        detail: '⚠️ 竟然写进去了（"只读"前提被打破）—— 已尝试按 id 删除',
+        detail: filter
+          ? `⚠️ 竟然写进去了（"只读"前提被打破）—— 已按 \`${filter}\` 删除`
+          : '⚠️ 竟然写进去了，且**没有可用的删除条件**（该表无 id 列，case 也没给 deleteBy）—— 请人工删除',
         wroteId: id,
       })
       continue
@@ -243,27 +294,35 @@ async function main(): Promise<void> {
   // ---------- 零残留自检 ----------
   // 上面的推理成立的话，这些哨兵值一行都不该在库里。这里**查一遍**而不是"相信推理"：
   // 万一哪天有人给这些表去掉了外键，探针就会开始真的写数据 —— 那时这行会立刻报警。
+  // ⚠️ 用 `select=*` 而不是 `select=id` —— `file_summaries` 没有 `id` 列，
+  // 点名查一个不存在的列会返回**错误对象**（42703）而不是数组，
+  // 而 `Array.isArray` 判假 → 计数会**假绿成 0 行**（本脚本最容易骗自己的地方）。
   const RESIDUE: Record<string, string> = {
     grade_components: `name=eq.probe&course_id=eq.${BOGUS_UUID}`,
     messages: `user_id=eq.${BOGUS_UUID}`,
+    file_summaries: `course_file_id=eq.${BOGUS_UUID}`,
   }
   console.log('\n零残留自检（每个哨兵条件都应 0 行）：')
   for (const [table, qs] of Object.entries(RESIDUE)) {
-    const res = await fetch(`${url}/rest/v1/${table}?select=id&${qs}`, {
+    const res = await fetch(`${url}/rest/v1/${table}?select=*&${qs}`, {
       headers: { apikey: key, Authorization: `Bearer ${key}` },
     })
-    const rows = (await res.json().catch(() => [])) as { id?: string }[]
-    const count = Array.isArray(rows) ? rows.length : 0
+    const rows = (await res.json().catch(() => [])) as unknown
+    if (!Array.isArray(rows)) {
+      // 查不动（多半是表还没建）—— 明确报出来，别伪装成 0 行。
+      console.log(`  ℹ️  ${table}：查询未返回行数组（该表的迁移可能还没跑）`)
+      continue
+    }
+    const count = rows.length
     console.log(`  ${count === 0 ? '✅' : '⚠️'} ${table}：${count} 行`)
     if (count > 0) {
-      for (const row of rows) {
-        if (!row?.id) continue
-        await fetch(`${url}/rest/v1/${table}?id=eq.${row.id}`, {
-          method: 'DELETE',
-          headers: { apikey: key, Authorization: `Bearer ${key}` },
-        })
-      }
-      console.log('     已按 id 删除；请人工确认这是探针留下的而不是你的真实数据')
+      // 直接用**哨兵条件**删（而不是按 id）：条件本身就是"只可能命中探针垃圾行"，
+      // 而且不依赖该表有没有 `id` 列。
+      await fetch(`${url}/rest/v1/${table}?${qs}`, {
+        method: 'DELETE',
+        headers: { apikey: key, Authorization: `Bearer ${key}` },
+      })
+      console.log('     已按哨兵条件删除；请人工确认这是探针留下的而不是你的真实数据')
       failed += 1
     }
   }
@@ -303,6 +362,31 @@ async function main(): Promise<void> {
   for (const r of pending) {
     console.log(
       `  ℹ️  ${r.c.label} → ${r.verdict}（${r.verdict === 'rejected' ? '符合预期：该卡的迁移还没跑' : '迁移已跑过'}）`,
+    )
+  }
+
+  const okCase = results.find((r) => r.c.label === "file_summaries.status = 'ok'（默认态）")
+  const filesControl = results.find(
+    (r) => r.c.label === "file_summaries.status = '__bogus__'（对照组）",
+  )
+  if (okCase?.verdict === 'accepted' && filesControl?.verdict === 'rejected') {
+    console.log(
+      '  ✅ P0-3-19b 迁移生效：file_summaries 已建，status 接受 ok/failed，且 CHECK 仍在拦非法值。',
+    )
+  } else if (okCase?.verdict !== 'accepted') {
+    console.log(
+      '  ❌ P0-3-19b 迁移**未生效** —— 回到 SQL Editor 重跑 `20260922000000_file_summaries.sql`。',
+    )
+  } else {
+    console.log(
+      '  ❌ 对照组异常：file_summaries.status 的 CHECK 没有拦下非法值 —— 约束可能被整体删掉了，人工核对。',
+    )
+  }
+  const localeCase = results.find((r) => r.c.label === "file_summaries.locale = 'fr'（**应放行**，反向断言）")
+  if (localeCase?.verdict === 'rejected') {
+    console.log(
+      '  ⚠️  file_summaries.locale 被加上了 CHECK —— 这与 ADR-026 的刻意决定相反（语言是数据维度，' +
+        '不该被迁移卡住），请人工确认是不是有意改的。',
     )
   }
 
