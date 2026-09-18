@@ -101,6 +101,13 @@ DECLARED_SUBS: list[tuple[str, str, str]] = [
      "](./cards/progress-pointer-archive.md#当前进度指针)"),
 ]
 
+# ── 已声明新增卡（拆分**之后**才开的卡，不在基线卡号集合里）──
+# ③ 卡号集合这条断言守的是「拆分时一张不多一张不少」；拆分之后新开的卡是**计划内**的增量，
+# 但同样不该悄悄出现 —— 所以必须在这里逐张登记并写明理由，闸门才继续有意义。
+DECLARED_NEW_CARDS: set[str] = {
+    'P0-3-28',   # 2026-09-18 新开：同步写入幂等（numeric 定标），必须在 P0-3-13 freeze 之前
+}
+
 
 def declared_edit(rel: str, line: str) -> tuple[str, int | None, int | None]:
     """若该行命中已声明修订，返回 (新行, 后缀修订下标, 子串修订下标)；否则原样返回。"""
@@ -303,13 +310,16 @@ def main() -> int:
             after |= set(CARD_RE.findall(p.read_text(encoding="utf-8")))
     only_before = sorted(before - after)
     only_after = sorted(after - before)
+    undeclared = sorted(set(only_after) - DECLARED_NEW_CARDS)
+    declared_hit = sorted(set(only_after) & DECLARED_NEW_CARDS)
     print(f"  拆分前 {len(before)} 个卡号 / 拆分后 {len(after)} 个")
     if only_before:
         fail(f"③ 拆分后丢失卡号：{only_before}")
-    if only_after:
-        fail(f"③ 拆分后凭空多出卡号：{only_after}")
-    if not only_before and not only_after:
-        print(f"  ✓ 通过（集合完全相同）")
+    if undeclared:
+        fail(f"③ 拆分后凭空多出卡号（且未在 DECLARED_NEW_CARDS 登记）：{undeclared}")
+    if not only_before and not undeclared:
+        extra = f"；已登记的新卡 {declared_hit}" if declared_hit else ""
+        print(f"  ✓ 通过（无丢失、无未登记新增{extra}）")
     print()
 
     print()
