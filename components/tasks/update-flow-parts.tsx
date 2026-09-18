@@ -74,6 +74,11 @@ export function UpdateComposer({ flow }: { flow: CourseUpdateFlow }) {
         className="mb-2 w-full resize-none rounded-lg border border-input bg-background px-3 py-2 text-sm text-foreground outline-none placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 disabled:opacity-50"
       />
 
+      {/* P0-3-27：粘链接也能识别 —— 不写出来用户不会想到这个入口。 */}
+      <p className="mb-3 text-xs text-muted-foreground">
+        也可以直接粘贴课程网页链接 —— Tempo 会抓取页面内容再识别。
+      </p>
+
       {/* P0-3-9 截图档：选图 / 粘贴入口（与文字互斥）。 */}
       <div className="mb-3 flex items-center gap-2">
         <input
@@ -489,8 +494,8 @@ export function UpdateActions({
 
       <div className="flex justify-end gap-2">
         {!hasAny ? (
-          <Button onClick={flow.handleParse} disabled={flow.parsing}>
-            {flow.parsing ? "解析中…" : "解析"}
+          <Button onClick={flow.handleParse} disabled={flow.parsing || flow.ingesting}>
+            {flow.ingesting ? "抓取链接中…" : flow.parsing ? "解析中…" : "解析"}
           </Button>
         ) : (
           <>

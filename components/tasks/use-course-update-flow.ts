@@ -30,6 +30,7 @@ import {
   weightWarnings,
   type WeightedItem,
 } from "@/lib/course-update/weights"
+import { looksLikeUrl } from "@/lib/ingest/detect"
 
 export type CourseOption = { id: string; courseName: string }
 
@@ -168,6 +169,8 @@ export function useCourseUpdateFlow(options: { initialCourses?: CourseOption[] }
   // DOM 引用属于视图，不属于状态机。
   const [loadingCourses, setLoadingCourses] = useState(false)
   const [parsing, setParsing] = useState(false)
+  /** P0-3-27：正在抓取链接（供按钮显示「抓取链接中…」，与「解析中…」区分开）。 */
+  const [ingesting, setIngesting] = useState(false)
   const [searching, setSearching] = useState(false)
   const [parsed, setParsed] = useState<ParseResult | null>(null)
   const [candidatesFor, setCandidatesFor] = useState<Record<number, Candidate[]>>({})
@@ -439,6 +442,37 @@ export function useCourseUpdateFlow(options: { initialCourses?: CourseOption[] }
       return
     }
 
+    // P0-3-27：粘贴的是链接 → 先抓成文本，再走**同一条**解析通道（不新开解析路径）。
+    let sourceText = text.trim()
+    if (looksLikeUrl(sourceText)) {
+      setIngesting(true)
+      try {
+        const res = await fetch("/api/v1/ingest/url", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ url: sourceText }),
+        })
+        const data = await res.json()
+        if (!res.ok) {
+          setError(data?.error?.message ?? "链接抓取失败，请稍后重试")
+          return
+        }
+        const fetched = typeof data?.data?.text === "string" ? data.data.text : ""
+        if (fetched.trim() === "") {
+          setError("这个链接里没抓到可读内容，换个页面试试？")
+          return
+        }
+        sourceText = fetched
+        // 把抓回来的文本填回输入框：用户看得见 Tempo 到底读了什么（原文可核对）。
+        setText(fetched)
+      } catch {
+        setError("链接抓取失败，请检查网络后重试")
+        return
+      } finally {
+        setIngesting(false)
+      }
+    }
+
     let accepted = {
       safeTasks: [] as ParsedTask[],
       exams: [] as ParsedExam[],
@@ -450,7 +484,7 @@ export function useCourseUpdateFlow(options: { initialCourses?: CourseOption[] }
       const res = await fetch("/api/v1/tasks/parse", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text: text.trim(), courseId }),
+        body: JSON.stringify({ text: sourceText, courseId }),
       })
       const data = await res.json()
       if (!res.ok) {
@@ -805,6 +839,7 @@ export function useCourseUpdateFlow(options: { initialCourses?: CourseOption[] }
     imagePreview,
     loadingCourses,
     parsing,
+    ingesting,
     searching,
     parsed,
     candidatesFor,

@@ -737,6 +737,30 @@
 - 走用户会话（RLS），非内部端点。token 首次访问时**懒生成**并写回 `profiles.inbound_token`，之后稳定不变。
 - 设置页据此展示该地址与转发说明。
 
+### `POST /api/v1/ingest/url` — 网页链接抓取（P0-3-27，**不落库、不调 LLM**）
+
+对话框「粘贴课程网页链接 → 结构化预览」的**第一半**：把链接抓成**合并纯文本**，
+再交给**同一张** `POST /api/v1/tasks/parse`（3-24 通道）解析。本端点**不解析、不落库**，
+也不认识 exams / gradeComponents ——「网页文本」与「手打文本」走同一条解析 → 预览 → 确认 → 写入。
+
+```jsonc
+// request
+{ "url": "https://math.berkeley.edu/~m53/" }
+// response 200 —— 只返回文本，解析由 /tasks/parse 完成
+{
+  "data": {
+    "text": "── 来源：https://math.berkeley.edu/~m53/ ──\n…（+ 同源子页合并）",
+    "meta": { "pages": 3, "urls": ["…"], "skipped": 1, "truncated": false }
+  }
+}
+```
+
+- **抓取范围**：首页 + 同源 `<a>` 子页（**≤5**；命中 `schedule/grading/exam/homework/syllabus/…` 关键词才跟 —— 本地确定性匹配、不用 LLM）；最多跟 3 次 3xx；单页 ≤1MB；总计 ≤40000 字符（超量截断并置 `meta.truncated`）；总超时 5s。
+- **🔴 SSRF 护栏（安全底线）**：仅 `http(s)`；禁本机 / 内网 / 链路本地（`127/10/172.16-31/192.168/169.254` + IPv6 `::1` / `fc00::/7` / `fe80::/10` + v4-mapped）；**DNS 解析后复检真实 IP**（挡十进制 IP 等花招）；**每一跳 3xx 都重跑护栏**（挡「公网 → 302 内网」）。命中 → 400 `blocked_url`。
+- **清洗复用 P0-3-25 的 `stripHtml()`**（`lib/canvas/announcements.ts`），与公告同一条「先剥标签、后解实体」的顺序。
+- **错误码**：400 `bad_request`（URL 非法 / 带账号密码）或 `blocked_url`（内网）；415 `unsupported_file_type`（非网页）；422 `no_content`（抓不到可读内容）；502 `upstream_error` / 504 `timeout`（对方站点故障 / 超时）。**子页失败不拖垮本次**，只记 `meta.skipped`。
+- 判定层（链接识别 / 内网判定 / 子页选取 / 合并）有**离线回归** `npm run regress:url-ingest`。
+
 ---
 
 ## 6. Canvas 连接与同步
