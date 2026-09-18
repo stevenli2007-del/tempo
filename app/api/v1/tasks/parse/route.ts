@@ -1,70 +1,36 @@
 /**
- * 课程更新解析端点（P0-3-8 文本档）。
+ * 课程更新解析端点（P0-3-8 文本档，P0-3-24 解禁 exam 产出）。
  *
  * `POST /api/v1/tasks/parse` —— 收 `{ text, courseId }`，把用户粘贴的零散课程更新
- * （作业 / 阅读 / 项目截止等）交给 LLM 解析成结构化任务预览。**不落库**：
- * 只返回解析结果，由前端展示给用户确认后，再走 `POST /api/v1/tasks` 真正写入。
+ * （作业 / 阅读 / 项目截止 / **考试安排** / **成绩构成**）交给 LLM 解析成结构化预览。
+ * **不落库**：只返回解析结果，由前端展示给用户确认后，再走 `POST /api/v1/course-updates`
+ * 真正写入（ADR-015）。
  *
  * ### 🔴 解析 ≠ 落库（红线）
- * 对话输入没有 `sourceExcerpt` 之类可核对的锚点，幻觉会直接进日程。
- * 所以这里**只产出预览**，确认动作在另一个端点完成（ADR-016：对话框是兜底不是入口）。
+ * 对话输入没有可核对锚点时，幻觉会直接进日程。所以这里**只产出预览**，
+ * 确认动作在另一个端点完成（ADR-016：对话框是兜底不是入口）。
  *
- * ### 考试变更不在这里处理
- * exam 是 `exam_dates` 的权威派生（ADR-004）。schema 只允许 `assignment` / `reading` /
- * `other`；若文本明显是考试日期变更，模型放入 `warnings` 并提示「请到课程页更新」，
- * 不生成 exam 任务，避免和派生逻辑打架。
+ * ### P0-3-24：exam 解禁了，但**不是无条件解禁**
+ * 原先规则 1 写死「绝不产出 exam」（ADR-004 防幻觉），导致 Galen Quiz Dates 这类
+ * 纯净的考试日期粘贴只产出一条 warning，用户只能手动去课程页重填六行。
+ * ADR-021 的侦察结论：**数据模型早支持**（`exam_dates` / `grade_components` 都有
+ * `source` + `source_excerpt` + `is_confirmed`），缺的只是产出通道。
+ *
+ * 解禁的**对价**是两条硬约束（缺一条就退回禁令）：
+ * 1. **每条 exam / gradeComponent 必须带 `sourceExcerpt`** —— 逐字原文摘录。
+ *    没有摘录的条目会被 `validateExamInput()` 直接拒掉（不是留空），
+ *    「没有锚点的考试日期」等价于幻觉，与 ADR-004 的初衷一致。
+ * 2. **写入仍走确认通道** —— 本端点照旧不落库；写入器只追加不替换
+ *    （`lib/course-update/apply.ts`）。
  */
 
-import type { JSONSchema, LLMMessage } from '@/lib/llm'
 import { runStructured } from '@/lib/llm/run'
 import { loadActiveCourseIds } from '@/lib/tasks'
+import { COURSE_UPDATE_PARSE_SCHEMA } from '@/lib/course-update/normalize'
+import { COURSE_UPDATE_PROMPT_VERSION, buildCourseUpdateMessages } from '@/lib/course-update/prompt'
 import { getCurrentUser, internalError, jsonError, jsonOk } from '@/lib/api/response'
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
-
-const PARSE_SCHEMA: JSONSchema = {
-  type: 'object',
-  properties: {
-    tasks: {
-      type: 'array',
-      description: '从文本中识别出的可添加任务',
-      items: {
-        type: 'object',
-        properties: {
-          title: { type: 'string', description: '简洁的中文任务标题，去掉营销腔与废话' },
-          taskType: {
-            type: 'string',
-            enum: ['assignment', 'reading', 'other'],
-            description: 'assignment=作业/项目/论文；reading=阅读；other=其他待办。绝不填 exam',
-          },
-          dueDate: {
-            type: ['string', 'null'],
-            description: '截止日期。文字给了具体月日（如 9/20、12月10日、Oct 5）就按 M/D 返回（如 9/20）；完全没有任何日期信息才填 null；不要自补 4 位年份（年份由系统按当前学年推断）',
-          },
-          notes: {
-            type: ['string', 'null'],
-            description: '补充说明（提交方式 / 字数 / 平台等），可空',
-          },
-        },
-        required: ['title', 'taskType', 'dueDate', 'notes'],
-      },
-    },
-    warnings: {
-      type: 'array',
-      items: { type: 'string' },
-      description: '无法转成任务的事项：考试日期变更、歧义、与课程无关的内容等',
-    },
-  },
-  required: ['tasks', 'warnings'],
-}
-
-const SYSTEM_PROMPT = `你是 Tempo 的课程更新解析器。用户会粘贴一段关于某门课的课程更新文字（可能是作业、阅读、项目、论文的截止信息，也可能夹杂考试安排）。请把它解析成结构化任务列表。
-
-规则：
-1. 只产出 assignment（作业/项目/论文）、reading（阅读）、other（其他待办）三类任务；**绝不**产出 exam 类型——考试日期是课程的权威数据，必须在课程页修改。若文字明显是考试日期/时间变更，不要生成任务，而是放进 warnings 并写「考试日期变更请到课程页更新」。
-2. dueDate：文字给了月日（9/20、12月10日、Oct 5 等）一律返回 M/D（如 9/20）；禁止自补 4 位年份（年份由系统按当前学年推断）；只有文字完全没有任何日期信息时才填 null（严禁编造）。
-3. title 简洁、去废话；notes 可补充提交方式/字数等，没有就填 null。
-4. 输出必须严格符合 JSON schema，不要输出任何解释性文字。`
 
 export async function POST(request: Request) {
   try {
@@ -102,19 +68,30 @@ export async function POST(request: Request) {
       return jsonError(request, 404, 'not_found', '课程不存在或无权访问')
     }
 
-    const messages: LLMMessage[] = [
-      { role: 'system', content: SYSTEM_PROMPT },
-      { role: 'user', content: text },
-    ]
+    const messages = buildCourseUpdateMessages(text)
 
     const result = await runStructured<{
       tasks: Array<{ title: string; taskType: string; dueDate: string | null; notes: string | null }>
+      exams: Array<{
+        examName: string
+        examDate: string | null
+        examTime: string | null
+        location: string | null
+        sourceExcerpt: string
+      }>
+      gradeComponents: Array<{
+        name: string
+        weightPercent: number | null
+        notes: string | null
+        sourceExcerpt: string
+      }>
       warnings: string[]
     }>({
       userId: user.id,
       purpose: 'course_update_parse',
-      promptVersion: 'v1',
-      schema: PARSE_SCHEMA,
+      // 版本与 prompt 一起放在 `lib/course-update/prompt.ts`（离线探针脚本共用同一份）。
+      promptVersion: COURSE_UPDATE_PROMPT_VERSION,
+      schema: COURSE_UPDATE_PARSE_SCHEMA,
       schemaName: 'CourseUpdateParse',
       messages,
       temperature: 0,

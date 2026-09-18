@@ -25,6 +25,12 @@
 import { useState } from "react"
 import { useRouter } from "next/navigation"
 
+import {
+  summarizeWeightTotals,
+  weightWarnings,
+  type WeightedItem,
+} from "@/lib/course-update/weights"
+
 export type CourseOption = { id: string; courseName: string }
 
 export type ParsedTask = {
@@ -36,7 +42,34 @@ export type ParsedTask = {
   submitted?: boolean | null
 }
 
-export type ParseResult = { tasks: ParsedTask[]; warnings: string[] }
+/** P0-3-24：解析出来的考试（走 `exam_dates`，不是 tasks）。 */
+export type ParsedExam = {
+  examName: string
+  examDate: string | null
+  examTime: string | null
+  location: string | null
+  /** 逐字原文摘录。服务端校验器**拒收**没有摘录的考试，所以这里非空。 */
+  sourceExcerpt: string
+}
+
+/** P0-3-24：解析出来的成绩构成（走 `grade_components`）。 */
+export type ParsedGradeComponent = {
+  name: string
+  weightPercent: number | null
+  notes: string | null
+  sourceExcerpt: string
+}
+
+/**
+ * 解析结果。**四个数组一个都不能省** —— 与服务端 `COURSE_UPDATE_PARSE_SCHEMA`
+ * 的 `required` 一一对应（schema 由 `lib/llm/schema.ts` 强校验，缺字段整个调用失败）。
+ */
+export type ParseResult = {
+  tasks: ParsedTask[]
+  exams: ParsedExam[]
+  gradeComponents: ParsedGradeComponent[]
+  warnings: string[]
+}
 
 export type Candidate = {
   id: string
@@ -50,7 +83,38 @@ export type Candidate = {
 
 export type Resolution = { mode: "create" } | { mode: "update"; candidate: Candidate }
 
-export type Summary = { created: number; updated: number; skipped: number }
+export type Summary = {
+  created: number
+  updated: number
+  skipped: number
+  /** P0-3-24：考试 / 成绩构成的写入回执（本次没写就是 null）。 */
+  apply?: ApplySummary | null
+}
+
+/** P0-3-24：确认写入后的回执（考试 / 成绩构成与权重校验）。 */
+export type ApplySummary = {
+  exams: number
+  gradeComponents: number
+  /** 写入后按 source 分组的合计校验（≠100% 时带人话说明）。 */
+  weightWarnings: string[]
+  /** 服务端拼的一句话回执（消息栏与对话框共用同一份文案）。 */
+  text: string
+}
+
+/**
+ * 去重键（考试：名称 + 日期；构成：名称 + 占比）。导出给渲染层判断"这条已存在"。
+ *
+ * 为什么需要：本通道是**只追加**（不是 PUT 全量替换），把同一条公告粘第二遍就会写出
+ * 重复行。这里不"静默跳过"（那是 ADR-016 R3 的静默失败），而是**把默认勾选取消**——
+ * 用户看得见那个空勾选框、也看得见旁边写的"已存在"，想再写一条可以自己勾回来。
+ */
+export function examKey(name: string, date: string | null): string {
+  return `${name.trim().toLowerCase()}|${date ?? ''}`
+}
+
+export function gradeKey(name: string, weightPercent: number | null): string {
+  return `${name.trim().toLowerCase()}|${weightPercent ?? ''}`
+}
 
 export function taskTypeLabel(type: string): string {
   if (type === "assignment") return "作业"
@@ -114,6 +178,29 @@ export function useCourseUpdateFlow(options: { initialCourses?: CourseOption[] }
   // Canvas / 考试等只读候选默认折叠，避免淹没可编辑的手动任务（P0-3-8b follow-up）。
   const [openReadonly, setOpenReadonly] = useState<Record<number, boolean>>({})
 
+  // ---------------------------------------------------------------
+  // P0-3-24：考试 / 成绩构成的勾选与「现有构成」预览上下文
+  // ---------------------------------------------------------------
+
+  // 默认全选 —— 用户说的是"这些都要"，勾选框的作用是**排除**个别项，不是逐条批准。
+  const [examPicked, setExamPicked] = useState<Record<number, boolean>>({})
+  const [gradePicked, setGradePicked] = useState<Record<number, boolean>>({})
+  /**
+   * 该课**已存在**的成绩构成（写入前用于合计校验）。
+   *
+   * 为什么必须拉一次现有的：用户贴了"两个期中各 30%"，若只看本次条目会算出"合计 60%，缺 40%"——
+   * 而真相可能是这门课 syllabus 里另有 40% 的 Final。合计校验必须按**整门课**算，
+   * 只看本次输入就是在制造假警报（与 `lib/course-update/weights.ts` 里"按 source 分组"同一条纪律）。
+   */
+  const [existingWeights, setExistingWeights] = useState<WeightedItem[]>([])
+  /** 现有考试名（用于提示"这条会和已有考试重名"，因为本通道是追加、不覆盖）。 */
+  const [existingExamNames, setExistingExamNames] = useState<string[]>([])
+  /** 现有考试 / 构成的**精确去重键**（同名 + 同日期 / 同名 + 同占比）→ "已存在"提示与默认不勾选。 */
+  const [existingExamKeys, setExistingExamKeys] = useState<string[]>([])
+  const [existingGradeKeys, setExistingGradeKeys] = useState<string[]>([])
+  /** 现有构成没取到（网络/接口问题）→ 合计预览不可信，如实说明而不是装作算过。 */
+  const [weightPreviewUnavailable, setWeightPreviewUnavailable] = useState(false)
+
   // 打开时拉一次课程列表（已拉过就不再拉）。改用「打开」事件触发，避免 effect 内同步 setState（react-hooks/set-state-in-effect）。
   function loadCourses() {
     if (courses.length > 0) return
@@ -136,7 +223,60 @@ export function useCourseUpdateFlow(options: { initialCourses?: CourseOption[] }
     setParsed(null)
     setCandidatesFor({})
     setResolutions({})
+    setExamPicked({})
+    setGradePicked({})
+    setExistingExamKeys([])
+    setExistingGradeKeys([])
     setError(null)
+  }
+
+  /**
+   * 拉该课**已存在**的成绩构成 / 考试（仅供写入前的预览校验与重复提示，不参与写入）。
+   *
+   * ⚠️ `GET /api/v1/courses/:id` 的响应**没有 `data` 包装**（直接返回课程详情对象），
+   * 与列表端点 `{ data, meta }` 不一致 —— 这是项目里已知的包装不统一（见 MEMORY）。
+   * 所以这里按裸对象读，别照抄别处的 `d.data`。
+   *
+   * @returns 现有考试 / 构成的去重键（调用方用它决定默认勾选）。
+   */
+  async function loadExistingContext(
+    cid: string,
+  ): Promise<{ examKeys: string[]; gradeKeys: string[] }> {
+    setWeightPreviewUnavailable(false)
+    try {
+      const res = await fetch(`/api/v1/courses/${encodeURIComponent(cid)}`)
+      if (!res.ok) {
+        setWeightPreviewUnavailable(true)
+        return { examKeys: [], gradeKeys: [] }
+      }
+      const detail = (await res.json()) as {
+        gradeComponents?: { name?: string | null; source?: string | null; weightPercent?: number | null }[]
+        examDates?: { examName?: string | null; examDate?: string | null }[]
+      }
+      const grades = Array.isArray(detail.gradeComponents) ? detail.gradeComponents : []
+      setExistingWeights(
+        grades.map((row) => ({
+          source: row.source ?? "manual",
+          weightPercent: typeof row.weightPercent === "number" ? row.weightPercent : null,
+        })),
+      )
+      const exams = Array.isArray(detail.examDates) ? detail.examDates : []
+      const examKeys = exams
+        .map((row) => examKey(String(row.examName ?? ""), row.examDate ?? null))
+        .filter((key) => key !== "|")
+      setExistingExamNames(exams.map((row) => String(row.examName ?? "")).filter((n) => n !== ""))
+      return {
+        examKeys,
+        gradeKeys: grades.map((row) =>
+          gradeKey(String(row.name ?? ""), typeof row.weightPercent === "number" ? row.weightPercent : null),
+        ),
+      }
+    } catch {
+      // 取不到就**如实标记**（渲染层会说"合计校验将在写入后给出"），
+      // 不能默默按"零条现有构成"算 —— 那会报一个不存在的缺口。
+      setWeightPreviewUnavailable(true)
+      return { examKeys: [], gradeKeys: [] }
+    }
   }
 
   /**
@@ -147,6 +287,11 @@ export function useCourseUpdateFlow(options: { initialCourses?: CourseOption[] }
     loadCourses()
     resetInput()
     setSummary(null)
+    setExistingWeights([])
+    setExistingExamNames([])
+    setExistingExamKeys([])
+    setExistingGradeKeys([])
+    setWeightPreviewUnavailable(false)
   }
 
   // ---------------------------------------------------------------
@@ -245,11 +390,40 @@ export function useCourseUpdateFlow(options: { initialCourses?: CourseOption[] }
     setResolutions(nextResolutions)
   }
 
+  /**
+   * 把解析结果收进状态前的**统一整形**（文本档与截图档共用一份）。
+   *
+   * 为什么要在这里再兜一层：schema 已经把考试拆到 `exams` 字段了，但模型偶尔仍会把
+   * 考试塞进 `tasks`（taskType='exam'）。**静默丢掉是 R3 的静默失败** —— 用户看到
+   * "识别到 6 个考试日期"，结果一条都没出现。所以丢掉的同时补一条 warning 说清楚。
+   */
+  function acceptParseResult(result: ParseResult) {
+    const allTasks = Array.isArray(result.tasks) ? result.tasks : []
+    const dropped = allTasks.filter((t) => t.taskType === "exam")
+    const warnings = [...(Array.isArray(result.warnings) ? result.warnings : [])]
+    if (dropped.length > 0) {
+      warnings.push(
+        `有 ${dropped.length} 条被识别成考试却混在任务里，已跳过 —— 考试请按「考试」区展示（本条不该出现，请反馈）`,
+      )
+    }
+    return {
+      safeTasks: allTasks.filter((t) => t.taskType !== "exam"),
+      exams: Array.isArray(result.exams) ? result.exams : [],
+      gradeComponents: Array.isArray(result.gradeComponents) ? result.gradeComponents : [],
+      warnings,
+    }
+  }
+
   async function handleParse() {
     setError(null)
     setParsed(null)
     setCandidatesFor({})
     setResolutions({})
+    setExamPicked({})
+    setGradePicked({})
+    setExistingWeights([])
+    setExistingExamNames([])
+    setWeightPreviewUnavailable(false)
     setSummary(null)
     if (!courseId) {
       setError("请先选择课程")
@@ -265,8 +439,12 @@ export function useCourseUpdateFlow(options: { initialCourses?: CourseOption[] }
       return
     }
 
-    let safeTasks: ParsedTask[] = []
-    let warnings: string[] = []
+    let accepted = {
+      safeTasks: [] as ParsedTask[],
+      exams: [] as ParsedExam[],
+      gradeComponents: [] as ParsedGradeComponent[],
+      warnings: [] as string[],
+    }
     setParsing(true)
     try {
       const res = await fetch("/api/v1/tasks/parse", {
@@ -279,14 +457,14 @@ export function useCourseUpdateFlow(options: { initialCourses?: CourseOption[] }
         setError(data?.error?.message ?? "解析失败，请重试")
         return
       }
-      const result = (data.data ?? { tasks: [], warnings: [] }) as ParseResult
-      safeTasks = result.tasks.filter((t) => t.taskType !== "exam")
-      warnings = result.warnings ?? []
-      if (safeTasks.length === 0 && warnings.length === 0) {
-        setError("没识别出可添加的任务，换个说法试试？")
-        return
-      }
-      setParsed({ tasks: safeTasks, warnings })
+      accepted = acceptParseResult(
+        (data.data ?? {
+          tasks: [],
+          exams: [],
+          gradeComponents: [],
+          warnings: [],
+        }) as ParseResult,
+      )
     } catch {
       setError("网络错误，请重试")
       return
@@ -294,21 +472,79 @@ export function useCourseUpdateFlow(options: { initialCourses?: CourseOption[] }
       setParsing(false)
     }
 
-    if (safeTasks.length > 0) {
+    if (!commitParseResult(accepted, courseId)) return
+
+    if (accepted.safeTasks.length > 0) {
       setSearching(true)
       try {
-        await loadCandidates(safeTasks, courseId)
+        await loadCandidates(accepted.safeTasks, courseId)
       } finally {
         setSearching(false)
       }
     }
   }
 
+  /**
+   * 落地一次解析结果：写入 `parsed`、默认全选考试/构成、必要时拉现有构成做合计预览。
+   * @returns 有内容可确认 → true；完全空 → false（调用方给「没识别出内容」提示）。
+   */
+  async function commitParseResult(
+    accepted: {
+      safeTasks: ParsedTask[]
+      exams: ParsedExam[]
+      gradeComponents: ParsedGradeComponent[]
+      warnings: string[]
+    },
+    cid: string,
+  ): Promise<boolean> {
+    const { safeTasks, exams, gradeComponents, warnings } = accepted
+    if (
+      safeTasks.length === 0 &&
+      exams.length === 0 &&
+      gradeComponents.length === 0 &&
+      warnings.length === 0
+    ) {
+      setError("没识别出可添加的内容，换个说法试试？")
+      return false
+    }
+
+    setParsed({ tasks: safeTasks, exams, gradeComponents, warnings })
+
+    // 先取现有数据、再定默认勾选：已存在（同名 + 同日期 / 同名 + 同占比）的条目
+    // **默认不勾选**。注意这不是"静默跳过"——空勾选框 + 旁边的「已存在」说明就是给用户看的
+    // （静默跳过等于假装成功，是 R3 红线）。
+    let examKeys: string[] = []
+    let gradeKeys: string[] = []
+    if (exams.length > 0 || gradeComponents.length > 0) {
+      const existing = await loadExistingContext(cid)
+      examKeys = existing.examKeys
+      gradeKeys = existing.gradeKeys
+    }
+
+    const nextExamPicks: Record<number, boolean> = {}
+    exams.forEach((exam, index) => {
+      nextExamPicks[index] = !examKeys.includes(examKey(exam.examName, exam.examDate))
+    })
+    const nextGradePicks: Record<number, boolean> = {}
+    gradeComponents.forEach((item, index) => {
+      nextGradePicks[index] = !gradeKeys.includes(gradeKey(item.name, item.weightPercent))
+    })
+    setExistingExamKeys(examKeys)
+    setExistingGradeKeys(gradeKeys)
+    setExamPicked(nextExamPicks)
+    setGradePicked(nextGradePicks)
+    return true
+  }
+
   /** 截图档解析分支（P0-3-9）。 */
   async function handleParseImage() {
     if (!image) return
-    let safeTasks: ParsedTask[] = []
-    let warnings: string[] = []
+    let accepted = {
+      safeTasks: [] as ParsedTask[],
+      exams: [] as ParsedExam[],
+      gradeComponents: [] as ParsedGradeComponent[],
+      warnings: [] as string[],
+    }
     setParsing(true)
     try {
       const res = await fetch("/api/v1/tasks/parse-image", {
@@ -322,14 +558,14 @@ export function useCourseUpdateFlow(options: { initialCourses?: CourseOption[] }
         setError(data?.error?.message ?? "截图识别失败，请改用文字输入")
         return
       }
-      const result = (data.data ?? { tasks: [], warnings: [] }) as ParseResult
-      safeTasks = result.tasks.filter((t) => t.taskType !== "exam")
-      warnings = result.warnings ?? []
-      if (safeTasks.length === 0 && warnings.length === 0) {
-        setError("这张截图里没识别出可添加的任务，换个角度或改用文字试试？")
-        return
-      }
-      setParsed({ tasks: safeTasks, warnings })
+      accepted = acceptParseResult(
+        (data.data ?? {
+          tasks: [],
+          exams: [],
+          gradeComponents: [],
+          warnings: [],
+        }) as ParseResult,
+      )
     } catch {
       setError("网络错误，请重试")
       return
@@ -337,14 +573,25 @@ export function useCourseUpdateFlow(options: { initialCourses?: CourseOption[] }
       setParsing(false)
     }
 
-    if (safeTasks.length > 0) {
+    if (!commitParseResult(accepted, courseId)) return
+
+    if (accepted.safeTasks.length > 0) {
       setSearching(true)
       try {
-        await loadCandidates(safeTasks, courseId)
+        await loadCandidates(accepted.safeTasks, courseId)
       } finally {
         setSearching(false)
       }
     }
+  }
+
+  /** 考试 / 成绩构成的勾选（默认全选，这里只做取消/恢复）。 */
+  function toggleExam(index: number) {
+    setExamPicked((prev) => ({ ...prev, [index]: prev[index] === false }))
+  }
+
+  function toggleGrade(index: number) {
+    setGradePicked((prev) => ({ ...prev, [index]: prev[index] === false }))
   }
 
   function chooseCreate(index: number) {
@@ -362,7 +609,10 @@ export function useCourseUpdateFlow(options: { initialCourses?: CourseOption[] }
    * 整页是"让服务端重新拉一次消息与任务"。**状态机本身不关心 UI**。
    */
   async function handleConfirm(onSuccess?: () => void) {
-    if (!parsed || parsed.tasks.length === 0) return
+    if (!parsed) return
+    const pickedExams = (parsed.exams ?? []).filter((_, i) => examPicked[i] !== false)
+    const pickedGrades = (parsed.gradeComponents ?? []).filter((_, i) => gradePicked[i] !== false)
+    if (parsed.tasks.length === 0 && pickedExams.length === 0 && pickedGrades.length === 0) return
     setSaving(true)
     setError(null)
     try {
@@ -459,7 +709,55 @@ export function useCourseUpdateFlow(options: { initialCourses?: CourseOption[] }
         }
       }
 
-      setSummary({ created, updated: updated + newMarkedDone, skipped })
+      // ---------------------------------------------------------------
+      // P0-3-24：考试 / 成绩构成（走独立端点，**只追加**）
+      // ---------------------------------------------------------------
+      // 为什么不复用 `PUT /courses/:id/exam-dates`：那个是全量替换，会把已有条目删掉。
+      // 对话输入不是"这门课的完整构成"，用户完全不会预期自己的旧数据被清空。
+      let apply: ApplySummary | null = null
+      if (pickedExams.length > 0 || pickedGrades.length > 0) {
+        const res = await fetch("/api/v1/course-updates", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            courseId,
+            exams: pickedExams.map((e) => ({
+              examName: e.examName,
+              examDate: e.examDate,
+              examTime: e.examTime,
+              location: e.location,
+              sourceExcerpt: e.sourceExcerpt,
+            })),
+            gradeComponents: pickedGrades.map((g) => ({
+              name: g.name,
+              weightPercent: g.weightPercent,
+              notes: g.notes,
+              sourceExcerpt: g.sourceExcerpt,
+            })),
+          }),
+        })
+        const data = await res.json()
+        if (!res.ok) {
+          // 服务端对单条非法输入是**整批拒绝**（不做"跳过坏的写好的"），
+          // 所以这里明确报错、保留输入让用户改，不要装作部分成功。
+          setError(data?.error?.message ?? "考试 / 成绩构成写入失败，请重试")
+          return
+        }
+        const d = (data.data ?? {}) as {
+          exams?: { created: number } | null
+          gradeComponents?: { created: number } | null
+          weightWarnings?: string[]
+          summary?: string
+        }
+        apply = {
+          exams: d.exams?.created ?? 0,
+          gradeComponents: d.gradeComponents?.created ?? 0,
+          weightWarnings: d.weightWarnings ?? [],
+          text: d.summary ?? "",
+        }
+      }
+
+      setSummary({ created, updated: updated + newMarkedDone, skipped, apply })
       resetInput()
       router.refresh()
       onSuccess?.()
@@ -474,6 +772,29 @@ export function useCourseUpdateFlow(options: { initialCourses?: CourseOption[] }
     ? parsed.tasks.filter((_, i) => (resolutions[i] ?? { mode: "create" }).mode === "create").length
     : 0
   const updateCount = parsed ? parsed.tasks.length - createCount : 0
+
+  /** 本次将要写入的考试 / 成绩构成条数（勾选之后）。 */
+  const pickedExamCount = parsed
+    ? (parsed.exams ?? []).filter((_, i) => examPicked[i] !== false).length
+    : 0
+  const pickedGradeCount = parsed
+    ? (parsed.gradeComponents ?? []).filter((_, i) => gradePicked[i] !== false).length
+    : 0
+
+  /**
+   * 写入前的合计预览：**现有构成 + 本次要写的条目**一起算（按 source 分组）。
+   * 只算本次输入会报出不存在的缺口（见 `existingWeights` 的注释）。
+   */
+  const previewWarnings: string[] = (() => {
+    if (!parsed || pickedGradeCount === 0) return []
+    const incoming: WeightedItem[] = (parsed.gradeComponents ?? [])
+      .filter((_, i) => gradePicked[i] !== false)
+      .map((item) => ({ source: "manual", weightPercent: item.weightPercent }))
+    return weightWarnings([...existingWeights, ...incoming])
+  })()
+
+  /** 现有构成分组（UI 里说明"这门课现在已标注了什么"）。 */
+  const existingTotals = summarizeWeightTotals(existingWeights)
 
   return {
     // 状态
@@ -494,6 +815,17 @@ export function useCourseUpdateFlow(options: { initialCourses?: CourseOption[] }
     openReadonly,
     createCount,
     updateCount,
+    // P0-3-24
+    examPicked,
+    gradePicked,
+    pickedExamCount,
+    pickedGradeCount,
+    previewWarnings,
+    existingTotals,
+    existingExamNames,
+    existingExamKeys,
+    existingGradeKeys,
+    weightPreviewUnavailable,
     // 动作
     setCourseId,
     setText,
@@ -507,6 +839,8 @@ export function useCourseUpdateFlow(options: { initialCourses?: CourseOption[] }
     handleParse,
     chooseCreate,
     chooseCandidate,
+    toggleExam,
+    toggleGrade,
     handleConfirm,
   }
 }

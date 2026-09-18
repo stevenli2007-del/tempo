@@ -12,7 +12,9 @@
     "regress:vision": "npx -y tsx scripts/regress-vision.ts",
     "regress:inbound": "npx -y tsx scripts/regress-inbound-email.ts",
     "regress:reminders": "npx -y tsx scripts/regress-reminders.ts",
-    "regress:messages": "npx -y tsx scripts/regress-messages.ts"
+    "regress:messages": "npx -y tsx scripts/regress-messages.ts",
+    "regress:course-updates": "npx -y tsx scripts/regress-course-updates.ts",
+    "probe:course-parse": "npx -y tsx scripts/probe-course-parse.ts"
   },
   "dependencies": {
     "@base-ui/react": "^1.7.0",
