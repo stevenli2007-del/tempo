@@ -83,6 +83,9 @@ const materialApplier: MessageApplier = async () => ({
 const APPLIERS = {
   material: async () => materialApplier,
   announcement: async () => (await import('./appliers/announcement')).announcementApplier,
+  // 3-20 的写入器同样惰性加载：它 import 了 `syncExamToTask` / `loadActiveCourseIds`，
+  // 顶层引入会把服务端依赖链拖进任何 import 本文件的调用方（见上方 ①）。
+  syllabus_drift: async () => (await import('./appliers/syllabus-drift')).syllabusDriftApplier,
 } satisfies Record<ApplierReadyType, ApplierLoader>
 
 /** 宽化后的索引视图：`ctx.type` 是完整的 `MessageType`，取值可能没有对应加载器。 */

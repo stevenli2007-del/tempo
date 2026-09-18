@@ -79,15 +79,19 @@ console.log("toMessageView（UI 可用性）")
   check("material/pending/high 无阻止原因", v.blockReason === null)
   check("material applier 就绪", isApplierReady("material") === true)
 
-  // 2. syllabus_drift + pending + high → 不可确认（写入逻辑由 3-20 接入）。
+  // 2. syllabus_drift + pending → 不可确认。
+  //    ⚠️ P0-3-20 之后这条的**理由变了**（原来是"写入逻辑还没接入"）：
+  //    漂移提案的写入逻辑已就绪，但**没有差异就不能写** —— 差异是懒补算出来的，
+  //    还没算好时按钮必须是灰的，否则点下去 applier 只能回一句"还没核对出来"，
+  //    那就是"按钮说能点、点了报错"。详细分档见 `regress:syllabus-drift`。
   const v2 = toMessageView(makeMessage("syllabus_drift", "pending"))
   check("syllabus_drift/pending/high 不可确认", v2.canAccept === false, `canAccept=${v2.canAccept}`)
   check(
-    "阻止原因提示未接入",
-    !!v2.blockReason && v2.blockReason.includes("写入逻辑还没接入"),
+    "阻止原因说清是核对信息缺失",
+    !!v2.blockReason && v2.blockReason.includes("核对"),
     v2.blockReason ?? "null",
   )
-  check("syllabus_drift applier 未就绪", isApplierReady("syllabus_drift") === false)
+  check("syllabus_drift applier 已就绪（3-20 接入）", isApplierReady("syllabus_drift") === true)
 
   // 3. 低置信度 → 不许一键接受（无论类型）。
   const v3 = toMessageView(makeMessage("material", "pending", { confidence: "low" }))
@@ -115,10 +119,12 @@ console.log("toMessageView（UI 可用性）")
   check("缺标题给占位文案", v6.title === "（这条提案没有摘要）", v6.title)
 
   // 6. 各类型 applier 就绪状态（单一来源，UI 与 API 都读它）。
+  //    ⚠️ 每张卡接入自己的 applier 时都要改这一行（3-19 接 material、3-25 接
+  //    announcement、3-20 接 syllabus_drift）。
   check(
-    "applier 就绪：material + announcement",
+    "applier 就绪：material + announcement + syllabus_drift",
     isApplierReady("material") && isApplierReady("announcement") &&
-      !isApplierReady("syllabus_drift") && !isApplierReady("practice_test") &&
+      isApplierReady("syllabus_drift") && !isApplierReady("practice_test") &&
       !isApplierReady("routine"),
   )
 }

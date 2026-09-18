@@ -102,6 +102,8 @@ Supabase Auth 的 `auth.users` 管认证，本表放业务扩展字段，`id` �
 | `sync_status` | text | `never` / `success` / `failed`，默认 `never` |
 | `sync_error` | text (nullable) | 最近一次同步失败的原因（给用户看的简短文案，不是堆栈） |
 | **`files_scanned_at`** | timestamptz (nullable) | **资料区（`course_files`）最后一次被扫描的时间**（P0-3-19 新增），见下方说明 |
+| **`syllabus_file_id`** | uuid (nullable, FK → `course_files.id` ON DELETE SET NULL) | **本课认定的那份 syllabus 文件**（P0-3-20 新增）。取值只能来自 `course_files` 里含 syllabus/大纲 的条目，由 `pickSyllabusFile()` 全序挑出 |
+| **`syllabus_seen_modified_at`** | timestamptz (nullable) | **上次核对到的文件版本**（P0-3-20 新增）—— 存的是 `course_files.modified_at`，**不是核对时刻** |
 | `created_at` / `updated_at` | timestamptz | |
 
 > 🔴 **`files_scanned_at` 与 `last_synced_at` 不是一个东西，别混用**：
@@ -112,6 +114,19 @@ Supabase Auth 的 `auth.users` 管认证，本表放业务扩展字段，`id` �
 >   资料区每门课 2 个 Canvas 请求，而单次同步只有 20 个预算（Sync-Strategy §5），
 >   所以走 **24 小时**独立节奏（手动刷新除外），详见 `lib/sync/canvas-files.ts`。
 
+> 🔴 **`syllabus_seen_modified_at` 存的是「文件版本」，不是「我们上次什么时候查的」**（P0-3-20）：
+> 它的值**逐字来自** `course_files.modified_at`，所以「锚点 ≠ 当前值」这一个比较就等价于「文件内容变过」。
+> 若存成 `now()`（核对时刻），第一次比较就永远不等 → **每一轮同步都会报"大纲变了"**（纯噪音），
+> 而真正的变更反而分辨不出来。配套：**内容变更看 `modified_at`，不是 `updated_at`**
+> （同一文件实测差 1.5 小时，`updated_at` 动的是元数据）—— 见 `CodingRules.md` §10.2。
+>
+> 两列的分工：`syllabus_file_id` 回答「**认哪一份文件**」，`syllabus_seen_modified_at` 回答「**认到哪个版本**」。
+> 首次核对与换文件都只**记基线、不提案**（两份不同文档之间没有共同锚点，「变了」在语义上不成立）。
+> 锚点**不是**"已通知过用户"的凭据 —— 顺序刻意是**锚点先推进、消息后建**：消息建失败时那一次变更会
+> 永久丢失，换来的是**绝不重复投同一条提案**（与 3-25 的 `insertAnnouncementMessage` 同一条取舍）。
+> 另外这两个字段的新鲜度**等于资料索引的新鲜度（24 小时）**：老师改完 syllabus 最长一天后才被发现，
+> 这是刻意的取舍（分钟级新鲜度要每轮下载 PDF，换掉的是主同步预算与 ADR-026 的红线）。
+>
 > `last_synced_at` / `sync_status` / `sync_error` 是**为用户可见性服务的**，不是给运维看的。总览页和课程页必须显示"最后同步于 X"，失败时显示原因 —— 这是 PRD F4 的硬性要求，静默展示旧数据是被明令禁止的（静默的旧数据比明确的错误更危险）。
 >
 > 🔴 **`last_synced_at` 只在同步成功时推进**（P0-2-7 修正）。P0-2-5 的实现是失败也写这一列，与本行的定义（"最后一次**成功**同步的时间"）冲突：失败后它指向**失败那一刻**，UI 展示成"最后同步于 1 分钟前"，而屏幕上的其实是几天前的旧数据 —— 正是 Sync-Strategy §9 禁止的那一条。现在的写法：失败只更新 `sync_status` / `sync_error`，`last_synced_at` 保持上一次成功的值（`toSyncStateUpdate({ lastSyncedAt: null })` 即不输出该列）。**代价**：不再记录"最后一次尝试同步的时间"，需要时读 `sync_runs.started_at`。
@@ -570,9 +585,13 @@ profiles (1) ──< sync_runs
 profiles (1) ──< parse_corrections
 syllabi  (1) ──< llm_runs
 llm_runs (1) ──< parse_corrections
+courses  (1) ──< course_files            （P0-3-19）
+courses  (0..1) ──> course_files         （`courses.syllabus_file_id`，P0-3-20，**ON DELETE SET NULL**，非 CASCADE）
 ```
 
 **外键级联**：`courses` 删除时，其下所有子表记录 `ON DELETE CASCADE`。`canvas_credentials` / `sync_runs` / `parse_corrections` 挂在 `profiles` 下，用户删除时级联。
+
+> ⚠️ **一处刻意的例外**：`courses.syllabus_file_id → course_files.id` 是 **`ON DELETE SET NULL`** 而非 CASCADE —— 语义上它是「这门课**认哪份文件**」这一条**指针**，不是所有权。删掉那份 `course_files` 行只该让这门课"忘了自己认哪份大纲"（锚点归 null → 下次同步重走 `baseline`），而不是反过来把课程删掉。方向也决定了它不是"课程的子表"，而是课程**指向**表的引用。
 
 ---
 
@@ -700,3 +719,4 @@ syllabus 可能含教师姓名、office hour 地址、评分细则等个人信�
 | 2026-09-07 | **新增 §3.14 `usage_events`**（P0-3-1）：只为 PRD 8.1 四项指标中的两项（7 日回访 / token 续期完成率）而建 —— 编辑修正率读 `parse_corrections`、人均关联课程数读 `courses.canvas_course_id`，**不重复埋点**。三类事件的写入点、每日去重规则、"埋点失败只告警 / 读数失败必须 500"的反向约定一并写入；§7.1 补索引、§7.2 补 RLS（INSERT 策略不可省，否则埋点静默全失败）；标注 P0-3-2 删账号需级联本表 | P0-3-1、`PRD.md` 8.1 |
 | 2026-09-02 | **P0-1-2 落地后对 §3.3 的补充**：`raw_text` 由 `POST /api/v1/syllabi/:id/extract` 写入，**列表与上传响应一律不读这一列**（可能几 MB，只有 extract 端点读它取前 1000 字符预览）；`extract_method` 的 CHECK 约束取值确认为 `pdf_text` / `docx` / `pptx` / `manual`（**`docx`/`pptx` 没有 `_text` 后缀**，是初版遗留，不为此改生产表）；悬挂行的兜底已实现 —— `createSignedUrl` 对不存在的对象返回 `NoSuchKey`，extract 端点据此置 `failed` + 返回 409 | P0-1-2、`API-Contract.md` §3 |
 | **2026-09-13** | **§3.9 `tasks` 新增 `submission_state` / `submitted_at` 两列**（P0-3-10，ADR-015）：分列的意义是让"外部真相"（Canvas `submission.workflow_state`）与"用户主权"（`status`）**永不互相覆盖** —— 同步只写前者，展示层合并。含 `external_tool` / `not_graded` / `on_paper` 类作业**必须落 `null` 并展示「待确认」**（Canvas 不知道 ≠ 用户没交，显示"待完成"等于诬告用户）。§4.1 同步可覆盖字段集加入这两列；§3.1 补**禁止硬编码 UTC** 的强制约束（dashboard 日期差一天的真 bug） |
+| 2026-09-18 | **§3.2 `courses` 新增 `syllabus_file_id` / `syllabus_seen_modified_at` 两列**（P0-3-20，迁移 `20260923000000_syllabus_drift.sql`）—— 大纲漂移检测的**差量锚点**。`syllabus_file_id` 是**指针**（「这门课认哪份文件」），`ON DELETE SET NULL` 是**刻意的非 CASCADE 例外**（§6 已注明理由：它不拥有那份文件）；`syllabus_seen_modified_at` 存的是**文件版本**（逐字来自 `course_files.modified_at`）**不是核对时刻** —— 存成 `now()` 会让每轮同步都报"大纲变了"（纯噪音），而真变更反而分辨不出来。**只加两列、不动任何枚举、无需补 CHECK**（已核实 `exam_dates.source` 含 `'canvas'`、`grade_components.source` 已由 `20260918000000` 补平、`messages.type` 含 `'syllabus_drift'`）。§6 表关系简图补两条关系线 + 上述例外说明。⚠️ **本表缺 2026-09-14 ~ 09-18 若干行**（3-14 / 3-17 / 3-19 / 3-19b 的表结构变更只在各自章节标注、未回填本表），待单开一次文档回补 | P0-3-20、**ADR-026**、P0-3-19 |

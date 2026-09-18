@@ -130,9 +130,10 @@ function emptySummary(): SyncSummary {
     tasksUpdated: 0,
     tasksDeleted: 0,
     failures: [],
-    // 没有已关联课程 → 一个请求都不会发，公告与资料那两步整个没跑。
+    // 没有已关联课程 → 一个请求都不会发，公告、资料、漂移那三步整个没跑。
     announcements: null,
     files: null,
+    drift: null,
     startedAt: now,
     finishedAt: now,
   }

@@ -20,6 +20,7 @@ import {
 } from '@/lib/sync/canvas-request'
 import { applyCanvasTasks } from '@/lib/sync/canvas-tasks'
 import { syncCourseFiles, type FileTarget } from '@/lib/sync/canvas-files'
+import { syncSyllabusDrift, type DriftTarget } from '@/lib/sync/syllabus-drift'
 import { findLastRunStartedAt, findRunningRun, finishRun, startRun } from '@/lib/sync/runs'
 import type { CanvasAssignment } from '@/types/canvas'
 import type { SyncFailure, SyncOutcome, SyncStatus, SyncTrigger, SyncSummary } from '@/types/sync'
@@ -109,7 +110,11 @@ export async function runCanvasSync(
   let query = supabase
     .from('courses')
     // `files_scanned_at`（P0-3-19）：资料区走 24h 独立节奏，与 `last_synced_at` 分开。
-    .select('id, course_name, canvas_course_id, last_synced_at, files_scanned_at')
+    // `syllabus_file_id` / `syllabus_seen_modified_at`（P0-3-20）：大纲漂移的差量锚点，
+    // 在这里一并取出，免得第 9 步再打一次库（一次同步只多带两列，不额外发请求）。
+    .select(
+      'id, course_name, canvas_course_id, last_synced_at, files_scanned_at, syllabus_file_id, syllabus_seen_modified_at',
+    )
     .eq('user_id', userId)
     .eq('is_archived', false)
     .not('canvas_course_id', 'is', null)
@@ -127,6 +132,8 @@ export async function runCanvasSync(
     canvas_course_id: string | null
     last_synced_at: string | null
     files_scanned_at: string | null
+    syllabus_file_id: string | null
+    syllabus_seen_modified_at: string | null
   }[]
 
   const targets: CourseTarget[] = courseRowList
@@ -161,6 +168,17 @@ export async function runCanvasSync(
       canvasCourseId: row.canvas_course_id as string,
       filesScannedAt: row.files_scanned_at,
     }))
+
+  // P0-3-20 大纲漂移的目标：只要本地课程 id + 名称 + 差量锚点。
+  // **不需要 canvasCourseId** —— 这一步零 Canvas 请求（详见 `lib/sync/syllabus-drift.ts`）。
+  const driftTargets: DriftTarget[] = courseRowList.map((row) => ({
+    id: row.id,
+    courseName: row.course_name,
+    anchor: {
+      syllabusFileId: row.syllabus_file_id,
+      syllabusSeenModifiedAt: row.syllabus_seen_modified_at,
+    },
+  }))
 
   // ---------- 4) 节流：服务端独立校验，不靠前端置灰（§6.4） ----------
   //
@@ -318,6 +336,31 @@ export async function runCanvasSync(
     console.error('[sync] 资料索引失败（作业同步不受影响）:', files.error)
   }
 
+  // ---------- 9) 大纲漂移检测（P0-3-20，ADR-026） ----------
+  //
+  // 排在资料的**后面**：它读的正是资料索引落下的 `course_files` 元数据 ——
+  // 先有目录，才谈得上"从中挑出 syllabus 比版本变化"。同一轮里资料刚更新过的文件，
+  // 这里立刻就能看见（不然要等下一轮）。
+  //
+  // **零 Canvas 请求、零模型调用**：纯读库 + 纯写库，不占 §5 的 20 请求预算。
+  //
+  // 🔴 凭证已失效时不跑。这一条与公告 / 资料不同 —— 那两块不跑是因为**发不出请求**，
+  // 而这里真正的原因是：此刻跑出来的提案**解决不了**。
+  // 提案要用户点开、走懒补 diff（`POST /api/v1/messages/drift`）才知道 "改了哪几条"，
+  // 而懒补同样要下载那份 PDF —— token 坏着的时候，用户会收到一条"有更新"、
+  // 点进去却永远算不出差异的消息，比不投更伤信任（R3）。
+  //
+  // 🟢 关键：不跑**不会丢信号** —— 锚点没被推进，下一个成功轮次照样会判出"变了"并提案。
+  const drift =
+    credentialBroken || driftTargets.length === 0
+      ? null
+      : await syncSyllabusDrift({ supabase, userId, targets: driftTargets })
+
+  if (drift?.error) {
+    // 同公告 / 资料：附加能力，失败不判整次同步失败，但**不吞**。
+    console.error('[sync] 大纲漂移检测失败（作业同步不受影响）:', drift.error)
+  }
+
   // ---------- 7) 收尾 ----------
   if (!credentialBroken) {
     await touchCredentialSuccess(supabase, credential.id)
@@ -325,9 +368,12 @@ export async function runCanvasSync(
 
   const status: SyncStatus =
     failures.length === 0 ? 'success' : coursesSynced === 0 ? 'failed' : 'partial'
-  // 作业的失败优先（它更严重）；只有作业全好、公告出错时才把公告的错误写进账。
+  // 作业的失败优先（它更严重）；只有作业全好时，才按 公告 → 资料 → 漂移 的顺序
+  // 把附加能力的第一条错误写进账。
   const errorMessage =
-    failures.length > 0 ? failures[0].message : (announcements?.error ?? files?.error ?? null)
+    failures.length > 0
+      ? failures[0].message
+      : (announcements?.error ?? files?.error ?? drift?.error ?? null)
 
   await finishRun(supabase, runId, {
     status,
@@ -348,6 +394,7 @@ export async function runCanvasSync(
     failures,
     announcements,
     files,
+    drift,
     startedAt: startedAt.toISOString(),
     finishedAt: new Date().toISOString(),
   }

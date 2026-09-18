@@ -129,6 +129,7 @@ Authorization: Bearer ${CRON_SECRET}
 | 并发度 | **1（严格串行）** | Canvas 对并发有 pre-flight 惩罚 |
 | 资料区（P0-3-19）单课请求数 | **2 个**（`/files` + `/folders`，先 files 后 folders） | 实测 6 门课 = 12 个，在 20 预算内 |
 | 资料区重扫间隔 | **24 小时**（手动刷新除外） | 目录低频变化，保住 20 请求预算给作业 |
+| 大纲漂移（P0-3-20）额外 Canvas 请求 | **0 个** | 同步侧只读 `course_files` + 比锚点；真正的文件下载发生在**用户打开消息栏之后**，不占同步预算 |
 
 ### 用量估算（Phase 0，6 名用户）
 
@@ -398,13 +399,29 @@ Phase 0 不搭监控系统，**每周人工看一次 `sync_runs` 表**即可。�
 - **学生看不见的不索引**：locked / hidden / `*_for_user` 的文件，以及落在不可见文件夹里的
   （实测 Chem 1AL：55 个文件夹里 24 个 hidden）。⚠️ Canvas 的 `hidden` 未隐藏时是 **`null` 不是 `false`**。
 - **外链必须拼**：`https://{domain}/courses/{cid}/files/{fid}`（实测 200）。
-  Canvas 返回的 `url` 是 `/files/{id}/download?...&verifier=...`，**需 Bearer**，浏览器点开 401。
+  Canvas 返回的 `url`（`/files/{id}/download?...&verifier=...`）是**能力凭据（capability URL）**
+  —— **不带任何 `Authorization` 头直接 GET 也 200 返回文件本体**（2026-09-18 实测修正本条原文
+  的「需 Bearer、点开 401」），故**既不落库也不下发浏览器**，只在服务端当次请求内用完。
+  见 `CodingRules.md` §10.1、**ADR-026**。
 - **删除判定只在拉取完整时做**（§7 同一条铁律）。
 - ❌ 花名册
 
 理由三条：① 最小权限原则（ADR-002 / ADR-008）—— 请求的数据越少，ToS 暴露面越小；② 少一处数据少一处合规义务；③ Phase 0 只接"有结构落点"的数据，无落点的只给回执。
 
 等到 Phase 1 走正式 OAuth 时，再按 scope 逐个评估是否放开成绩 / 讨论区。
+
+**🔴 第四类：大纲漂移检测（P0-3-20，2026-09-18 落地）—— 同步零下载，读内容全在「打开消息栏之后」**
+
+老师改 syllabus（改期 / 加考试 / 调成绩构成）是「用户不走运才撞上」的信息。本类让 Tempo 自己发现它，但**绝不自动改任何字段**。
+
+- **同步侧只做三件事：零 Canvas 请求、零模型调用、1 个 SELECT** —— 从 `course_files` 里挑出 syllabus 文件 → 与 `courses.syllabus_seen_modified_at` 比 `modified_at` → 变了才建一条 `type='syllabus_drift'` 的消息（`driftStatus='pending'`）。挂在 Pipeline **第 9 步**、排在资料索引之后（读的就是 3-19 的产物）。
+- **🔴 真正的文件读取发生在用户打开消息栏之后**（`POST /api/v1/messages/drift` → 下载那**一个**文件、抽文本、调模型 diff）—— 这是 **ADR-026** 的边界：**批量/后台路径零下载，用户触发路径才读内容**。原文/全文**不落库、不落盘、不进日志**，只落模型产出。卡面原文写的是「**同步时**按需抓 syllabus 文件」，与 ADR-026 冲突；且定时同步跑在 **service role + 无 cookies** 下写不进 `llm_runs` 审计（实测 `cookies was called outside a request scope`，会打穿 ADR-003）。**2026-09-18 Steven 拍板改为懒补**（范式同 **ADR-024**）。
+- **首次核对 / 换文件 = 只记基线，不提案**（`baseline`）：否则 6~13 门课首次同步会各塞一条纯噪音；换文件时两份文档没有共同锚点，「变了」在语义上不成立。
+- **三条「不」**：**不下载**（同步侧）｜ **不猜**（`size_bytes === null` 不当候选、`modified_at === null` 不报变更）｜ **不诬告**（只认名字含 syllabus/大纲 的文件，**不认 `outline`/`schedule`** —— 那是另一份文档，说它"变了"是诬告）。
+- **差量锚点是「文件版本」不是「核对时间」**：`courses.syllabus_seen_modified_at` 存的是 `course_files.modified_at`（**内容变更看 `modified_at`，不是 `updated_at`**），所以两值可比；存的不是"我们上次什么时候查的"。
+- **不自动覆盖**：提案只能落到 `source='syllabus'` 且 `is_confirmed=false` 的行 —— 已确认的考试日期是权威源（**ADR-004 / ADR-015**），**在 applier 里就不在可写范围内**；且 applier 只照做提案里就地的 `writable` 判定、不重判。撤销必须按**结构化旧值快照**还原（漂移含 update，不能按 id 删）。
+- **扫描件 PDF 提取不准 → 提案标 `confidence='low'`，低置信度不许一键接受**（卡面边界）。
+- **不占同步请求预算**：整类在同步侧 0 个 Canvas 请求；按需路径的下载不计入 §5 的 20 请求预算。
 
 ---
 
@@ -431,3 +448,5 @@ Phase 0 不搭监控系统，**每周人工看一次 `sync_runs` 表**即可。�
 | 2026-09-18 | **§14 补「进站口径」（ADR-022）**：落点判定同时决定**是否合并**——有落点**逐条**进消息栏（可确认写入）；无落点**全部合并成一条摘要**（可展开逐条看标题/课程/时间/原文链接，按钮「知道了」）。实测真账号 14 天窗口 **48 条公告 / 40 条无落点**：每条各进一次 = 用户要点 48 次，合并后只新增 **9 条**（8 逐条 + 1 摘要）且**一条不漏**。有落点的公告**绝不折进摘要**（折进去 = 用户没法点「确认」，是把能力藏起来） | P0-3-25 在线探针实测（`probe:announcements`）|
 | 2026-09-18 晚 | **§14 窗口收窄 + 课程色（ADR-023）**：窗口起点改为**跟锚点**（上次成功同步那天，min），常态"当天 + 昨天"、断更自动回补、14 天上限 —— 直接改成"只抓当天"会漏掉「cron 跑完后又发布」的公告（次日那轮的"当天"已是次日），且无任何提示。实测 48 条 → 5 条 → **真正新增 0 条**。同批：消息栏课程标签改**彩色徽标**（seed 用课程名，保证逐条/摘要两条通道同色） | Steven 验收 ADR-022 时提出（"抓的有点太多了"）/ P0-3-25 |
 | 2026-09-18 夜 | **§14 补「公告要点（AI 总结）」（ADR-024）**：给消息加中文要点，但**不进同步路径** —— 懒生成 + 落库缓存（`message_summaries`，key `(message_id, locale)`），打开消息栏后静默补齐；只对仍待处理的公告消息生成；覆盖不全如实标（"基于最新 20 条 / 共 40 条"）；失败落 `failed` 行 = 不再重试；语言是入参（先中文、术语保留英文，英文版加一行数据即可）。实测（`probe:message-summaries`，真模型零写入）：池化 40 条 → 4 条要点、单条精确、**0 编造日期**、0.86–1.34s/条 | Steven 验收时提出（"announcement 内容可不可以过一遍 AI 做总结"）/ P0-3-25b |
+| 2026-09-18 | **§14 新增「第四类：大纲漂移检测」（P0-3-20）**：同步侧**零下载、零 LLM、1 个 SELECT**（从 3-19 的 `course_files` 挑 syllabus 文件 → 比 `courses.syllabus_seen_modified_at` → 变了才建 `type='syllabus_drift'` 消息），排在 **Pipeline 第 9 步**；**真正的文件读取改到「用户打开消息栏之后」**（`POST /api/v1/messages/drift`）—— 卡面原案写「同步时抓文件」与 **ADR-026**（批量/后台零下载）冲突，且定时同步在 service role + 无 cookies 下写不进 `llm_runs` 审计，**Steven 拍板改懒补**（范式同 ADR-024）。首次核对/换文件只记 `baseline` 不提案；不猜（`size_bytes`/`modified_at` 为 null 时不判定）、不诬告（不认 `outline`/`schedule`）；锚点存的是**文件版本**（`modified_at`）不是核对时间。§5 数值表补一行「额外 Canvas 请求 0 个」 | P0-3-20、**ADR-026**、ADR-004/015 |
+| 2026-09-18 | **§14 修正「Canvas 返回的 `url` 需 Bearer、点开 401」这一条（3-19 段落）**：实测该 `url` 是**能力凭据（capability URL）** —— 不带任何 `Authorization` 头直接 GET 也 **200 返回文件本体**，故**既不落库也不下发浏览器**。可点外链必须自己拼 `https://{domain}/courses/{cid}/files/{fid}`。与 `CodingRules.md` §10.1、`Database.md` §10.2 的记载对齐 | P0-3-19b 实测、**ADR-026** |

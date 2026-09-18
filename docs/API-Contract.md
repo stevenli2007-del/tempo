@@ -1161,6 +1161,11 @@
 | POST | `/api/v1/reminders/send` | 手动触发当前用户提醒（可选 `?preview=1` 只预览不发送） | P0-3-14（✅ 已上线 2026-09-17） |
 | GET/POST | `/api/v1/reminders/scheduled` | 定时批量提醒（CRON_SECRET，service role） | P0-3-14（✅ 已上线 2026-09-17） |
 | GET | `/api/v1/reminders/unsubscribe` | 一键退订（公开，token 定位） | P0-3-14（✅ 已上线 2026-09-17） |
+| GET | `/api/v1/messages` | 消息栏列表（可选 `?status`，取值为 pending / accepted / dismissed） | ✅ P0-3-18 |
+| PATCH | `/api/v1/messages/:id` | 提案确认 / 忽略（`{status}`）/ 撤销（`{action:'undo'}`，24h 窗口） | ✅ P0-3-18 / P0-3-26 |
+| POST | `/api/v1/messages/summaries` | 公告要点懒补（AI 总结，按需） | ✅ P0-3-25b |
+| POST | `/api/v1/messages/drift` | 大纲漂移懒补核对（按需，**唯一会下载文件的入口**） | ✅ P0-3-20 |
+| POST | `/api/v1/course-updates` | 对话框（文本 / 截图 / 链接）的课程更新落写（**只追加**） | ✅ P0-3-24 |
 
 ---
 
@@ -1217,7 +1222,42 @@ Vercel 引擎组装好邮件后，POST `{ to, subject, html, text }` 给 Cloudfl
 
 ---
 
-## 12. 变更记录
+## 12. 消息栏（P0-3-18 起）
+
+`messages` 表是「Tempo 主动找到用户」的那条通道：公告自动进站（P0-3-25）、大纲漂移（P0-3-20）、回执与撤销（P0-3-26）都落在这里。**🔴 这是全站唯一的「提案 → 用户确认 → 才写」出口** —— 任何"顺手自动写"的路径都不该存在（ADR-015）。
+
+读取走 `GET /api/v1/messages`（默认返回全部状态、按时间倒序；处理完不消失，用户要留着"我点过什么"的凭据，取向同 P0-3-2 可审计）。判定与展示同理：**向客户端下发的是 `Message`（不是 `MessageView`）**，视图由客户端用同一个纯函数 `toMessageView()` 现算 —— 不允许两处各派生一遍。
+
+### `POST /api/v1/messages/drift` — 大纲漂移的懒补核对（P0-3-20）
+
+同步侧发现「这门课的大纲文件版本变了」时，只建一条 `type = 'syllabus_drift'`、`payload.driftStatus = 'pending'` 的提案（**零下载、零模型调用、零 Canvas 请求**）。真正的差异核对是**用户打开消息栏之后**由客户端静默发起的一次请求 —— 这是 **ADR-026** 划的那条线：**批量/后台路径零下载，用户触发的路径才读内容**。
+
+```jsonc
+// request
+{ "messageIds": ["<uuid>", "…"] }
+// response 200
+{
+  "data": { "messages": [ /* 整条 Message（非视图），形状同 GET /api/v1/messages */ ] },
+  "meta": { "eligible": 3, "computed": 2, "failed": 1, "deferred": 0, "remaining": 0 }
+}
+```
+
+- **入参**：`messageIds` 是**客户端传来的候选 id**，1–50 个。**空数组刻意回 400**：真跑起来时客户端只在 `needsDrift` 为真时才请求，送空数组说明调用方的判定已经坏了 —— 回 200 会把这个 bug 藏起来。
+- **🔴 归属靠会话 client**：id 来自客户端，**绝不能用 service role** —— 那样 `.in('id', ids)` 会读到别人的消息、并拿别人的大纲去跑模型。会话 client 下别人的 id **静默不在候选里**（不回 404、不确认 id 是否存在，§1.4/ADR-010）。
+- **只对 `driftStatus === 'pending'` 的条目动手**，算完即改写状态 → **多打几次是安全的**（幂等）；两个标签页同时打开最多各算一次，写回收敛到同一份结论。
+- **一轮上限 3 条、并发 2**；`meta.remaining > 0` 表示还有没轮到的，客户端可再来一轮（前端封顶 2 轮）。
+- **`failed` 与 `deferred` 刻意分开报**：前者 = **确定性失败**，已写回 `payload.driftStatus='failed'` + `confidence='low'`，**不再重试**；后者 = **暂时性失败**（网络 / 5xx / 限流），**状态没动**，下次打开消息栏会重试。客户端与排障要能分清「读不出来」和「刚才网抖了」。
+- **单条失败不进 HTTP 状态**：它落在 `payload.driftStatus` 与 `meta` 里。「3 条里 1 条读不出来」不是请求失败，客户端不该为它弹错。
+- **错误码**：401 `unauthenticated`；400 `bad_request`（请求体不是合法 JSON）/ `validation_failed`（`messageIds` 不是数组 / 为空 / 超过 50 / 含非字符串或空串）；**502 `drift_unavailable`**（读库失败 —— 当前确实会发生：迁移 `20260923000000` 未跑时锚点两列不存在）。502 是刻意的：**核对不了必须留痕**，否则表现是那行「正在核对差异…」永远不动而没有任何线索（ADR-016 R3）。
+- **🔴 ADR-026 的三道闸门全在发请求前判**（扩展名/MIME → 库内 `size_bytes` 超限 → 缓存 `modified_at` 未变）；`size_bytes = null` 一律不下载。**原文与抽取出的全文不落库、不落盘、不进日志**，落库的只有差异结论与 ≤200 字符的逐字摘录。
+- **低置信度不许一键接受**：扫描件 PDF 提取不准 → `confidence='low'` → `canAccept=false`，只能「知道了」（卡面边界的落地）。
+- 判定层有离线回归 `npm run regress:syllabus-drift`；真账号只读探针 `npm run probe:syllabus-drift`（**零写入**）。
+
+> ⚠️ **已知留白（本文件的历史缺口，非本卡引入）**：消息栏与其邻接端点的完整契约**尚未在本文件成文** —— `GET /api/v1/messages`、`PATCH /api/v1/messages/:id`、`POST /api/v1/messages/summaries`（P0-3-18 / 3-25b / 3-26）与 `POST /api/v1/course-updates`（P0-3-24）此前只写在 `Phase-0-MVP.md` 的卡面与 `Decisions.md` 的 ADR 里。本文件本次只补了 **P0-3-20 自己新增的这一个端点** + §10 总表的五行索引；**其余端点的成文建议单开一次文档回补**。
+
+---
+
+## 13. 变更记录
 
 | 日期 | 变更 | 依据 |
 |---|---|---|
@@ -1248,3 +1288,4 @@ Vercel 引擎组装好邮件后，POST `{ to, subject, html, text }` 给 Cloudfl
 | 2026-09-17 | **§11 邮件正文口径收敛为「聚焦版」+ 出站全链路生产验证通过**（P0-3-14 续）：① **聚焦版**（Steven 拍板）—— 正文只列「可行动」项（逾期 + 3 天内），其余折叠成「另有 N 项更远的任务（含 M 项日期待定）→ 在 Tempo 查看」；新增结果字段 `shownCount` / `hiddenCount` / `hiddenTbdCount`；根因=首版全量平铺在真实数据上生成 **63 行**、而主题写 20（口径打架 + 洪水式日报，违背 ADR-016 R3 / ADR-017）。② **出站启用**：迁移执行 ✅、Workers Paid **本就已付费**（免升级）、`noreply@tempocourse.com` 验证 ✅（catch-all zone 上靠**临时精确转发规则**把验证信引到已验邮箱，验完删除）、出站 Worker 部署 ✅（`tempo-outbound-email.stevenli2007.workers.dev` + `send_email` 绑定 + Bearer 密钥）、Vercel 三 env ✅。③ **验收判据**：无凭证打 `/reminders/scheduled` → **401（路由已上线）而非 404（代码没上）** —— env 触发的部署不含未 push 的代码，是本次唯一卡点。④ 本地零副作用预览（service role + 真数据 + `preview:true`）：`actionable=true`、主题 20 / 正文 20 / 折叠 43（= 63）。⑤ 已知数据层问题（**不在本卡**）：`Final Exam` / `Unit 1-3 Exam` 各出现两份（exam 派生任务与 syllabus 重复），单列后续卡 | P0-3-14、ADR-016、ADR-017 |
 | 2026-09-17 | **§5.1 删「已到期作业」债务条、新增「今日任务」加权切片**（P0-3-16）：① 删除 `components/overview/debt-bar.tsx` + dashboard 接线 + `lib/tasks.ts` 的 `loadDebtTasks` + `lib/tasks/progress.ts` 的 `debtWindow`/`classifyDebt`/`summarizeDebt` 等死代码（`grep debtWindow` = 0）；② 新增 `lib/tasks/today.ts` 的 `buildTodayTasks()` —— **今天到期 100% + 未来 7 天按 `1/剩余天数` 切片（9/17 看 9/21 = 25%）+ 逾期未完成红组**，三组权重之和即"今日工作量"；③ **红组只收 Canvas 明确说没交的**（`unsubmitted`/`missing`），`null` / `external_unconfirmed` 不进红组（ADR-013）；④ **零新查询**：取数复用总览清单（`loadTasks`，窗口 = now + 7d），总览页从**四路查询降到两路**；⑤ 展示层 `components/overview/today-tasks.tsx`（服务端组件）。回归 `regress:progress` 24 → **27**（删 5 条 debt、加 8 条今日任务） | P0-3-16、ADR-013、ADR-015、ADR-016 |
 | 2026-09-17 | **§5 任务新增三个 Canvas 附带字段 + §5.1 统一「逾期资格」+ §11 补可提醒例外**（P0-3-17）：① `tasks` 加列 `canvas_url` / `points_possible` / `submission_score`（迁移 `20260917140000`，**字段全部来自已有的那一个 `?include[]=submission` 请求，零额外 Canvas 调用**；`pointsPossible`/`submissionScore` 的 `null` **绝不用 0 替代**，收窄实现 `lib/numbers.ts`）；② 「能不能标逾期」收成**一个** `canBeOverdue()`（`lib/tasks/progress.ts`）—— 排掉"手勾已完成 / Canvas 已判定完成 / 外部平台无可信记录 / Canvas 明说不追踪"四类，周历逾期条 + 总览页清单 + 课程卡近期任务 + 课程页作业详情**四处共用**；**顺手修掉 P0-3-16 留下的不一致**（周历逾期条原收全部来源，把 `makeup form` 标成「已逾期 16 天」，与同页「今日任务」红组打架）；③ 新增 `needsManualConfirmation()` = `source='canvas' && submission_state IS NULL` → 灰色徽标「需手动确认」；④ §11 可提醒范围补第 3 行：**Canvas 来源的 NULL 不提醒**，但 **syllabus/manual 的 NULL（含全部考试）照常提醒** —— 两侧都有回归断言钉着；⑤ §5.1「明确不做」澄清 ❌ 饼图只针对总览页进度可视化，课程详情页的成绩构成饼图（数据源 = syllabus `grade_components.weight_percent`）不在禁止之列 | P0-3-17、ADR-013、ADR-015 |
+| 2026-09-18 | **新增 §12「消息栏」（P0-3-20）+ §10 总表补五行**，原 §12 变更记录顺延为 **§13**（无其他文件引用旧节号，已核实）。§12 = `POST /api/v1/messages/drift` 的完整契约：大纲漂移的**懒补核对**，同步侧只建提案（零下载零模型），真核对在**用户打开消息栏之后**（**ADR-026** 的"用户触发路径"）；入参 `messageIds` 1–50、**空数组刻意 400**；**归属靠会话 client，绝不用 service role**；只对 `driftStatus='pending'` 动手 → 幂等；一轮 3 条 / 并发 2；`failed`（确定性，已写回不再重试）与 `deferred`（暂时性，状态没动下次重试）**分开报**；单条失败不进 HTTP 状态；**502 `drift_unavailable`** 刻意留痕（否则那行「正在核对差异…」永远不动而无任何线索）；三道闸门全在发请求前判、原文不落库。**§10 总表此前完全没有消息栏一族**（`GET /messages` / `PATCH /messages/:id` / `POST /messages/summaries` / `POST /course-updates` 虽已上线验收却不在表里）—— 一并补上五行索引，并在 §12 末尾标注「其余端点成文留白」。⚠️ 本表缺 2026-09-18 当天 3-18 / 3-24 / 3-25 / 3-25b / 3-26 的变更行，待文档回补 | P0-3-20、**ADR-026** |

@@ -48,6 +48,103 @@ export type MessageDigestItem = {
 }
 
 /**
+ * 漂移核对（P0-3-20）的进度。
+ *
+ * ### 为什么状态要落进 payload 而不是另开一张表
+ * 它是**这一条提案**的属性（"这条的差异算出来了没"），与 `receipt` / `applied` 同级 ——
+ * 混在 `message_summaries` 那种"缓存表"里会让"重放同步"和"重算差异"互相踩（ADR-024 同一条理由）。
+ *
+ * | 值 | 含义 | 界面 |
+ * |---|---|---|
+ * | `pending` | 同步已发现文件变了，差异**还没算**（等用户打开消息栏时懒补） | 按钮禁用 + 「正在核对差异…」 |
+ * | `ready` | 差异算好了，有可写入的内容 | 按钮「确认」 |
+ * | `clean` | 算过了，**与你的记录一致**（或只有描述性变化） | 按钮「知道了」（确认只留回执） |
+ * | `failed` | 算不出来（抽不出文字 / 文件拿不到 / 模型不可用） | 按钮禁用 + 原因 |
+ *
+ * 🔴 `pending` 必须禁用「确认」：差异还没算出来时点确认，applier 无事可做 ——
+ * 那就是"点了没反应"的静默失败（ADR-016 R3）。
+ */
+export type MessageDriftStatus = 'pending' | 'ready' | 'clean' | 'failed'
+
+/** 一条**新增**的考试 / 成绩构成（`drift` 里的条目，确认后追加）。 */
+export type MessageDriftAddedExam = {
+  examName: string
+  /** `YYYY-MM-DD`；null = 原文没写（落 TBD，**绝不编**）。 */
+  examDate: string | null
+  examTime: string | null
+  location: string | null
+  /** 原文逐字摘录。**没有摘录的条目不许写库**（ADR-021 的解禁前提）。 */
+  sourceExcerpt: string
+}
+
+/**
+ * 一条**变动**（确认后更正已有行）。
+ *
+ * `id` 是 `exam_dates.id`，由模型从"当前已确认的考试列表"里选 —— 服务端会复核它确实属于这门课。
+ * `before` 是**服务端读出来的旧值**（不是模型转述的），确保界面上那句「10/20 → 10/27」可信。
+ */
+export type MessageDriftChangedExam = {
+  id: string
+  examName: string
+  before: string
+  after: string
+  examDate: string | null
+  examTime: string | null
+  location: string | null
+  sourceExcerpt: string
+  /**
+   * 这条能不能直接改。
+   *
+   * 🔴 由**服务端**在算出 diff 时判定（2026-09-18 Steven 拍板）：只有
+   * `source='syllabus'` 且 `is_confirmed=false` 的才能自动更正 ——
+   * 用户亲手确认过的那一行是权威源（ADR-015），只能提示他去课程页改，
+   * **绝不自动覆盖**。
+   */
+  writable: boolean
+  /** 不可自动更正的原因（人话，显示给用户）。可自动更正时为 null。 */
+  blockedReason: string | null
+}
+
+export type MessageDriftAddedComponent = {
+  name: string
+  /** 0-100；null = 原文没写占比（**不是 0**）。 */
+  weightPercent: number | null
+  notes: string | null
+  sourceExcerpt: string
+}
+
+/**
+ * 大纲差异的明细（P0-3-20，懒补产出）。
+ *
+ * ### 🔴 它是"读出来的东西"，不是用户数据
+ * 与 `receipt` / `applied` 一样由服务端写进 payload（`jsonb` 无 schema 约束），
+ * 所以**读取侧每个字段都要当"可能不存在"**处理 —— 见 `lib/messages/view.ts`。
+ * 界面上那几行「新增 X / 变动 Y」由这里渲染，**不额外做一套 UI**（3-18 是唯一提案出口）。
+ *
+ * ### 为什么不存原文
+ * 用的是**按需路径**：允许下载那一个文件、抽文本、调模型，但
+ * 原文与全文**不落库、不落盘、不进日志**（ADR-026）。这里只有结论与逐字摘录
+ * （摘录 ≤200 字符，是"能核对"的最小证据，与 3-24 同一条纪律）。
+ */
+export type MessageDrift = {
+  addedExams: MessageDriftAddedExam[]
+  changedExams: MessageDriftChangedExam[]
+  addedComponents: MessageDriftAddedComponent[]
+  /**
+   * 其他变化的一句话摘要（大纲里的描述性内容：评分细则、办公时间、课程安排…）。
+   *
+   * ⚠️ **不写库**，只显示。与 3-25「去掉 OH 结构化落点」同一条取舍：
+   * 造一个没人维护的模型比不写更糟。有内容时界面必须说实话（"另有 N 处描述性变化，
+   * 请到课程页核对"），否则用户会以为"没写就是没变"。
+   */
+  notes: string[]
+  /** 抽取到的正文字符数 —— 覆盖率的证据（太少就不该相信这份 diff）。 */
+  sourceChars: number
+  /** 实际服务的模型（`llm_runs` 记的是实际服务模型，见 `TechStack.md` §5.2）。 */
+  model: string | null
+}
+
+/**
  * 提案载荷的**最小契约**（P0-3-18 定义，后续卡按此产出）。
  *
  * 本卡是「全站系统提案的唯一出口」，所以载荷的公共形状定在这里，
@@ -101,6 +198,20 @@ export type MessagePayload = {
   digest?: MessageDigestItem[]
   /** 条数超过上限（`MAX_DIGEST_ITEMS`）时，没被列进 `digest` 的条数。 */
   digestOverflow?: number
+  /**
+   * 漂移核对的进度（P0-3-20）。**只有 `syllabus_drift` 类型有**。
+   *
+   * 缺字段 = 老数据 / 别的产出方 → 读取侧一律按"没有这套状态"处理（不因此禁用按钮）。
+   */
+  driftStatus?: MessageDriftStatus
+  /** 这一版大纲对应的 `course_files.id`（按需路径靠它定位要下载哪个文件）。 */
+  syllabusFileId?: string
+  /** 该文件的 `course_files.modified_at` —— 提案的依据，也是"这是哪一版"的凭据。 */
+  syllabusModifiedAt?: string | null
+  /** 差异明细（懒补产出）。`driftStatus` 为 `pending` / `failed` 时不存在。 */
+  drift?: MessageDrift
+  /** 核对失败的人话原因（`driftStatus='failed'` 时必有）。机器可读的那一份。 */
+  driftError?: string
   [key: string]: unknown
 }
 
@@ -167,4 +278,31 @@ export type MessageRow = {
 export type MessageApplied = {
   examDateIds?: string[]
   gradeComponentIds?: string[]
+  /**
+   * **被更正**的考试行（P0-3-20 加）。
+   *
+   * ### 为什么不能复用 `examDateIds`
+   * 大纲漂移里「变动 Y」是 **update，不是 insert** —— 撤销不可能按 id 去删，
+   * 那会把一行用户本来就有的考试连根删掉。要还原就必须知道**旧值**，
+   * 而旧值只在写入那一刻存在于库里（写完就被覆盖了）。
+   *
+   * 所以确认时在这里留一份快照，撤销时按 `id` 写回去。
+   * ⚠️ 字段是**结构化的值**（不是界面上的 `before` 那句人话）：
+   * 「Unit 3 Exam · 2026-10-20 · 7-9pm」这句话拆不回 `exam_time`。
+   */
+  examRestores?: MessageExamRestore[]
+}
+
+/** 一行考试的旧值快照（`exam_dates` 里所有会被写入器改动的字段）。 */
+export type MessageExamRestore = {
+  id: string
+  examName: string
+  examDate: string | null
+  examTime: string | null
+  location: string | null
+  /**
+   * 旧值的原文摘录。**必须一起还原** —— 摘录是"这个值凭什么这么写"的证据，
+   * 把新值的摘录留在还原后的旧值旁边，等于在库里留了一条对不上的溯源信息。
+   */
+  sourceExcerpt: string | null
 }

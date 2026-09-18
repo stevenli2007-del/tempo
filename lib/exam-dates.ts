@@ -130,8 +130,13 @@ export function parseSaveExamDatesInput(body: unknown): ValidationResult<SaveExa
  * 由 `examDate` 派生 `status` —— 与解析侧 `normalizeExam()` 同一条规则：
  * 有合法日期 = `confirmed`，否则 `tbd`。校验层已保证 `examDate` 是 null 或
  * 合法 `YYYY-MM-DD`，所以这里只需判空。
+ *
+ * ⚠️ 导出给 P0-3-20 的漂移写入器 / 撤销器用（它们要改 / 还原同一列）。
+ * 复制一份到那边会在"什么时候算 confirmed"上开出第二个答案 ——
+ * 表现是同一行被更正前后 `status` 不一致，而 `status` 直接渲染成「已确定 / TBD」。
+ * （`lib/course-update/normalize.ts` 里还内联着一份同规则的写法，属既有代码，本次不动。）
  */
-function deriveStatus(examDate: string | null): 'confirmed' | 'tbd' {
+export function deriveStatus(examDate: string | null): 'confirmed' | 'tbd' {
   return examDate !== null ? 'confirmed' : 'tbd'
 }
 

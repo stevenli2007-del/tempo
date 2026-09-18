@@ -1,6 +1,7 @@
 import type { ApplierReadyType } from '@/lib/messages/registry'
 import type { ApplierSupabase } from '@/lib/messages/apply'
 import { announcementUndoer } from '@/lib/messages/undoers/announcement'
+import { syllabusDriftUndoer } from '@/lib/messages/undoers/syllabus-drift'
 import type { MessagePayload, MessageType } from '@/types/message'
 
 /**
@@ -43,6 +44,9 @@ const materialUndoer: MessageUndoer = async () => ({ ok: true })
 const UNDOERS = {
   material: materialUndoer,
   announcement: announcementUndoer,
+  // ⚠️ 3-20 的撤销器与公告那一个**本质不同**：漂移里有 update（改期），
+  // 撤销要按确认时留下的旧值快照写回去，不能按 id 删。见 `undoers/syllabus-drift.ts`。
+  syllabus_drift: syllabusDriftUndoer,
 } satisfies Record<ApplierReadyType, MessageUndoer>
 
 /** 宽化后的索引视图。 */

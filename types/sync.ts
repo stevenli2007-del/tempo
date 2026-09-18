@@ -125,6 +125,47 @@ export type SyncFileSummary = {
   error: string | null
 }
 
+/**
+ * 大纲漂移检测的记账（P0-3-20，ADR-026）。
+ *
+ * ### 为什么又是一块独立的 summary
+ * 与公告（3-25）、资料（3-19）同一条：附加能力失败**不改整次同步的状态**、
+ * 不塞进 `failures`。否则一门课的大纲文件读不出来，用户会看到"同步失败"，
+ * 而作业其实全好 —— 归因错了。
+ *
+ * ### 这一块是**零成本**的，与其他两块不同
+ * 公告 / 资料各自要打 Canvas。这一步是**纯读库**：`course_files` 的元数据
+ * （3-19 已落）本来就是现成的，只需要在内存里挑出 syllabus、比一比版本。
+ * 所以 `status: 'failed'` 在这里的含义很窄 —— 只有"读库失败"或"写锚点失败"，
+ * 不会有"Canvas 不顺"这种外部原因。
+ *
+ * ### 🔴 各字段的关系（对账用）
+ * - `coursesChecked` = `baselined + proposed + unchanged + noFile`
+ * - `baselined`：**首次核对**或**换了另一份大纲文件** → 只记基线，**不提案**。
+ *   为什么不算提案：第一次本来就没有可比的旧版本，"有个变化"会是凭空捏造的假警；
+ *   换文件同理（两份不同文档之间没有共同锚点）。6~13 门课首次跑各投一条噪音，
+ *   是会让人直接关掉消息栏的那种骚扰。
+ * - `proposed`：文件真的变了 → 已建一条 `syllabus_drift` 提案进消息栏（差异待懒补）。
+ * - `unchanged`：文件在库里，版本与锚点一致。
+ * - `noFile`：这门课没有可识别的 syllabus 文件（没开 Files 区 / 没上传 / 只有
+ *   `size_bytes` 为 null 的不可抽取文件）。**这是常态，不是错误**。
+ */
+export type SyncDriftSummary = {
+  status: 'success' | 'failed'
+  /** 本轮判过的课程数。= 下面四个数之和。 */
+  coursesChecked: number
+  /** 首次核对 / 换了文件而只记基线的课程数（**不发提案**）。 */
+  baselined: number
+  /** 发现文件变化、已建提案的课程数。 */
+  proposed: number
+  /** 文件版本与锚点一致、无动作的课程数。 */
+  unchanged: number
+  /** 没找到可识别大纲文件的课程数（**常态，不是故障**）。 */
+  noFile: number
+  /** 失败说明；`null` = 成功。 */
+  error: string | null
+}
+
 export type SyncSummary = {
   status: SyncStatus
   /** 成功同步的课程数。 */
@@ -147,6 +188,14 @@ export type SyncSummary = {
    * 与 `failures` 分开的理由见 `SyncFileSummary`。
    */
   files: SyncFileSummary | null
+  /**
+   * 大纲漂移检测结果（P0-3-20）。`null` = 本轮没跑（凭证失效 / 没有已关联课程）。
+   *
+   * 为什么排在 `files` 之后：这一步**依赖资料索引的结果**
+   * （`course_files` 里得先有文件，才谈得上挑 syllabus），
+   * 同步流水线里也确实是资料之后才跑到它（见 `lib/sync/canvas-sync.ts`）。
+   */
+  drift: SyncDriftSummary | null
   startedAt: string
   finishedAt: string
 }

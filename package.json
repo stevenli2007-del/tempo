@@ -23,7 +23,9 @@
     "probe:schema": "npx -y tsx scripts/probe-schema-constraints.ts",
     "probe:announcements": "npx -y tsx scripts/probe-announcements.ts",
     "regress:message-summaries": "npx -y tsx scripts/regress-message-summaries.ts",
-    "probe:message-summaries": "npx -y tsx scripts/probe-message-summaries.ts"
+    "probe:message-summaries": "npx -y tsx scripts/probe-message-summaries.ts",
+    "regress:syllabus-drift": "npx -y tsx scripts/regress-syllabus-drift.ts",
+    "probe:syllabus-drift": "npx -y tsx scripts/probe-syllabus-drift.ts"
   },
   "dependencies": {
     "@base-ui/react": "^1.7.0",

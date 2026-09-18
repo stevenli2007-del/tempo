@@ -123,5 +123,27 @@ export function summarize(summary: SyncSummary): string {
     summary.failures.length > 0
       ? `；${summary.failures.length} 门失败（${summary.failures[0].courseName}：${summary.failures[0].message}）`
       : ''
-  return `已同步 ${summary.coursesSynced} 门课，${changeLine}${failureLine}${announcementLine(summary)}${filesLine(summary)}`
+  return `已同步 ${summary.coursesSynced} 门课，${changeLine}${failureLine}${announcementLine(summary)}${filesLine(summary)}${driftLine(summary)}`
+}
+
+/**
+ * 大纲漂移那一步的结果压成一句话（P0-3-20）。
+ *
+ * ⚠️ 与资料（`filesLine`）**刻意不同**：资料只在出错时出声，漂移则是**主动报喜**。
+ *
+ * 为什么这一条值得说：它是本卡唯一真正"产品化"的信号 ——
+ * 「老师把期中挪了两周」这种事，Tempo 的价值就在于**替用户发现**。
+ * 只把提案静静塞进消息栏、同步提示里一个字不提，用户不点开消息栏就等于没发现，
+ * 那这个功能在体感上就不存在（ADR-016 hands-off 的前提是"发现了要让人知道"）。
+ *
+ * 反过来，`baselined` / `noFile` / `unchanged` 一律**闭嘴**：
+ * 首次核对 6~13 门课全在 `baselined` 里，报出来就是"13 门课有更新"的假警 ——
+ * 与 `announcementLine` 只认 `created`、`filesLine` 只认 `error` 是同一种克制。
+ */
+function driftLine(summary: SyncSummary): string {
+  const d = summary.drift
+  if (!d) return ''
+  if (d.error) return `；大纲漂移检测失败（${d.error}）`
+  if (d.proposed > 0) return `；${d.proposed} 门课的大纲文件有更新，已进消息栏`
+  return ''
 }

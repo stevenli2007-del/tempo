@@ -53,8 +53,12 @@ export const MESSAGE_STATUSES: readonly MessageStatus[] = ['pending', 'accepted'
  * 这里是权威取值；`apply.ts` 的加载器表用
  * `satisfies Record<ApplierReadyType, ApplierLoader>` 声明 ——
  * 少一个键、多一个键，`tsc` 都会报错。两边不可能漂开。
+ *
+ * ⚠️ 加一个类型进来 = 那类提案的「确认」立刻可点（`view.ts` 的 `canAccept` 由它派生）。
+ * 所以必须**同时**在 `undo.ts` 的 `UNDOERS` 里补一个撤销器 —— 能写不能撤
+ * 比不能写更糟（用户以为回得去）。
  */
-export const APPLIER_READY_TYPES = ['material', 'announcement'] as const
+export const APPLIER_READY_TYPES = ['material', 'announcement', 'syllabus_drift'] as const
 
 export type ApplierReadyType = (typeof APPLIER_READY_TYPES)[number]
 

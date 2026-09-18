@@ -11,7 +11,13 @@ import {
   summaryPendingLabel,
   type SummaryLocale,
 } from '@/lib/messages/summary/locale'
-import type { Message, MessagePayload, MessageStatus, MessageType } from '@/types/message'
+import type {
+  Message,
+  MessageDriftStatus,
+  MessagePayload,
+  MessageStatus,
+  MessageType,
+} from '@/types/message'
 
 /**
  * 提案的展示层视图模型（纯函数，`scripts/regress-messages.ts` 直接断言）。
@@ -189,6 +195,18 @@ export type MessageView = {
   needsSummary: boolean
   /** 「生成中」的占位文案（真在请求中时由组件决定要不要画）。 */
   summaryBusyLabel: string
+  /**
+   * 这条漂移提案**还需要算差异**（P0-3-20）。
+   *
+   * 🔴 与 `needsSummary` 同一个用途：客户端只按这一个字段决定"要不要请求"。
+   * 同步侧建的那条提案此刻只有一句「正在核对差异…」占位，真正的「新增 X / 变动 Y」
+   * 由 `POST /api/v1/messages/drift` 懒补回 `payload.details`（同 ADR-024 范式）。
+   *
+   * ⚠️ 刻意**不**再配一个"忙态文案"：占位就在 `details` 里（连同"一直不动怎么办"的
+   * 说明），再画一行「正在核对差异…」就是同一句话出现两遍。公告要点那边需要忙态，
+   * 是因为它的 `points` 为空时界面上什么都没有；这里不是。
+   */
+  needsDrift: boolean
 }
 
 export function toMessageView(
@@ -206,9 +224,58 @@ export function toMessageView(
       ? message.payload.courseName
       : null
 
+  /**
+   * 漂移核对进度（P0-3-20）。只有 `syllabus_drift` 有；其余类型是 null。
+   *
+   * 缺字段按 `pending` 处理吗？**不。** 老数据 / 别的产出方缺这个字段时，
+   * 若当成 `pending` 就会去请求一次核对（对一个根本没有 `syllabusFileId` 的消息，
+   * 那是必然失败的一次往返）。这里保持 `null` = "不是待核对的漂移消息"，
+   * 让 `needsDrift` 要求三个条件同时成立。
+   */
+  const driftStatus: MessageDriftStatus | null =
+    message.type === 'syllabus_drift' && typeof message.payload.driftStatus === 'string'
+      ? (message.payload.driftStatus as MessageDriftStatus)
+      : null
+  const driftError =
+    typeof message.payload.driftError === 'string' && message.payload.driftError.trim() !== ''
+      ? message.payload.driftError
+      : null
+
+  /**
+   * 能不能点「确认」——**唯一判定**：`blockReason === null`。
+   *
+   * 原来这里是 `isPending && confidence === 'high' && applierReady`，与上面的
+   * `blockReason` 三条分支是同一件事的两种写法（互补）。合成一条之后，
+   * 每加一个"不能写"的理由只需要改一处 —— 否则迟早出现
+   * 「按钮能点但点了报错」或反过来的分叉（CodingRules §10.1 第 21 条）。
+   *
+   * ⚠️ 顺序有讲究：**越具体的理由排越前**。漂移的 `failed` 同时也满足
+   * `confidence === 'low'`，但用户更需要看到「这份大纲抽不出文字」而不是
+   * 一句泛泛的"置信度低"。
+   */
   let blockReason: string | null = null
   if (!isPending) {
     blockReason = '已经处理过了'
+  } else if (driftStatus === 'pending') {
+    // 此刻 payload 里只有占位文案，确认下去会**什么都不写**。
+    // 卡住按钮 + 说明原因，正是 R3「不许静默失败」要的形状。
+    blockReason = '正在核对差异，稍等一下就能确认'
+  } else if (driftStatus === 'failed') {
+    blockReason = driftError ?? '这次没能核对出差异，请到课程页核对原文'
+  } else if (driftStatus === 'clean') {
+    // 核对完发现没有差异 → 按钮叫「知道了」（见下面 `confirmLabel`），applier 空写入。
+    //
+    // 🔴 **刻意放行、且排在低置信度判断之前**：卡片那条"低置信度不许一键接受"
+    // 针对的是**提案内容**（提取不准 → 写进去的值不可信）。`clean` 一个字段都不写，
+    // 挡住它只会让用户没法把这条提案清掉（只能"忽略"，而忽略的语义是"我不需要它"）。
+    // 低置信度徽标此时仍然显示 —— 那个提醒是有用的（"这份 PDF 抽得不全，
+    // '没差异'这个结论也不一定可靠"），但它不该禁掉一句"我知道了"。
+  } else if (message.type === 'syllabus_drift' && driftStatus !== 'ready') {
+    // 走到这里只剩"字段缺失"一种可能（pending / failed / clean 上面都已分支）。
+    // ⚠️ 这条分支是刻意留的：漂移提案**没有差异就不能写**，而缺字段（老数据 /
+    // 半截写入 / 手工改库）会让按钮亮着、点下去 applier 回一句"差异还没核对出来"
+    // —— 那就成了"按钮说能点、点了报错"。宁可明确挡住并说清原因。
+    blockReason = '这条提案缺少核对信息，请到课程页手动核对大纲'
   } else if (confidence === 'low') {
     blockReason = '置信度低：请先去课程页核对原文，这条不允许一键接受'
   } else if (!applierReady) {
@@ -222,6 +289,20 @@ export function toMessageView(
   const summary = message.summary ?? null
   const summaryPoints = summary?.points ?? []
   const needsSummary = message.type === 'announcement' && isPending && summary === null
+
+  /**
+   * 还需要算差异的漂移提案（P0-3-20）。
+   *
+   * 三个条件缺一不可：① 类型对；② 还没被处理（已确认/已忽略的提案不该再花一次下载+模型钱）；
+   * ③ 状态是 `pending` 且**拿得到定位文件的两个字段** —— 缺 `syllabusFileId` 的
+   * 老数据请求过去也只会被判失败，不如不请求。
+   */
+  const needsDrift =
+    message.type === 'syllabus_drift' &&
+    isPending &&
+    driftStatus === 'pending' &&
+    typeof message.payload.syllabusFileId === 'string' &&
+    typeof message.payload.courseId === 'string'
 
   return {
     id: message.id,
@@ -243,16 +324,18 @@ export function toMessageView(
     confidence,
     isPending,
     applierReady,
-    canAccept: isPending && confidence === 'high' && applierReady,
+    canAccept: blockReason === null,
     blockReason,
     timeLabel: TIME_FORMATTER.format(new Date(message.createdAt)),
     sourceUrl: readSafeUrl(message.payload.sourceUrl),
     digestItems: readDigest(message.payload),
     digestOverflow: readDigestOverflow(message.payload),
-    // 只有**明确标了**「无落点」的公告才改文案。`landing` 缺失（老数据 / 其他类型）
-    // 一律按「确认」—— 不能因为字段没写就让按钮含糊其辞。
+    // 只有**明确标了**「无落点」的公告、以及**核对完确认没差异**的漂移提案，
+    // 才改按钮文案：这两种情况下确认确实什么都不写，叫「确认」是在含糊其辞。
+    // 其余（含字段缺失）一律按「确认」。
     confirmLabel:
-      message.type === 'announcement' && message.payload.landing === false
+      (message.type === 'announcement' && message.payload.landing === false) ||
+      (message.type === 'syllabus_drift' && driftStatus === 'clean')
         ? ACK_LABEL
         : CONFIRM_LABEL,
     summaryPoints,
@@ -262,15 +345,27 @@ export function toMessageView(
     summaryCoverage: coverageLabel(summary?.itemsUsed ?? 0, summary?.itemsTotal ?? 0, locale),
     needsSummary,
     summaryBusyLabel: summaryPendingLabel(locale),
+    needsDrift,
   }
 }
 
 /** 载荷是 `jsonb`，读的时候**每个字段都要当"可能不存在"**（3-19/3-20/3-23 各自产出）。 */
 function countApplied(payload: MessagePayload): number {
-  const applied = (payload.applied ?? {}) as { examDateIds?: unknown; gradeComponentIds?: unknown }
+  const applied = (payload.applied ?? {}) as {
+    examDateIds?: unknown
+    gradeComponentIds?: unknown
+    examRestores?: unknown
+  }
   const exams = Array.isArray(applied.examDateIds) ? applied.examDateIds.length : 0
   const components = Array.isArray(applied.gradeComponentIds) ? applied.gradeComponentIds.length : 0
-  return exams + components
+  /**
+   * 🔴 **更正过的行也要算进来**（P0-3-20）。界面用这个数决定要不要显示「撤销」，
+   * 而大纲漂移里"只更正了 1 条日期、没新增任何东西"是最常见的形态 ——
+   * 漏掉它，用户就会看到「✓ 已确认」却找不到撤销按钮，
+   * 而他刚才明明看到 Tempo 把期中日期改掉了。
+   */
+  const restores = Array.isArray(applied.examRestores) ? applied.examRestores.length : 0
+  return exams + components + restores
 }
 
 function readTitle(payload: MessagePayload): string {

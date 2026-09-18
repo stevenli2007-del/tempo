@@ -30,7 +30,7 @@ import type { CourseOption } from "@/components/tasks/use-course-update-flow"
 import { MESSAGES_UPDATED_EVENT } from "@/lib/messages/event"
 import { DEFAULT_SUMMARY_LOCALE } from "@/lib/messages/summary/locale"
 import { toMessageView, type MessageView } from "@/lib/messages/view"
-import type { Message, MessageSummary } from "@/types/message"
+import type { Message, MessagePayload, MessageSummary } from "@/types/message"
 
 /** 气泡头像的宽 + 间距（size-7 = 28px，gap-2.5 = 10px）。回执靠它左沿对齐气泡内容。 */
 const RECEIPT_INDENT = "pl-[38px]"
@@ -48,6 +48,38 @@ const UNDO_WINDOW_MS = 24 * 60 * 60 * 1000
  * 服务端会把失败的落成 `failed` 行（= 别再问），下一轮自然就没人可问了。
  */
 const MAX_SUMMARY_ROUNDS = 4
+
+/**
+ * 差异请求最多跑几轮。
+ *
+ * 服务端一轮只算 `MAX_DRIFT_PER_REQUEST`（3）条，且**一次已经够贵**
+ * （每条要下载一个 PDF + 一次模型调用）。上游极少会出现 3 条以上同时待核对
+ * （那意味着 3 门课的 syllabus 在同一周被改过），所以 2 轮封顶：
+ * 够覆盖"积了几条"的情况，又不会把一次打开变成一串下载。
+ */
+const MAX_DRIFT_ROUNDS = 2
+
+/**
+ * 从接口响应里挑出漂移消息，只取 `payload`。
+ *
+ * 🔴 **只取 payload**，不是整条替换：`POST /messages/drift` 回的是服务端那一刻的
+ * `Message`，其中的 `summary` 恒为 null（漂移提案没有 AI 要点）。整条替换会把要点
+ * 悄悄抹掉 —— 现在是看不出来（漂移本来就没要点），但那是"数据被悄悄抹掉"的形状，
+ * 下次谁想在这条消息上加别的派生数据就会踩上。
+ * 而服务端这次**真正改的也只有 payload**（差异、状态、回写后的 details）。
+ */
+function readIncomingDrift(raw: unknown): { id: string; payload: MessagePayload }[] {
+  if (!Array.isArray(raw)) return []
+  const out: { id: string; payload: MessagePayload }[] = []
+  for (const entry of raw) {
+    if (typeof entry !== "object" || entry === null) continue
+    const record = entry as Record<string, unknown>
+    if (typeof record.id !== "string" || record.id === "") continue
+    if (typeof record.payload !== "object" || record.payload === null) continue
+    out.push({ id: record.id, payload: record.payload as MessagePayload })
+  }
+  return out
+}
 
 export function MessagesView({
   initialMessages,
@@ -87,6 +119,8 @@ export function MessagesView({
    * 所以这里不需要持久化，也不会因为热更新/重渲染而漏问。
    */
   const askedRef = useRef<Set<string>>(new Set())
+  /** 同理，防止同一次访问里反复重问漂移（P0-3-20）。 */
+  const askedDriftRef = useRef<Set<string>>(new Set())
 
   // 服务端带下来的要点 + 客户端补进来的：后者优先（它是更新的那一次）。
   const views: MessageView[] = useMemo(
@@ -159,6 +193,59 @@ export function MessagesView({
         // 网络层失败：静默（见上面的注释）。下一轮由服务端的缓存/failed 行收敛。
       } finally {
         setSummaryBusyIds((prev) => prev.filter((id) => !missing.includes(id)))
+      }
+    })()
+  }, [views])
+
+  /**
+   * 懒补大纲差异（P0-3-20）：**只对"还没问过、且客户端真的会画"的漂移提案**发一次请求。
+   *
+   * 🔴 与要点那趟的差别：这条链路的产物**不是增强，而是提案的内容本身**。
+   *    同步建的那条提案此刻只有一句「正在核对差异…」，`确认` 按钮是灰的
+   *    （`view.canAccept` 派生的 `blockReason` 会说明原因）。所以它失败时
+   *    **占位文案会留在界面上** —— 那行字里带着"一直不动怎么办"的说明
+   *    （点「原文 ↗」自己看），这就是它的兜底，不需要再弹错。
+   *
+   * ⚠️ 依赖里只有 `views`：`askedDriftRef` 不进依赖（它不该触发重跑），
+   *    这样"问过 → 结果回来 → 重渲染"不会变成无限请求。
+   */
+  useEffect(() => {
+    const missing = views
+      .filter((view) => view.needsDrift && !askedDriftRef.current.has(view.id))
+      .map((view) => view.id)
+    if (missing.length === 0) return
+
+    for (const id of missing) askedDriftRef.current.add(id)
+
+    void (async () => {
+      try {
+        for (let round = 0; round < MAX_DRIFT_ROUNDS; round += 1) {
+          const res = await fetch("/api/v1/messages/drift", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ messageIds: missing }),
+          })
+          if (!res.ok) return
+
+          const data = await res.json()
+          const incoming = readIncomingDrift(data?.data?.messages)
+          if (incoming.length > 0) {
+            const byId = new Map(incoming.map((entry) => [entry.id, entry.payload]))
+            // 只换 payload（见 `readIncomingDrift`）。服务端这次改的就是它 ——
+            // 差异清单、核对状态、回写后的 details 全在里面。
+            setMessages((prev) =>
+              prev.map((message) => {
+                const payload = byId.get(message.id)
+                return payload ? { ...message, payload } : message
+              }),
+            )
+          }
+          // 没有剩余（都算完了，或剩下的都判了确定失败不会再问）→ 收工。
+          if ((data?.meta?.remaining ?? 0) <= 0) return
+        }
+      } catch {
+        // 网络层失败：静默。占位文案还在，用户点「原文 ↗」照样能看到 Canvas 上那份。
+        // 下次打开消息栏由服务端的 `driftStatus='pending'` 自然重试。
       }
     })()
   }, [views])
