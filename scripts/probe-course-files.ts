@@ -44,8 +44,8 @@ import {
 } from '@/lib/canvas/files'
 import { canvasGet } from '@/lib/canvas/client'
 import { loadDecryptedCredential } from '@/lib/canvas/credentials'
-import { groupByFolder } from '@/lib/course-files/grouping'
-import type { CourseFileView } from '@/lib/course-files/grouping'
+import { buildFileTree } from '@/lib/course-files/grouping'
+import type { CourseFileNode, CourseFileView } from '@/lib/course-files/grouping'
 import type { CanvasFile, CanvasFolder } from '@/types/canvas'
 
 const here = path.dirname(fileURLToPath(import.meta.url))
@@ -106,6 +106,29 @@ async function fetchAll<T>(
   }
 
   return { items, pages, status, rawRestricted }
+}
+
+/**
+ * 缩进打印文件夹树 —— **就是课程页「资料」区会画出来的那棵树**。
+ *
+ * 每层多缩进两格，所以"三个并列标题"和"三层父子"在输出里一眼可辨：
+ * 旧版（扁平路径标题）会打印成三行同缩进，现在是层层往里缩。
+ * 每层只列前 3 个文件名（探针要的是结构，不是清单）。
+ */
+function printTree(node: CourseFileNode, depth: number): void {
+  const pad = '  '.repeat(depth + 1)
+
+  for (const file of node.files.slice(0, 3)) {
+    console.log(`${pad}- ${file.displayName}`)
+  }
+  if (node.files.length > 3) {
+    console.log(`${pad}  … 另 ${node.files.length - 3} 个文件`)
+  }
+
+  for (const child of node.children) {
+    console.log(`${pad}[${child.name}] — ${child.totalCount} 个`)
+    printTree(child, depth + 1)
+  }
 }
 
 async function main(): Promise<void> {
@@ -249,17 +272,10 @@ async function main(): Promise<void> {
       `   → 会索引 ${views.length} 个文件（另有 ${hiddenSkipped} 个落在不可见文件夹里，跳过）`,
     )
 
-    // 分组结构 = 课程页「资料」区会画出来的东西（验收标准①）。
-    const groups = groupByFolder(views)
-    for (const group of groups) {
-      console.log(`     · ${group.label || '(根目录)'} — ${group.files.length} 个`)
-      for (const file of group.files.slice(0, 3)) {
-        console.log(`         ${file.displayName}`)
-      }
-      if (group.files.length > 3) {
-        console.log(`         … 另 ${group.files.length - 3} 个`)
-      }
-    }
+    // 文件夹树 = 课程页「资料」区会画出来的东西（验收标准①）。
+    // 缩进即为层级 —— 2026-09-18 验收修正后，`Practice Exams` 与它的
+    // `Unit 1 Exam`、`Answer Keys` 是**父子**，不再是三个并列标题。
+    printTree(buildFileTree(views), 1)
 
     if (views.length > 0) {
       console.log(`     外链样例：${views[0].fileUrl}`)

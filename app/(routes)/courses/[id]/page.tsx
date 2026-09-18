@@ -29,7 +29,8 @@ import { loadTasks } from '@/lib/tasks'
  * 新顺序按**问题**排，而不是按数据表排：
  *   概览（Canvas 关联 / 成绩构成 / 作业概况，宽屏三栏一屏看完）
  *   → 作业详情（**折叠**，含分数条与 Canvas 外链）
- *   → 资料（P0-3-19：Canvas 文件夹结构分组 + 外链回 Canvas，**只存目录不存内容**）
+ *   → 资料（P0-3-19：按 Canvas 的**文件夹树**分组 + 外链回 Canvas；索引只存目录，
+ *     点「一键总结」才临时读那一份文件 → `P0-3-19b`，见 `lib/course-files/summary/`）
  *   → 课程板块（原来的五板块编辑器，含 syllabus 上传）
  *
  * ### 作业数据为什么单独取，而不塞进 `loadCourseDetail`
@@ -193,7 +194,7 @@ export default async function CourseDetailPage({ params }: PageProps) {
         </details>
 
         {/* ---------- 资料（P0-3-19）：按 Canvas 文件夹结构分组，点开回 Canvas ---------- */}
-        <CourseFiles files={courseFiles.files} error={courseFiles.error} />
+        <CourseFiles courseId={detail.id} files={courseFiles.files} error={courseFiles.error} />
 
         {/* ---------- 课程板块（原「五个板块」，含 syllabus 上传） ---------- */}
         <section className="rounded-xl border border-border bg-card p-5 shadow-sm">

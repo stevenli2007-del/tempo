@@ -18,6 +18,7 @@
     "regress:url-ingest": "npx -y tsx scripts/regress-url-ingest.ts",
     "regress:course-files": "npx -y tsx scripts/regress-course-files.ts",
     "probe:course-files": "npx -y tsx scripts/probe-course-files.ts",
+    "probe:file-summary": "npx -y tsx scripts/probe-file-summary.ts",
     "probe:course-parse": "npx -y tsx scripts/probe-course-parse.ts",
     "probe:schema": "npx -y tsx scripts/probe-schema-constraints.ts",
     "probe:announcements": "npx -y tsx scripts/probe-announcements.ts",

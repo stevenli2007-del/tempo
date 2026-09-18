@@ -30,7 +30,16 @@ import {
   toCanvasFiles,
   toCanvasFolders,
 } from "@/lib/canvas/files"
-import { formatFileSize, groupByFolder } from "@/lib/course-files/grouping"
+import { detectExtractableExtension, unsupportedReason } from "@/lib/course-files/extractable"
+import { buildFileTree, formatFileSize } from "@/lib/course-files/grouping"
+import {
+  MAX_ITEM_CHARS,
+  MAX_POINTS,
+  MAX_SOURCE_CHARS,
+  buildSummaryInput,
+  buildSummaryMessages,
+  validateSummaryOutput,
+} from "@/lib/course-files/summary/prompt"
 import type { CourseFileView } from "@/lib/course-files/grouping"
 
 let passed = 0
@@ -226,7 +235,7 @@ console.log("filePreviewUrl（外链回 Canvas —— 本卡的验收标准②�
 }
 
 console.log("")
-console.log("groupByFolder（按 Canvas 文件夹结构分组 —— 验收标准①）")
+console.log("buildFileTree（还原 Canvas 的文件夹树 —— 验收标准①，2026-09-18 验收修正）")
 {
   const view = (
     id: string,
@@ -255,38 +264,254 @@ console.log("groupByFolder（按 Canvas 文件夹结构分组 —— 验收标�
     view("9", "HW0.pdf", "Homework"),
   ]
 
-  const groups = groupByFolder(files)
-  const paths = groups.map((g) => g.path)
+  const root = buildFileTree(files)
 
-  check("根目录排最前", paths[0] === "", `[${paths.join(" | ")}]`)
   check(
-    "Lecture Slides/Unit 1 与 Unit 2 分成两组且相邻",
-    paths.indexOf("Lecture Slides/Unit 1") >= 0 &&
-      paths.indexOf("Lecture Slides/Unit 2") === paths.indexOf("Lecture Slides/Unit 1") + 1,
-    `[${paths.join(" | ")}]`,
+    "根目录的文件直接挂根节点（不套文件夹）",
+    root.files.map((f) => f.displayName).join() ===
+      "Chem1A_Syllabus_Fall2026.pdf,Quiz 4.pdf",
+    root.files.map((f) => f.displayName).join(),
   )
   check(
-    "Practice Exams/Unit 1 Exam/Answer Keys 单独成组（三层路径）",
-    paths.includes("Practice Exams/Unit 1 Exam/Answer Keys"),
-    `[${paths.join(" | ")}]`,
+    "顶层文件夹按名字排序",
+    root.children.map((c) => c.name).join() === "Homework,Lecture Slides,Practice Exams",
+    root.children.map((c) => c.name).join(),
+  )
+  check("根节点 totalCount = 全部文件数", root.totalCount === 9, String(root.totalCount))
+
+  const lecture = root.children.find((c) => c.name === "Lecture Slides")
+  check(
+    "Lecture Slides 下有两个 Unit（一层真实父子）",
+    lecture?.children.map((c) => c.name).join() === "Unit 1,Unit 2",
+    lecture?.children.map((c) => c.name).join(),
   )
   check(
-    "三层排在两层之后（按路径升序）",
-    paths.indexOf("Practice Exams/Unit 1 Exam/Answer Keys") >
-      paths.indexOf("Practice Exams/Unit 1 Exam"),
+    "Unit 1 的直属文件是 L1/L2",
+    lecture?.children[0].files.map((f) => f.displayName).join() === "L1.pdf,L2.pdf",
   )
-  check("分组数 = 不同路径数", groups.length === 6, String(groups.length))
+  check("子节点的 path 是完整路径", lecture?.children[0].path === "Lecture Slides/Unit 1")
+
+  const practice = root.children.find((c) => c.name === "Practice Exams")
+  check("中间层自己没有直属文件（Practice Exams 直挂 0 个）", practice?.files.length === 0)
+  check("Practice Exams 有 1 个子文件夹", practice?.children.length === 1)
+
+  const exam = practice?.children[0]
+  check("第二层是 Unit 1 Exam", exam?.name === "Unit 1 Exam")
   check(
-    "根目录标题是「课程文件」而不是空串",
-    groups[0].label === "课程文件",
-    groups[0].label,
+    "Unit 1 Exam 直属 1 个文件",
+    exam?.files.map((f) => f.displayName).join() === "Exam1EquationSheet.pdf",
+  )
+
+  const keys = exam?.children[0]
+  check(
+    "🔴 第三层 Answer Keys 是 Answer Keys 自己的节点（旧版会塌成一行标题）",
+    keys?.name === "Answer Keys",
+    String(keys?.name),
   )
   check(
-    "组内按名字升序",
-    groups.find((g) => g.path === "Lecture Slides/Unit 1")?.files.map((f) => f.displayName).join() ===
-      "L1.pdf,L2.pdf",
+    "Answer Keys 里 2 个文件",
+    keys?.files.map((f) => f.displayName).join() === "Key1.pdf,Key2.pdf",
   )
-  check("空输入 → 空数组", groupByFolder([]).length === 0)
+  check(
+    "三层 path 逐级拼接",
+    keys?.path === "Practice Exams/Unit 1 Exam/Answer Keys",
+    String(keys?.path),
+  )
+  check(
+    "Practice Exams 的 totalCount 含后代（1 + 2 = 3）",
+    practice?.totalCount === 3,
+    String(practice?.totalCount),
+  )
+
+  // 自然序：换成纯字典序会把 `Unit 10` 排到 `Unit 2` 前面（课件命名里的常态，不是边缘情况）。
+  const natural = buildFileTree([
+    view("a", "x.pdf", "Unit 10"),
+    view("b", "y.pdf", "Unit 2"),
+    view("c", "z.pdf", "Unit 1"),
+  ])
+  check(
+    "Unit 2 排在 Unit 10 前面（自然序，不是字典序）",
+    natural.children.map((c) => c.name).join() === "Unit 1,Unit 2,Unit 10",
+    natural.children.map((c) => c.name).join(),
+  )
+  check(
+    "同一组文件也按自然序（L2 在 L10 前）",
+    buildFileTree([view("a", "L10.pdf", "U"), view("b", "L2.pdf", "U")])
+      .children[0].files.map((f) => f.displayName)
+      .join() === "L2.pdf,L10.pdf",
+  )
+
+  // 同名文件夹出现在不同父级下时必须各成节点（按完整路径建节点，只在同一父下复用）。
+  const duplicated = buildFileTree([
+    view("a", "p.pdf", "A/Unit 1"),
+    view("b", "q.pdf", "B/Unit 1"),
+  ])
+  check(
+    "A/Unit 1 与 B/Unit 1 互不干扰",
+    duplicated.children.length === 2 && duplicated.children.every((c) => c.children.length === 1),
+    duplicated.children.map((c) => c.path).join(" | "),
+  )
+
+  const empty = buildFileTree([])
+  check(
+    "空输入 → 空树（不是 null）",
+    empty.files.length === 0 && empty.children.length === 0 && empty.totalCount === 0,
+  )
+}
+
+console.log("")
+console.log("detectExtractableExtension（能不能读 ≠ 名字里有没有后缀）")
+{
+  check("普通 .pdf", detectExtractableExtension("slides.pdf", "application/pdf") === "pdf")
+  check("大小写混杂", detectExtractableExtension("Slides.PPTX", null) === "pptx")
+  check("pptx 放行（extract.ts 里有 extractPptx）", detectExtractableExtension("deck.pptx", null) === "pptx")
+  check(
+    "🔴 没有后缀但 MIME 是 PDF（Chem 1AL 真实存在：`Weekly Review 1 - PDF`）",
+    detectExtractableExtension("Weekly Review 1 - PDF", "application/pdf") === "pdf",
+  )
+  check(
+    "MIME 带 charset 参数也认",
+    detectExtractableExtension("无名", "application/pdf; charset=utf-8") === "pdf",
+  )
+  check("MIME 大小写不敏感", detectExtractableExtension("无名", "Application/PDF") === "pdf")
+  check(
+    "docx 的长 MIME 认得出",
+    detectExtractableExtension(
+      "x",
+      "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    ) === "docx",
+  )
+  check(
+    "图片 → null（要视觉模型，不在这里硬抽出一个空结果）",
+    detectExtractableExtension("photo.JPG", "image/jpeg") === null,
+  )
+  check("压缩包 → null", detectExtractableExtension("a.zip", null) === null)
+  check("完全没有线索 → null", detectExtractableExtension("README", null) === null)
+  check(
+    "🔴 名字里含 pdf 字面量但真后缀是 zip → null",
+    detectExtractableExtension("notes.pdf.zip", "application/zip") === null,
+  )
+  check(
+    "旧版 .doc → null（mammoth 只吃 docx）",
+    detectExtractableExtension("old.doc", "application/msword") === null,
+  )
+
+  const imageReason = unsupportedReason("photo.jpg", "image/jpeg")
+  check(
+    "图片的理由点明「是图片、没有文字层」",
+    imageReason.includes("图片") && imageReason.includes("文字层"),
+    imageReason,
+  )
+  check("旧版 Office 的理由点名格式", unsupportedReason("old.ppt", null).includes("旧版"))
+  check(
+    "不认识的后缀也有一句人话（不是空字符串）",
+    unsupportedReason("file.pages", null).length > 0,
+  )
+}
+
+console.log("")
+console.log("buildSummaryInput / buildSummaryMessages / validateSummaryOutput（一键总结的判定层）")
+{
+  const short = buildSummaryInput({
+    fileName: "a.pdf",
+    folderPath: "Unit 1",
+    courseName: "Chem 1A",
+    text: "abc",
+  })
+  check("短文本不截断", short.truncated === false && short.text === "abc" && short.sourceChars === 3)
+
+  const long = buildSummaryInput({
+    fileName: "a.pdf",
+    folderPath: "",
+    courseName: "Chem 1A",
+    text: "x".repeat(MAX_SOURCE_CHARS + 500),
+  })
+  check(
+    "超长文本被截断到上限",
+    long.truncated === true && long.text.length === MAX_SOURCE_CHARS,
+    String(long.text.length),
+  )
+  check(
+    "🔴 截断后 sourceChars 仍记原始长度（否则界面没法如实说「共 N 字」）",
+    long.sourceChars === MAX_SOURCE_CHARS + 500,
+    String(long.sourceChars),
+  )
+
+  const messages = buildSummaryMessages(short)
+  check(
+    "两条消息：system + user",
+    messages.length === 2 && messages[0].role === "system" && messages[1].role === "user",
+  )
+  const systemText = String(messages[0].content)
+  check("system 写了「只依据给出的文字」（防补常识）", systemText.includes("只依据给出的文字"))
+  check("system 禁止声称覆盖全部", systemText.includes("不要声称覆盖了全部内容"))
+  check("system 要求术语/公式照抄", systemText.includes("照原文抄写"))
+
+  const userText = String(messages[1].content)
+  check("user 带上文件名与课程", userText.includes("a.pdf") && userText.includes("Chem 1A"))
+  check("user 带上文件夹位置", userText.includes("Unit 1"))
+  check("没截断时不出覆盖警告", !userText.includes("不代表全部内容"))
+  check(
+    "🔴 截断时 user 里必须带覆盖警告",
+    String(buildSummaryMessages(long)[1].content).includes("不代表全部内容"),
+  )
+
+  const good = validateSummaryOutput({ overview: "讲了 VSEPR", points: ["p1", "p2"], formulas: ["Ksp"] })
+  check(
+    "合法输出通过并计数为 0",
+    good.ok === true && good.value.points.length === 2 && good.value.formulas.length === 1 && good.dropped === 0,
+  )
+
+  const messy = validateSummaryOutput({
+    overview: "  x  ",
+    points: ["a", "", 3, null, "b"],
+    formulas: "不是数组",
+  })
+  check(
+    "非字符串与空串被丢掉",
+    messy.ok === true && messy.value.points.join() === "a,b",
+    messy.ok ? messy.value.points.join() : "n/a",
+  )
+  check("公式不是数组时降级为空数组（不是整次失败）", messy.ok === true && messy.value.formulas.length === 0)
+  check("overview 去首尾空白", messy.ok === true && messy.value.overview === "x")
+
+  const overflow = validateSummaryOutput({
+    overview: "x",
+    points: Array.from({ length: MAX_POINTS + 3 }, (_, i) => `p${i}`),
+    formulas: [],
+  })
+  check(
+    "超量要点被裁到上限",
+    overflow.ok === true && overflow.value.points.length === MAX_POINTS,
+    overflow.ok ? String(overflow.value.points.length) : "n/a",
+  )
+  check(
+    "🔴 裁掉多少要计数上报（不报就没人发现模型开始写废话）",
+    overflow.ok === true && overflow.dropped === 3,
+    overflow.ok ? String(overflow.dropped) : "n/a",
+  )
+
+  const longItem = validateSummaryOutput({
+    overview: "x",
+    points: ["y".repeat(MAX_ITEM_CHARS + 50)],
+    formulas: [],
+  })
+  check(
+    "单条超长被截到上限",
+    longItem.ok === true && longItem.value.points[0].length === MAX_ITEM_CHARS,
+  )
+
+  check(
+    "🔴 三者全空 → 失败（模型什么都没读出来，落 failed 不再重试）",
+    validateSummaryOutput({ overview: "", points: [], formulas: [] }).ok === false,
+  )
+  check(
+    "全空白的字符串也算空",
+    validateSummaryOutput({ overview: " ", points: ["  "], formulas: [] }).ok === false,
+  )
+  check("不是对象 → 失败", validateSummaryOutput("一段话").ok === false)
+  check("数组 → 失败", validateSummaryOutput([1, 2]).ok === false)
+  check("null → 失败", validateSummaryOutput(null).ok === false)
 }
 
 console.log("")

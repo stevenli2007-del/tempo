@@ -900,6 +900,15 @@
 > （详见 Sync-Strategy §8 的那条例外说明）。
 > 资料区走 **24 小时**独立节奏（手动刷新除外），所以多数轮次 `coursesScanned` 会是 0。
 
+> 🔴 **一键总结（P0-3-19b）不是端点，是页面路由**：`GET /courses/:id/files/:fileId`
+> （App Router 页面，服务端组件 + `<Suspense>` 流式）。它**不经过任何 `/api/v1/…` 端点**，
+> 也没有"生成"按钮对应的 POST —— 打开页面即在服务端完成：读缓存 → 未命中则下载那一个文件 →
+> 抽文本 → 调模型 → 落 `file_summaries` 缓存。
+> **因此没有 API 契约可写，但有两条必须遵守的约束（详见 ADR-026）**：
+> ① 文件下载在服务端进行，**Canvas 的能力 URL（带 `verifier`）绝不下发浏览器、绝不落库**；
+> ② **原文字节与抽取出的全文不落库、不落盘、不进日志**，只有总结落 `file_summaries`。
+> 缓存键是 `(course_file_id, locale)`；命中判据是 `source_modified_at === 当前 modified_at`。
+
 | 情况 | 状态码 | `error.code` | 说明 |
 |---|---|---|---|
 | 未登录 | 401 | `unauthenticated` | |

@@ -30,58 +30,81 @@ export type CourseFileView = {
   modifiedAt: string | null
 }
 
-/** 一个文件夹分组。 */
-export type CourseFileGroup = {
-  /** 原始路径（空串 = 根目录）。排序用。 */
+/** 资料区里的一个文件夹节点（树）。 */
+export type CourseFileNode = {
+  /** 本层文件夹名（根节点为空串）。 */
+  name: string
+  /** 完整路径（根节点为空串）。唯一键，React `key` 与回归断言都用它。 */
   path: string
-  /** 分组标题：根目录显示为「课程文件」，其余直接显示 Canvas 路径。 */
-  label: string
+  /** **直属**本文件夹的文件（不含子文件夹的），已排序。 */
   files: CourseFileView[]
+  /** 子文件夹，已排序。 */
+  children: CourseFileNode[]
+  /** 子树内文件总数（含所有后代）—— 折叠状态下也要能一眼看出"这里有多少东西"。 */
+  totalCount: number
 }
 
 /**
- * 按 Canvas 文件夹路径分组。
+ * 把 Canvas 的扁平路径还原成一棵**文件夹树**。
  *
- * ### 两处刻意的排序
- * 1. **根目录排最前**：实测大量文件直接躺在根目录（Chem 1A 的 syllabus 就在根上），
- *    它们是全课通用的，理应第一眼看到。
- * 2. 其余按路径字符串升序 —— `Lecture Slides/Unit 1` 自然排在 `Unit 2` 之前，
- *    不必解析层级。
+ * ### 为什么从"扁平路径当标题"改成树（2026-09-18 Steven 验收反馈）
+ * 原实现把 `Practice Exams/Unit 1 Exam/Answer Keys` 当成**一个**分组标题，
+ * 于是 `Practice Exams`、`Practice Exams/Unit 1 Exam`、`.../Answer Keys` 是三个**并列**小节。
+ * 实测 Chem 1A 平铺出 7 个同级标题、Chem 1AL 平铺出 10 个、R4A 干脆 101 个文件一坨 ——
+ * 用户的原话是「文件一股脑全列出来了」，看不出老师的分层。
  *
- * ### 为什么做扁平分组而不是多级树
- * Canvas 的 `full_name` 本来就是**扁平**的（`Practice Exams/Unit 1 Exam/Answer Keys`），
- * 做树要自己按 `/` 切段再拼父子，多一处逻辑就多一处出错；
- * 而实测一门课只有 13 个文件夹，扁平分组已经够读 ——
- * 标题直接显示完整路径反而比三级折叠更好扫（验收标准①要的就是"按结构分组"）。
+ * ### 路径切分是安全的
+ * Canvas 的 `full_name` 用 `/` 作分隔符，且**中间层文件夹真实存在**
+ * （有 `Practice Exams/Unit 1 Exam/Answer Keys` 就必然有 `Practice Exams`），
+ * 所以纯按文件路径拼树不会造出幻觉节点。
+ * 代价（刻意接受）：Canvas 上**空的**文件夹不会出现在树里 —— 一个没有文件的文件夹
+ * 对"找资料"这件事没有价值。
+ *
+ * ### 🔴 这里也永不接触文件内容
+ * 节点里只有文件名、路径、外链 —— 没有正文、没有字节。
  */
-export function groupByFolder(files: CourseFileView[]): CourseFileGroup[] {
-  const byPath = new Map<string, CourseFileView[]>()
+export function buildFileTree(files: CourseFileView[]): CourseFileNode {
+  const root: CourseFileNode = { name: '', path: '', files: [], children: [], totalCount: 0 }
 
   for (const file of files) {
-    const bucket = byPath.get(file.folderPath)
-    if (bucket) {
-      bucket.push(file)
-    } else {
-      byPath.set(file.folderPath, [file])
+    const segments = file.folderPath === '' ? [] : file.folderPath.split('/').filter((s) => s !== '')
+
+    let node = root
+    let path = ''
+    for (const segment of segments) {
+      path = path === '' ? segment : `${path}/${segment}`
+      let child = node.children.find((c) => c.name === segment)
+      if (!child) {
+        // 同名不同层是合法的（两门课都可能有 `Unit 1`），所以按**完整路径**建节点、
+        // 只在**同一父节点下**按 `name` 复用。
+        child = { name: segment, path, files: [], children: [], totalCount: 0 }
+        node.children.push(child)
+      }
+      node = child
     }
+
+    node.files.push(file)
   }
 
-  const groups: CourseFileGroup[] = []
-  for (const [path, groupFiles] of byPath) {
-    groups.push({
-      path,
-      label: path === '' ? '课程文件' : path,
-      // 同一分组内按名字排（DB 已排过一次，分组后顺序可能被打散，这里再稳一次）。
-      files: [...groupFiles].sort((a, b) => a.displayName.localeCompare(b.displayName)),
-    })
-  }
+  return finalize(root)
+}
 
-  // 根目录第一，其余按路径升序。
-  return groups.sort((a, b) => {
-    if (a.path === '' && b.path !== '') return -1
-    if (b.path === '' && a.path !== '') return 1
-    return a.path.localeCompare(b.path)
-  })
+/**
+ * 排序 + 自底向上数数。
+ *
+ * 用 `numeric: true` 做**自然序**：`Unit 2` 要排在 `Unit 10` 前面，`L2 Slides` 排在 `L10 Slides` 前面。
+ * 纯字典序会把 `10` 排到 `2` 前面 —— 这在课件命名里是常态，不是边缘情况。
+ */
+function finalize(node: CourseFileNode): CourseFileNode {
+  const byNaturalOrder = (a: string, b: string) => a.localeCompare(b, undefined, { numeric: true })
+
+  node.children.sort((a, b) => byNaturalOrder(a.name, b.name))
+  node.files.sort((a, b) => byNaturalOrder(a.displayName, b.displayName))
+  node.children = node.children.map(finalize)
+  node.totalCount =
+    node.files.length + node.children.reduce((sum, child) => sum + child.totalCount, 0)
+
+  return node
 }
 
 /**

@@ -56,6 +56,7 @@
 | `parse_corrections` | 用户修正记录（存 diff） | ✅ |
 | `usage_events` | 行为事件埋点（7 日回访 / token 续期完成率） | ✅（P0-3-1 新增） |
 | `course_files` | 课程资料索引（Canvas 文件**元数据**，P0-3-19） | ✅（P0-3-19 新增） |
+| `file_summaries` | 单文件「一键总结」缓存（结构化提要，**不含课件原文**，P0-3-19b） | ✅（P0-3-19b 新增） |
 | Phase 2+ 预留表 | 规划能力、多数据源 | ❌ 见第 8 节 |
 
 > 相比初版，`sync_runs` / `llm_runs` / `parse_corrections` 是新增的三张表。它们不是"锦上添花"：
@@ -411,21 +412,68 @@ Canvas 课程 Files 区的**目录**：文件名、所在文件夹、外链、�
 ```sql
 CREATE UNIQUE INDEX course_files_course_file_unique
   ON course_files (course_id, canvas_file_id);
+
+-- 资料总结（P0-3-19b）：读取路径永远是「按 course_file_id + locale 取一行」，
+-- 主键已覆盖，**不另建索引**。要按课程统计"总结了几份"时再加。
 ```
 
 > 🔴 **只存元数据，绝不存内容**。本表**没有任何一列**能装文件内容：没有 bytea、没有正文 text、没有 storage 路径。
 > 要读某个文件的内容是 3-20（大纲漂移）/ 3-23（practice test）的事，且那时才按 `modified_at` 差量去取那**一个**文件。
 >
 > 🔴 **`file_url` 必须是拼出来的预览页，不能用 Canvas 返回的 `url`**。
-> `/files` 给的 `url` 形如 `/files/{id}/download?...&verifier=<uuid>` —— **需 Bearer token**，用户在浏览器里点开是 401
-> （2026-09-18 实测）。正确形态是 `https://{domain}/courses/{canvas_course_id}/files/{file_id}`（实测 200）。
+> `/files` 给的 `url` 形如 `/files/{id}/download?download_frd=1&verifier=<uuid>` —— 它是一个**能力 URL**：
+> 实测（2026-09-18，做 P0-3-19b 时重测）**不带任何 token 也能 200 拿到 `application/pdf`**，
+> 也就是说**拿到这条 URL 就等于拿到那个文件的下载权**。
+> 所以它**既不能落库、也不能下发给浏览器**：存了 = 库里躺着一把能开课件的钥匙；
+> 下发了 = 任何能读页面源码的人都能绕过 Canvas 的登录去下课件。
+> 正确形态是**拼出来**的 `https://{domain}/courses/{canvas_course_id}/files/{file_id}`（实测 200，走 Canvas 自己的登录）。
 > 四个候选的实测对照见 `lib/canvas/files.ts` 的 `filePreviewUrl`。
+>
+> ⚠️ 这与「裸 `/files/{id}`（没有 verifier）→ 401」不矛盾：401 的是**没有能力凭据的裸链**，
+> 200 的是**带 verifier 的能力链**。两件事，别混。
 >
 > 🔴 **学生看不见的不索引**：`locked` / `hidden` / `locked_for_user` / `hidden_for_user` 任一为真的文件，
 > 以及落在不可见文件夹里的文件（实测 Chem 1AL：55 个文件夹里 24 个 hidden、57 个文件里 2 个 restricted）。
 > ⚠️ Canvas 的 `hidden` 实测是 **`null` 而不是 `false`**（表示未隐藏），必须判 `=== true`。
 >
 > ⚠️ **P0-3-2 删账号的级联**：`course_id` 已 `ON DELETE CASCADE`，删课程即清空本课程的资料索引。
+
+### 3.16 `file_summaries`（单文件「一键总结」缓存，P0-3-19b 新增）
+
+用户在某个文件上点「一键总结」后，模型给出的**结构化提要**（概述 / 要点 / 公式术语）。
+一份文件 + 一种语言一行，一次生成永久复用。
+
+> 🔴 **它不存课件内容**。`summary` 列里只有**模型生成的概述与要点**；
+> 抽出来的文本只存在于那次请求的内存里，**不落库、不进 Storage**。
+> 「不下载内容」这条红线在 3-19 里指的是**索引路径**（同步时一个字节都不下）——
+> 按需路径允许读**那一个**文件，但读到的原文不留副本。见 **ADR-026**。
+
+| 字段名 | 类型 | 说明 |
+|---|---|---|
+| `course_file_id` | uuid (FK → course_files.id, **ON DELETE CASCADE**, PK 之一) | 归属（本表无 `user_id`，RLS 经 `course_files → courses` 反查） |
+| `locale` | text (PK 之一) | 总结语言（`zh-CN` / `en`，白名单在 `lib/course-files/summary/locale.ts`）。**无 CHECK** —— 它只是数据标签，加语言不该被迁移卡住 |
+| `status` | text | `ok` / `failed`（有 CHECK，因为它是**代码分支**）。`failed` 行保留的意义 = **别再重试** |
+| `summary` | jsonb | `{ overview, points[], formulas[] }`。**只含模型输出，绝不含原文** |
+| `source_chars` | integer | 抽取到多少字符（截断前） |
+| `source_truncated` | boolean | 是否因过长被截断 —— 为真时界面**必须**标「不覆盖全篇」 |
+| `page_count` | integer (nullable) | PDF 页数；docx / pptx 为 null（**不是 0**） |
+| `extract_method` | text (nullable) | 用了哪个抽取器（`pdf_text` / `docx` / `pptx`） |
+| `source_modified_at` | timestamptz (nullable) | 生成时该文件在 Canvas 的 `modified_at`；与当前值不同 = 老师换过文件 = **重算** |
+| `model` | text (nullable) | 实际服务的模型名（同 `llm_runs` 的纪律：记实际值，不记别名） |
+| `error_message` | text (nullable) | 失败原因（精简、**不含课件内容**） |
+| `created_at` / `updated_at` | timestamptz | |
+
+**主键**：`PRIMARY KEY (course_file_id, locale)` —— 并发点开或流式渲染重入时靠它收敛，
+不会出现「同一份文件两条总结」。
+
+> 🔴 **失败也落一行**（`status = 'failed'`）：缓存表的第二职责是"别反复重试"。
+> 但只有**确定性失败**才落行（扫描件没有文字层、模型稳定给不出结果）；
+> **暂时性失败**（Canvas 5xx / 网络断 / 超时 / 凭据失效）**不落行** ——
+> 那是"我这次没做到"，不是"这份材料做不了"（与 `message_summaries` 同一区分）。
+> 要重新试一次就 `delete from file_summaries where status = 'failed'`。
+>
+> ⚠️ **P0-3-2 删账号的级联**：经 `course_files → courses` 两级 `ON DELETE CASCADE`，
+> 删账号（删 `profiles` → 删 `courses`）即清空本表。
 
 ---
 
