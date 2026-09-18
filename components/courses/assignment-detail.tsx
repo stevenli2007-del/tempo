@@ -17,8 +17,14 @@ import type { Task } from '@/types/task'
  * （`lib/numbers.ts` 与迁移 `20260917140000` 都写了这条），
  * 所以这里宁可只显示「尚未评分」，也不给一根长度为 0 的条。
  *
+ * ### 🔴 只列「有分数」的（2026-09-17 Steven 验收定）
+ * 本区**不渲染**没有分子的行（`AssignmentDetail` 先按 `hasScore` 过滤）。
+ * 它只回答一个问题：「我考了多少」—— 未评分 / `on_paper` / 考试派生 / 外部平台交的
+ * 在这里都是噪音。**它们没有被藏起来**：待办清单、周历、课程页其它区照旧可见。
+ * 计数行仍写明「另有 N 项暂无分数」，避免用户以为作业少了。
+ *
  * ### 未评分 vs 0 分在界面上必须能分清
- * - 没分（`submissionScore === null`）→ 只写状态徽标，**没有条**；
+ * - 没分（`submissionScore === null`）→ **不在这一区出现**（见上）；
  * - 0 分（`submissionScore === 0`）→ 有条，长度 0，右侧明确写 `0 / 20`。
  *
  * ### 颜色不带判断
@@ -61,6 +67,10 @@ function ScoreBar({ score, possible }: { score: number; possible: number }) {
   )
 }
 
+/**
+ * 一行=一条**有分数**的作业。传进来的行都过了 `hasScore`（见 `AssignmentDetail`），
+ * 但这里仍然各自判一次 —— 组件不该假设调用方永远记得过滤。
+ */
 function TaskRow({ task, now }: { task: Task; now: Date }) {
   const { label, isOverdue } = formatDue(task.dueDate, now)
   const done = isEffectivelyDone(task)
@@ -116,14 +126,13 @@ function TaskRow({ task, now }: { task: Task; now: Date }) {
         </p>
       </div>
 
-      {/* 分数区：有分子+分母才出现。宽度在窄屏占满、宽屏固定一段，避免挤扁标题。 */}
+      {/* 分数区：有分子+分母才出现。宽度在窄屏占满、宽屏固定一段，避免挤扁标题。
+          原先"已评分但拿不到分数"（Canvas 只给 grade 不给 score）在这里写一行提示，
+          现随本区改成「只列有分数的」一并移除 —— 那种行不再进入这一区（2026-09-17 Steven 定）。 */}
       {hasScore ? (
         <div className="w-full shrink-0 sm:w-40">
           <ScoreBar score={task.submissionScore as number} possible={task.pointsPossible as number} />
         </div>
-      ) : task.submissionState === 'graded' && task.submissionScore === null ? (
-        // 已评分但拿不到分数（Canvas 只给 grade 不给 score 的情况）：说明白，不画空条。
-        <p className="shrink-0 text-xs text-ink-faint sm:w-40 sm:text-right">已评分 · 分数未提供</p>
       ) : null}
     </li>
   )
@@ -150,15 +159,32 @@ export function AssignmentDetail({ tasks, now }: { tasks: Task[]; now: Date }) {
 
   const scored = sorted.filter((task) => task.submissionScore !== null && task.pointsPossible !== null)
 
+  // 🔴 **只列有分数的**（分子与分母都在）—— 2026-09-17 Steven 验收定。
+  // 这一区只回答一个问题：「我考了多少」。没有分子的行（尚未评分 / Canvas 不追踪的
+  // on_paper 与考试派生 / 外部平台交的）在这里只是噪音，**它们并没有被藏起来** ——
+  // 仍完整地留在待办清单、周历、课程页其它区，所以这是"这一区不回答那个问题"。
+  // ⚠️ 判据必须是 `hasScore` 的两项同时成立：只有满分没有得分时画不出条（见文件头铁律）。
+  if (scored.length === 0) {
+    return (
+      <p className="text-sm text-muted-foreground">
+        这门课还没有出分的作业。Canvas 评分后会出现在这里。
+      </p>
+    )
+  }
+
+  // 只报"另有 N 项暂无分数"，不把它们列出来 —— 说清被过滤掉的数量，
+  // 免得用户以为作业少了（静默丢信息是这类过滤最坏的观感）。
+  const unscored = sorted.length - scored.length
+
   return (
     <div className="space-y-1">
       <p className="text-xs text-ink-faint">
-        共 {sorted.length} 项
-        {scored.length > 0 ? ` · 其中 ${scored.length} 项有分数` : ''}
-        {sorted.some((task) => task.canvasUrl !== null) ? ' · 点标题去 Canvas' : ''}
+        {scored.length} 项已出分
+        {unscored > 0 ? ` · 另有 ${unscored} 项暂无分数` : ''}
+        {scored.some((task) => task.canvasUrl !== null) ? ' · 点标题去 Canvas' : ''}
       </p>
       <ul>
-        {sorted.map((task) => (
+        {scored.map((task) => (
           <TaskRow key={task.id} task={task} now={now} />
         ))}
       </ul>

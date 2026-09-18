@@ -167,9 +167,14 @@ export default async function CourseDetailPage({ params }: PageProps) {
           <summary className="cursor-pointer list-none p-5 text-sm font-medium text-foreground">
             作业详情
             <span className="ml-2 font-normal text-ink-muted">
+              {/* 🔴 说的必须和展开后看到的是同一件事（P0-3-17 验收修正，2026-09-17）：
+                  区里只列「已出分」的行，所以这里也报已出分的条数；总数另说一句，
+                  好让用户知道被过滤掉多少，不至于以为作业少了。 */}
               {courseTasks.error
                 ? '加载失败'
-                : `${courseTasks.tasks.length} 项${scoredCount > 0 ? ` · ${scoredCount} 项有分数` : ''}`}
+                : scoredCount > 0
+                  ? `${scoredCount} 项已出分 · 共 ${courseTasks.tasks.length} 项`
+                  : `共 ${courseTasks.tasks.length} 项 · 暂无分数`}
             </span>
           </summary>
           <div className="px-5 pb-5">
