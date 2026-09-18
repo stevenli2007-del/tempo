@@ -1,4 +1,4 @@
-import { sameNumber } from '@/lib/numbers'
+import { roundToScale, sameNumber } from '@/lib/numbers'
 import { sameInstant } from '@/lib/time'
 import type { CanvasAssignment } from '@/types/canvas'
 
@@ -157,7 +157,7 @@ export type ApplyCanvasTasksResult =
   | { ok: true; counts: CanvasTaskCounts }
   | { ok: false; error: string }
 
-type ExistingRow = {
+export type ExistingRow = {
   id: string
   source_id: string | null
   title: string
@@ -176,26 +176,108 @@ type ExistingRow = {
 const EXISTING_COLUMNS =
   'id, source_id, title, due_date, external_updated_at, is_deleted, submission_state, submitted_at, canvas_url, points_possible, submission_score'
 
+/** 本次同步对一条作业算出的「Canvas 侧字段」集合。 */
+export type CanvasTaskFields = {
+  submissionState: string | null
+  submittedAt: string | null
+  /** 已按列标度定标（`roundToScale`），既能直接落库、也能直接与库里读回的值比。 */
+  submissionScore: number | null
+  pointsPossible: number | null
+}
+
 /**
- * 判断一条已存在的任务是否需要写入。
+ * 一条 Canvas 作业 → 本次要落库的字段。
+ *
+ * 🔴 **两个分数在这里先定标，再同时用于比较与写入**（B1：同步不幂等的修法）。
+ * 症状是每轮同步都报 `updated N` 而数据其实没变：列是 `numeric(10,2)`，
+ * Canvas 却给未定标浮点（实测 `9.923076923076923`）→ 库里读回 `9.92`，
+ * 差量判定永远为真 → `updated_at` 被无意义地刷新，失去"这条数据什么时候真变过"的意义。
+ * **只在比较端四舍五入不够** —— 那样落库的仍是未定标值，要靠数据库的舍入规则与 JS
+ * 一致才能保证下一轮读出同一个数；在边界值上两者并不一致（详见 `lib/numbers.ts`）。
+ * 所以走「写入与比较共用同一个已定标值」：收敛由构造保证，不依赖任何舍入约定。
+ */
+export function toCanvasTaskFields(assignment: CanvasAssignment, now: Date): CanvasTaskFields {
+  const { submissionState, submittedAt, submissionScore } = deriveSubmission(assignment, now)
+  return {
+    submissionState,
+    submittedAt,
+    submissionScore: roundToScale(submissionScore),
+    pointsPossible: roundToScale(assignment.pointsPossible),
+  }
+}
+
+/** 一处的差异：`field` 是列名，`stored` 是库里的值，`incoming` 是本次算出的值。 */
+export type CanvasTaskDiff = { field: string; stored: unknown; incoming: unknown }
+
+/**
+ * 逐字段列出「哪些列真的变了」。
+ *
+ * `hasChanged()` 与在线探针（`scripts/probe-sync-idempotent.ts`）共用这一份判定 ——
+ * 探针里再抄一遍判定逻辑，就等于"用另一份代码验证这份代码"，验不出真东西。
  *
  * `is_deleted` 也算变化条件：之前被软删除的行这次又出现了（老师恢复了作业），
  * 必须写一次把它恢复 —— 否则用户会看到"作业回来了但列表里没有"。
  */
-function hasChanged(existing: ExistingRow, incoming: CanvasAssignment, now: Date): boolean {
-  const { submissionState, submittedAt, submissionScore } = deriveSubmission(incoming, now)
-  return (
-    existing.is_deleted ||
-    existing.title !== incoming.title ||
-    !sameInstant(existing.due_date, incoming.dueAt) ||
-    !sameInstant(existing.external_updated_at, incoming.externalUpdatedAt) ||
-    existing.submission_state !== submissionState ||
-    !sameInstant(existing.submitted_at, submittedAt) ||
-    // P0-3-17 的三个新字段：老师改了满分、或成绩出来了 → 必须写一次。
-    existing.canvas_url !== incoming.htmlUrl ||
-    !sameNumber(existing.points_possible, incoming.pointsPossible) ||
-    !sameNumber(existing.submission_score, submissionScore)
-  )
+export function canvasTaskDiffs(
+  existing: ExistingRow,
+  incoming: CanvasAssignment,
+  next: CanvasTaskFields,
+): CanvasTaskDiff[] {
+  const diffs: CanvasTaskDiff[] = []
+  if (existing.is_deleted) {
+    diffs.push({ field: 'is_deleted', stored: true, incoming: false })
+  }
+  if (existing.title !== incoming.title) {
+    diffs.push({ field: 'title', stored: existing.title, incoming: incoming.title })
+  }
+  if (!sameInstant(existing.due_date, incoming.dueAt)) {
+    diffs.push({ field: 'due_date', stored: existing.due_date, incoming: incoming.dueAt })
+  }
+  if (!sameInstant(existing.external_updated_at, incoming.externalUpdatedAt)) {
+    diffs.push({
+      field: 'external_updated_at',
+      stored: existing.external_updated_at,
+      incoming: incoming.externalUpdatedAt,
+    })
+  }
+  if (existing.submission_state !== next.submissionState) {
+    diffs.push({
+      field: 'submission_state',
+      stored: existing.submission_state,
+      incoming: next.submissionState,
+    })
+  }
+  if (!sameInstant(existing.submitted_at, next.submittedAt)) {
+    diffs.push({ field: 'submitted_at', stored: existing.submitted_at, incoming: next.submittedAt })
+  }
+  // P0-3-17 的三个新字段：老师改了满分、或成绩出来了 → 必须写一次。
+  if (existing.canvas_url !== incoming.htmlUrl) {
+    diffs.push({ field: 'canvas_url', stored: existing.canvas_url, incoming: incoming.htmlUrl })
+  }
+  if (!sameNumber(existing.points_possible, next.pointsPossible)) {
+    diffs.push({
+      field: 'points_possible',
+      stored: existing.points_possible,
+      incoming: next.pointsPossible,
+    })
+  }
+  if (!sameNumber(existing.submission_score, next.submissionScore)) {
+    diffs.push({
+      field: 'submission_score',
+      stored: existing.submission_score,
+      incoming: next.submissionScore,
+    })
+  }
+  return diffs
+}
+
+/** 判断一条已存在的任务是否需要写入。 */
+export function hasChanged(
+  existing: ExistingRow,
+  incoming: CanvasAssignment,
+  next: CanvasTaskFields,
+): boolean {
+  return canvasTaskDiffs(existing, incoming, next).length > 0
 }
 
 /**
@@ -251,7 +333,8 @@ export async function applyCanvasTasks({
     seenSourceIds.add(assignment.externalId)
 
     const existing = bySourceId.get(assignment.externalId)
-    const { submissionState, submittedAt, submissionScore } = deriveSubmission(assignment, nowDate)
+    // 一次算完，比较与写入共用（`submissionScore` / `pointsPossible` 已定标）。
+    const fields = toCanvasTaskFields(assignment, nowDate)
     if (!existing) {
       inserts.push({
         course_id: courseId,
@@ -264,16 +347,16 @@ export async function applyCanvasTasks({
         is_derived: false,
         external_updated_at: assignment.externalUpdatedAt,
         last_seen_at: now,
-        submission_state: submissionState,
-        submitted_at: submittedAt,
+        submission_state: fields.submissionState,
+        submitted_at: fields.submittedAt,
         canvas_url: assignment.htmlUrl,
-        points_possible: assignment.pointsPossible,
-        submission_score: submissionScore,
+        points_possible: fields.pointsPossible,
+        submission_score: fields.submissionScore,
       })
       continue
     }
 
-    if (hasChanged(existing, assignment, nowDate)) {
+    if (hasChanged(existing, assignment, fields)) {
       // ⚠️ 这里刻意没有 status：用户的"已完成"不被同步覆盖（文件头铁律 1）。
       // submission_state / submitted_at / submission_score 是 Canvas 真相，同步可写（ADR-015）。
       updates.push({
@@ -284,11 +367,11 @@ export async function applyCanvasTasks({
           external_updated_at: assignment.externalUpdatedAt,
           last_seen_at: now,
           is_deleted: false,
-          submission_state: submissionState,
-          submitted_at: submittedAt,
+          submission_state: fields.submissionState,
+          submitted_at: fields.submittedAt,
           canvas_url: assignment.htmlUrl,
-          points_possible: assignment.pointsPossible,
-          submission_score: submissionScore,
+          points_possible: fields.pointsPossible,
+          submission_score: fields.submissionScore,
         },
       })
     }

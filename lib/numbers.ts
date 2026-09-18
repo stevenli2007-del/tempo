@@ -43,6 +43,35 @@ export function toNumberOrNull(value: unknown): number | null {
  * 走到这里还能出现异常形状说明上游坏了，此时"少写一次"比"每轮都写"更安全
  * （真正的问题会在同步的报错通道里暴露，而不是靠这里反复重写来掩盖）。
  */
+/**
+ * `tasks` 两个分数列的标度（`numeric(10, 2)`，见迁移 `20260917140000`）。
+ * 改列定义时必须同步改这里，否则定标会静默地定错。
+ */
+export const SCORE_SCALE = 2
+
+/**
+ * 按列标度定标（**落库前**用，不只是拿来判断相等）。
+ *
+ * ### 为什么必须"写进去的值"就是"比过的值"
+ * Canvas 给的分数是未定标浮点（实测 `submission.score = 9.923076923076923`），
+ * 而列是 `numeric(10,2)` → 数据库存 `9.92`。若只在**比较端**四舍五入，
+ * 落库的仍是 `9.923076923076923`，下一轮读到的是数据库按自己规则舍入后的 `9.92` ——
+ * 两条舍入规则在边界值上并不一致（JS 的 `Math.round` 对负数是向 +∞ 取半，
+ * Postgres 的 `numeric` 是远离零取半），于是"要不要写"可能永远为真。
+ * **写入与比较共用这一个已定标的值，收敛由构造保证**，不依赖任何舍入约定。
+ *
+ * @param scale 小数点后位数。默认 `SCORE_SCALE`。
+ * @returns 定标后的数；`null` 原样返回（"没设满分" / "未评分" ≠ 0 分）。
+ */
+export function roundToScale(value: unknown, scale: number = SCORE_SCALE): number | null {
+  const n = toNumberOrNull(value)
+  if (n === null) return null
+  const factor = 10 ** scale
+  const scaled = n * factor
+  // 与 Postgres numeric 一致：半值**远离零**（JS 的 Math.round 对 -2.5 给 -2）。
+  return (scaled < 0 ? -Math.round(-scaled) : Math.round(scaled)) / factor
+}
+
 export function sameNumber(a: unknown, b: unknown): boolean {
   const left = toNumberOrNull(a)
   const right = toNumberOrNull(b)
