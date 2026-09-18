@@ -1,3 +1,4 @@
+import { MESSAGE_STATUSES, MESSAGE_TYPES } from '@/lib/messages/registry'
 import { createClient } from '@/lib/supabase/server'
 import type { Message, MessagePayload, MessageRow, MessageStatus, MessageType } from '@/types/message'
 
@@ -19,13 +20,8 @@ type ServerSupabase = Awaited<ReturnType<typeof createClient>>
 /** 查询列（列表与单条共用，避免两处 list 漂移 —— 与 `TASK_COLUMNS` 同一理由）。 */
 export const MESSAGE_COLUMNS = 'id, user_id, type, payload, status, created_at'
 
-const MESSAGE_TYPES: readonly MessageType[] = [
-  'syllabus_drift',
-  'practice_test',
-  'routine',
-  'material',
-]
-const MESSAGE_STATUSES: readonly MessageStatus[] = ['pending', 'accepted', 'dismissed']
+// 枚举白名单在 `lib/messages/registry.ts`（纯模块，回归脚本可断言）——
+// 放在这里的话，测试 import 本文件就会拖进 `next/headers`，第 ② 处漏改永远测不出来。
 
 /**
  * 把 DB 行映射成 `Message`。

@@ -71,6 +71,22 @@ export async function callSyncNow(trigger: 'manual' | 'app_open'): Promise<SyncC
   }
 }
 
+/**
+ * 公告那一步的结果压成一句话（P0-3-25）。
+ *
+ * 🔴 公告失败**必须出现在这里**：它的逻辑是"下次同步会重试"，用户看不到任何异常 ——
+ * 而"老师发了公告、Tempo 没抓到、界面上一片正常"正是 ADR-016 R3 点名的那种静默失败。
+ *
+ * `announcements` 缺失按"没跑"处理（弱校验过的响应可能来自老版本服务端 / 被代理改写）。
+ */
+function announcementLine(summary: SyncSummary): string {
+  const a = summary.announcements
+  if (!a) return ''
+  if (a.error) return `；公告同步失败（${a.error}）`
+  if (a.created > 0) return `；${a.created} 条新公告进了消息栏`
+  return ''
+}
+
 /** 把一次成功的同步结果压成一行人话。 */
 export function summarize(summary: SyncSummary): string {
   if (summary.coursesSynced === 0 && summary.coursesFailed === 0) {
@@ -85,5 +101,5 @@ export function summarize(summary: SyncSummary): string {
     summary.failures.length > 0
       ? `；${summary.failures.length} 门失败（${summary.failures[0].courseName}：${summary.failures[0].message}）`
       : ''
-  return `已同步 ${summary.coursesSynced} 门课，${changeLine}${failureLine}`
+  return `已同步 ${summary.coursesSynced} 门课，${changeLine}${failureLine}${announcementLine(summary)}`
 }

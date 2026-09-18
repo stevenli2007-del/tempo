@@ -13,8 +13,16 @@
  * 真正的写入由 applier 执行（`lib/messages/apply.ts`，ADR-015「确认才写」）。
  */
 
-/** 提案类型。与迁移 `20260917200000_messages.sql` 的 CHECK 约束**必须一致**。 */
-export type MessageType = 'syllabus_drift' | 'practice_test' | 'routine' | 'material'
+/**
+ * 提案类型。与迁移的 CHECK 约束**必须一致**
+ * （`20260917200000_messages.sql` 定前四个，`20260919000000_announcements.sql` 加第五个）。
+ *
+ * 🔴 加取值要**四处同改**（CodingRules §10.1 第 16 条），漏一处 `toMessage()` 返回 null、
+ * 消息在列表里**静默消失**：
+ * ① 本文件；② `lib/messages.ts` 的 `MESSAGE_TYPES`；③ 迁移的 CHECK 约束；
+ * ④ `scripts/regress-messages.ts` 的断言。
+ */
+export type MessageType = 'syllabus_drift' | 'practice_test' | 'routine' | 'material' | 'announcement'
 
 /** 提案状态。同上，与迁移的 CHECK 约束一致。 */
 export type MessageStatus = 'pending' | 'accepted' | 'dismissed'
@@ -29,6 +37,14 @@ export type MessageStatus = 'pending' | 'accepted' | 'dismissed'
  * - `details`：细节行，一行一句（如「Unit 3 Exam 从 10/20 → 10/27」）。
  * - `confidence`：抽取出处不可靠时（扫描件 PDF 等）标 `low`。
  *   🔴 `low` **不许一键接受** —— 见 `lib/messages/view.ts` 的 `canAccept`。
+ *
+ * ### P0-3-25 加的四个字段（公告用）
+ * - `sourceUrl`：原文链接。公告正文被剥成纯文本之后，**这是唯一能看原貌的路**，
+ *   必须存下来（`course_announcements.html_url` 同步写入）。
+ * - `announcementId`：指向 `course_announcements.id`。applier 靠它回查正文去解析 ——
+ *   不把正文塞进 payload，是因为正文可能很长，而消息栏只读摘要。
+ * - `landing`：`true` = 有结构化落点（按钮叫「确认」）；`false` = 纯通知（按钮叫「知道了」）。
+ *   判定见 `lib/course-update/landing.ts`。
  */
 export type MessagePayload = {
   title: string
@@ -36,6 +52,12 @@ export type MessagePayload = {
   courseId?: string
   courseName?: string
   confidence?: 'high' | 'low'
+  /** 原文链接（点「原文」跳过去）。没有就是 null —— 绝不编一个链接。 */
+  sourceUrl?: string | null
+  /** 公告账的 id（`course_announcements.id`）。 */
+  announcementId?: string
+  /** 有没有结构化落点。 */
+  landing?: boolean
   [key: string]: unknown
 }
 

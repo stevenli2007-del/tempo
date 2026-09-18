@@ -4,17 +4,19 @@ import {
   toCanvasAssignments,
 } from '@/lib/canvas/assignments'
 import {
-  canvasGet,
-  isRetryable,
-  type CanvasFailureKind,
-  type CanvasResult,
-} from '@/lib/canvas/client'
-import {
   loadDecryptedCredential,
   markCredentialFailed,
   touchCredentialSuccess,
 } from '@/lib/canvas/credentials'
 import { toSyncStateUpdate } from '@/lib/courses'
+import { syncCourseAnnouncements } from '@/lib/sync/announcements'
+import {
+  MAX_REQUESTS_PER_SYNC,
+  SYNC_TIME_BUDGET_MS,
+  fetchCanvasPages,
+  type CanvasBudget,
+  type CanvasFetchResult,
+} from '@/lib/sync/canvas-request'
 import { applyCanvasTasks } from '@/lib/sync/canvas-tasks'
 import { findLastRunStartedAt, findRunningRun, finishRun, startRun } from '@/lib/sync/runs'
 import type { CanvasAssignment } from '@/types/canvas'
@@ -55,14 +57,6 @@ import type { getCurrentUser } from '@/lib/api/response'
 
 type SupabaseClient = Awaited<ReturnType<typeof getCurrentUser>>['supabase']
 
-/** Sync-Strategy §5：单次同步 Canvas 请求上限 20 个。 */
-const MAX_REQUESTS_PER_SYNC = 20
-/** Sync-Strategy §5：单次同步总预算 60 秒（Vercel 上限 300s，留 5 倍余量）。 */
-const SYNC_TIME_BUDGET_MS = 60_000
-/** Sync-Strategy §8：可重试失败的退避 1s → 4s（指数 + 抖动）。 */
-const RETRY_DELAYS_MS = [1_000, 4_000]
-/** 429 的等待上限：Canvas 让等 60 秒时不等（会吃掉整个时间预算），留给下一轮。 */
-const MAX_RATE_LIMIT_WAIT_MS = 10_000
 /** Sync-Strategy §5：手动刷新最小间隔 30 秒。 */
 export const MANUAL_THROTTLE_MS = 30_000
 /** Sync-Strategy §5：打开应用自动同步最小间隔 60 秒（P0-2-6 会用）。 */
@@ -74,9 +68,7 @@ type CourseTarget = {
   canvasCourseId: string
 }
 
-type FetchResult =
-  | { ok: true; items: CanvasAssignment[]; complete: boolean }
-  | { ok: false; kind: CanvasFailureKind; message: string }
+type FetchResult = CanvasFetchResult<CanvasAssignment>
 
 export async function runCanvasSync(
   supabase: SupabaseClient,
@@ -244,14 +236,42 @@ export async function runCanvasSync(
     await writeCourseState(supabase, target.id, { syncStatus: 'success', syncError: null, now })
   }
 
-  // ---------- 6) 收尾 ----------
+  // ---------- 6) 公告（P0-3-25，Sync-Strategy §14） ----------
+  //
+  // 刻意放在作业循环**之后**：公告走批量端点（1 个请求拿所有课），
+  // 塞进 per-course 循环会把 1 个请求变成 N 个，还会先吃掉作业的预算。
+  //
+  // 🔴 凭证已失效时一个请求都不发 —— 拿一个已知被拒的 token 再打一次纯属浪费（§8）。
+  const announcements =
+    credentialBroken || targets.length === 0
+      ? null
+      : await syncCourseAnnouncements({
+          supabase,
+          userId,
+          domain: credential.canvasDomain,
+          token: credential.token,
+          targets,
+          budget,
+          startedAtMs: startedAt.getTime(),
+          now,
+        })
+
+  if (announcements?.error) {
+    // 公告是附加能力：它失败不把整次同步判成失败（那会让用户以为作业也没同步上），
+    // 但也**不吞** —— 进 summary、进 sync_runs 的 error_message、进日志。
+    console.error('[sync] 公告同步失败（作业同步不受影响）:', announcements.error)
+  }
+
+  // ---------- 7) 收尾 ----------
   if (!credentialBroken) {
     await touchCredentialSuccess(supabase, credential.id)
   }
 
   const status: SyncStatus =
     failures.length === 0 ? 'success' : coursesSynced === 0 ? 'failed' : 'partial'
-  const errorMessage = failures.length === 0 ? null : failures[0].message
+  // 作业的失败优先（它更严重）；只有作业全好、公告出错时才把公告的错误写进账。
+  const errorMessage =
+    failures.length > 0 ? failures[0].message : (announcements?.error ?? null)
 
   await finishRun(supabase, runId, {
     status,
@@ -270,6 +290,7 @@ export async function runCanvasSync(
     tasksUpdated: updated,
     tasksDeleted: deleted,
     failures,
+    announcements,
     startedAt: startedAt.toISOString(),
     finishedAt: new Date().toISOString(),
   }
@@ -281,97 +302,28 @@ export async function runCanvasSync(
 /**
  * 拉一门课的全部作业，按预算翻页。
  *
+ * 重试、退避、三级熔断全在 `fetchCanvasPages`（与公告共用同一份纪律），
+ * 这里只剩"公告端点换成作业端点"这一件事。
+ *
  * @param complete false 表示"没拿全"（翻到页数上限 / 请求预算耗尽 / 时间到）。
  *   调用方据此**跳过软删除** —— 一次不完整的拉取会把没拿到的行误判成"外部已删除"。
  */
-async function fetchCourseAssignments(
+function fetchCourseAssignments(
   domain: string,
   token: string,
   externalCourseId: string,
-  budget: { requestsUsed: number },
+  budget: CanvasBudget,
   startedAtMs: number,
 ): Promise<FetchResult> {
-  let path: string | null = assignmentsPath(externalCourseId)
-  let pages = 0
-  const items: CanvasAssignment[] = []
-
-  while (path !== null) {
-    if (pages >= MAX_PAGES_PER_COURSE) return { ok: true, items, complete: false }
-    if (budget.requestsUsed >= MAX_REQUESTS_PER_SYNC) {
-      return { ok: true, items, complete: false }
-    }
-    if (Date.now() - startedAtMs > SYNC_TIME_BUDGET_MS) {
-      return { ok: true, items, complete: false }
-    }
-
-    const result = await requestWithRetry(domain, token, path, budget, startedAtMs)
-    if (!result.ok) {
-      return { ok: false, kind: result.kind, message: result.message }
-    }
-
-    items.push(...result.items)
-    pages += 1
-    path = result.nextPath
-  }
-
-  return { ok: true, items, complete: true }
-}
-
-/**
- * 发一个请求，按 Sync-Strategy §8 的表重试。
- *
- * - 5xx / 超时 / 网络 → 最多 2 次，退避 1s → 4s（加抖动，避免多用户同时重试撞车）
- * - 429 → 最多 1 次，等 `Retry-After`（封顶 10s，超过就放弃留给下一轮）
- * - 401/403 / 404 / 解析异常 → **不重试**
- */
-async function requestWithRetry(
-  domain: string,
-  token: string,
-  path: string,
-  budget: { requestsUsed: number },
-  startedAtMs: number,
-): Promise<
-  | { ok: true; items: CanvasAssignment[]; nextPath: string | null }
-  | { ok: false; kind: CanvasFailureKind; message: string }
-> {
-  let attempt = 0
-  let waitMs = 0
-
-  for (;;) {
-    if (waitMs > 0) {
-      await sleep(waitMs)
-    }
-    if (Date.now() - startedAtMs > SYNC_TIME_BUDGET_MS) {
-      return { ok: false, kind: 'timeout', message: '同步超出时间预算，已停止' }
-    }
-
-    budget.requestsUsed += 1
-    const result: CanvasResult<unknown> = await canvasGet<unknown>(domain, token, path)
-
-    if (result.ok) {
-      return {
-        ok: true,
-        items: toCanvasAssignments(result.data),
-        nextPath: result.nextPath,
-      }
-    }
-
-    // 不重试的三类：凭证失效 / 资源不存在 / 响应结构异常。
-    if (!isRetryable(result.kind) && result.kind !== 'rate_limited') {
-      return { ok: false, kind: result.kind, message: result.message }
-    }
-
-    const maxRetries = result.kind === 'rate_limited' ? 1 : RETRY_DELAYS_MS.length
-    if (attempt >= maxRetries) {
-      return { ok: false, kind: result.kind, message: result.message }
-    }
-
-    waitMs =
-      result.kind === 'rate_limited'
-        ? Math.min((result.retryAfterSeconds ?? 5) * 1000, MAX_RATE_LIMIT_WAIT_MS)
-        : RETRY_DELAYS_MS[attempt] + Math.floor(Math.random() * 250)
-    attempt += 1
-  }
+  return fetchCanvasPages<CanvasAssignment>({
+    domain,
+    token,
+    path: assignmentsPath(externalCourseId),
+    budget,
+    startedAtMs,
+    maxPages: MAX_PAGES_PER_COURSE,
+    map: toCanvasAssignments,
+  })
 }
 
 /**
@@ -403,10 +355,4 @@ async function writeCourseState(
   if (error) {
     console.error('[sync] 写回课程同步状态失败:', courseId, error.message)
   }
-}
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => {
-    setTimeout(resolve, ms)
-  })
 }

@@ -27,6 +27,34 @@ export type SyncFailure = {
   message: string
 }
 
+/**
+ * 公告同步的记账（P0-3-25，Sync-Strategy §14）。
+ *
+ * ### 为什么单独一块，而不是塞进 `failures`
+ * `SyncFailure` 的每一项都是**某一门课**的失败，而公告走的是**批量**端点 ——
+ * 一次请求覆盖所有课，失败也不是某一门课的问题。硬塞进去会让
+ * `coursesFailed` 虚高（"6 门课里 1 门失败"其实是"公告那次请求挂了"），
+ * 用户看到的归因就是错的。
+ *
+ * ### 为什么公告失败不改 `status`
+ * 公告是**附加**能力。它挂掉时把整次同步判成 `partial`，用户会以为作业也没同步上，
+ * 而其实作业好好的 —— 这是误报。所以失败只记在这里 + `sync_runs.error_message`，
+ * **不伪装成成功、也不冤枉作业**。
+ */
+export type SyncAnnouncementSummary = {
+  status: 'success' | 'failed'
+  /** 本轮从 Canvas 拿到的公告条数（去重前）。 */
+  scanned: number
+  /** 新进消息栏的条数。 */
+  created: number
+  /** 已在账上、本轮重复覆盖的条数（滚动窗口的正常现象）。 */
+  seen: number
+  /** 拉取没拿全（翻页 / 预算 / 时间触顶）。 */
+  incomplete: boolean
+  /** 失败说明；null = 成功。 */
+  error: string | null
+}
+
 export type SyncSummary = {
   status: SyncStatus
   /** 成功同步的课程数。 */
@@ -39,6 +67,11 @@ export type SyncSummary = {
   tasksDeleted: number
   /** 失败的课程明细。全部成功时为空数组。 */
   failures: SyncFailure[]
+  /**
+   * 公告同步结果。`null` = 本轮没跑公告（凭证失效 / 没有已关联课程）。
+   * 与 `failures` 分开的理由见 `SyncAnnouncementSummary`。
+   */
+  announcements: SyncAnnouncementSummary | null
   startedAt: string
   finishedAt: string
 }

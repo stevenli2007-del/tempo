@@ -11,7 +11,8 @@
 
 import { isApplierReady } from "@/lib/messages/apply"
 import { planDecision } from "@/lib/messages/decide"
-import { toMessageView } from "@/lib/messages/view"
+import { MESSAGE_STATUSES, MESSAGE_TYPES } from "@/lib/messages/registry"
+import { MESSAGE_TYPE_LABELS, toMessageView } from "@/lib/messages/view"
 import type { Message, MessagePayload, MessageStatus, MessageType } from "@/types/message"
 
 let passed = 0
@@ -89,9 +90,92 @@ console.log("toMessageView（UI 可用性）")
 
   // 6. 各类型 applier 就绪状态（单一来源，UI 与 API 都读它）。
   check(
-    "applier 就绪仅 material",
-    isApplierReady("material") && !isApplierReady("syllabus_drift") &&
-      !isApplierReady("practice_test") && !isApplierReady("routine"),
+    "applier 就绪：material + announcement",
+    isApplierReady("material") && isApplierReady("announcement") &&
+      !isApplierReady("syllabus_drift") && !isApplierReady("practice_test") &&
+      !isApplierReady("routine"),
+  )
+}
+
+console.log("枚举白名单（CodingRules §10.1 第 16 条：四处同改）")
+{
+  // 🔴 这组断言抓的是"四处同改漏了某一处"。
+  // 四处是：① types/message.ts ② lib/messages.ts 的运行时白名单
+  //       ③ 迁移的 CHECK 约束（**测不到**，靠 `npm run probe:schema` 在真库上验）
+  //       ④ 本文件的断言
+  //
+  // 第 ② 处原先藏在 `lib/messages.ts` 里，那个文件 import 了 `next/headers`，
+  // 测试根本 import 不了 —— 于是漏改的表现是"新类型的消息一条都不显示、零报错"。
+  // 现在白名单抽到纯模块 `lib/messages/registry.ts`，这里就能钉死它。
+  const labelKeys = Object.keys(MESSAGE_TYPE_LABELS).sort()
+  const runtimeTypes = [...MESSAGE_TYPES].sort()
+  check(
+    "类型白名单 == 标签表的键",
+    JSON.stringify(labelKeys) === JSON.stringify(runtimeTypes),
+    `labels=[${labelKeys}] runtime=[${runtimeTypes}]`,
+  )
+  check(
+    "白名单含 announcement",
+    runtimeTypes.includes("announcement"),
+    `runtime=[${runtimeTypes}]`,
+  )
+  // 标签表是 `Record<MessageType, string>`，tsc 会强制穷尽 ——
+  // 但"多出一个 tsc 管不到的键"它不会报，所以这里也查反向。
+  check("标签表没有多余的键", labelKeys.length === runtimeTypes.length)
+  check(
+    "状态白名单是 pending/accepted/dismissed",
+    JSON.stringify([...MESSAGE_STATUSES].sort()) === JSON.stringify(["accepted", "dismissed", "pending"]),
+    `[${MESSAGE_STATUSES}]`,
+  )
+}
+
+console.log("公告视图（P0-3-25）")
+{
+  // 7. 有落点 → 按钮叫「确认」。
+  const withLanding = toMessageView(
+    makeMessage("announcement", "pending", {
+      landing: true,
+      sourceUrl: "https://bcourses.berkeley.edu/courses/1/announcements/9001",
+    }),
+  )
+  check("公告类型标签", withLanding.typeLabel === "课程公告", withLanding.typeLabel)
+  check("有落点 → 文案「确认」", withLanding.confirmLabel === "确认", withLanding.confirmLabel)
+  check("有落点 → 可确认", withLanding.canAccept === true)
+  check("原文链接透传", withLanding.sourceUrl?.endsWith("/announcements/9001") === true, String(withLanding.sourceUrl))
+
+  // 8. 无落点 → 按钮叫「知道了」（它确实什么都不会写，不能叫「确认」）。
+  const ack = toMessageView(makeMessage("announcement", "pending", { landing: false }))
+  check("无落点 → 文案「知道了」", ack.confirmLabel === "知道了", ack.confirmLabel)
+  check("无落点 → 仍可确认（走空写入回执）", ack.canAccept === true)
+
+  // 9. landing 字段缺失（老数据 / 别的产出方）→ 按「确认」处理，不含糊其辞。
+  const legacy = toMessageView(makeMessage("announcement", "pending"))
+  check("缺 landing → 仍是「确认」", legacy.confirmLabel === "确认", legacy.confirmLabel)
+
+  // 10. 非公告类型不受影响。
+  check("material 文案仍是「确认」", toMessageView(makeMessage("material", "pending")).confirmLabel === "确认")
+
+  // 11. 🔴 sourceUrl 白名单：payload 是 jsonb，只放行 http(s)。
+  //     `javascript:` 如果漏过去，渲染层的 <a href> 就成了"点一下执行"的口子，
+  //     而它长得和普通链接一模一样。
+  const dangerous = [
+    "javascript:alert(1)",
+    "data:text/html,<script>alert(1)</script>",
+    "  javascript:alert(1)",
+    "/relative/path",
+    "not a url",
+  ]
+  for (const url of dangerous) {
+    const v = toMessageView(makeMessage("announcement", "pending", { sourceUrl: url }))
+    check(`拒绝不安全链接：${url.trim().slice(0, 28)}`, v.sourceUrl === null, String(v.sourceUrl))
+  }
+  check(
+    "放行 http（本地开发也可能用）",
+    toMessageView(makeMessage("announcement", "pending", { sourceUrl: "http://x.test/a" })).sourceUrl !== null,
+  )
+  check(
+    "缺 sourceUrl → null",
+    toMessageView(makeMessage("announcement", "pending")).sourceUrl === null,
   )
 }
 

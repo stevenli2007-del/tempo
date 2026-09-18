@@ -80,7 +80,13 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
       return jsonOk(request, { data: updated, applied: false })
     }
 
-    const outcome = await applyMessage({ type: updated.type, payload: updated.payload })
+    const outcome = await applyMessage({
+      type: updated.type,
+      payload: updated.payload,
+      supabase,
+      // 会话里的用户 id，不是 payload 里的任何字段（见 `ApplyContext` 的注释）。
+      userId: user.id,
+    })
     if (!outcome.ok) {
       // 状态已改但没写成业务数据 —— 回滚成 pending，避免"显示已确认、其实没生效"。
       const { error: rollbackError } = await updateMessageStatus(supabase, id, 'pending')

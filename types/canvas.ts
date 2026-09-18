@@ -105,6 +105,32 @@ export type CanvasAssignment = {
   submission: CanvasSubmission | null
 }
 
+/**
+ * Canvas 公告（P0-3-25 同步的输入形状，`GET /api/v1/announcements` 的映射结果）。
+ *
+ * ### 与作业形状的两处关键差异
+ * 1. **归属靠 `courseExternalId`**：批量端点一次回多门课，每条公告自带 `context_code`
+ *    （形如 `course_1234`），映射时抽出来。没有它就无法判断"这条算谁的课"，会被丢弃。
+ * 2. 🔴 **`bodyText` 是剥完标签的纯文本，不是 HTML 原文**。
+ *    数据库里刻意不落 HTML（`course_announcements.body_text`），渲染层也禁
+ *    `dangerouslySetInnerHTML` —— 两道一起才挡得住 stored XSS。想看原貌请点 `htmlUrl`。
+ *
+ * 同样不含作者、附件、已读状态等字段（Security-Privacy 最小权限）。
+ */
+export type CanvasAnnouncement = {
+  /** 源侧公告 ID（字符串），落库为 `course_announcements.canvas_announcement_id`，去重的唯一依据。 */
+  externalId: string
+  /** 源侧**课程** ID（不是本地 uuid），用来映射到 `courses.canvas_course_id`。 */
+  courseExternalId: string
+  title: string
+  /** 已剥标签 / 已解实体的纯文本正文。空串表示这条公告没有正文。 */
+  bodyText: string
+  /** 公告原页地址，用户点「原文」回跳 Canvas。缺失时为 null（渲染层退回不显示链接）。 */
+  htmlUrl: string | null
+  /** 发布时间（ISO 8601）；null = Canvas 没给。 */
+  postedAt: string | null
+}
+
 /** 内联提交对象里 Tempo 用到的字段（P0-3-10，Canvas `submission` 的子集）。 */
 export type CanvasSubmission = {
   /** `unsubmitted` / `submitted` / `pending_review` / `graded` / … */

@@ -174,7 +174,29 @@ function ProposalBubble({
             {line}
           </p>
         ))}
-        <p className="mt-2 text-xs text-ink-faint">{view.timeLabel}</p>
+        <p className="mt-2 text-xs text-ink-faint">
+          {view.timeLabel}
+          {view.sourceUrl && (
+            <>
+              {" · "}
+              {/*
+                「原文」= 公告的证据链。正文在同步时被剥成了纯文本（防 stored XSS），
+                表格 / 图片 / 附件只有点进来才看得到 —— 没有这个链接，
+                用户就只能凭我们摘要过的几行做判断。
+                `noopener noreferrer` 不能省：新窗口打开外部页面时不带 referrer、
+                也不给对面 `window.opener` 的句柄。
+              */}
+              <a
+                href={view.sourceUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-ink-muted underline decoration-dotted underline-offset-2 hover:text-ink"
+              >
+                原文 ↗
+              </a>
+            </>
+          )}
+        </p>
 
         <div className="mt-3 flex items-center justify-end gap-2 border-t border-line pt-3">
           {!view.canAccept && view.blockReason && (
@@ -185,8 +207,9 @@ function ProposalBubble({
           <Button variant="outline" size="sm" disabled={busy} onClick={onDismiss}>
             忽略
           </Button>
+          {/* 文案来自 `toMessageView`：无落点的公告是「知道了」—— 它确实什么都不会写。 */}
           <Button size="sm" disabled={busy || !view.canAccept} onClick={onAccept}>
-            确认
+            {view.confirmLabel}
           </Button>
         </div>
       </div>

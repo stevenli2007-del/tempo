@@ -24,10 +24,8 @@
  *    （`lib/course-update/apply.ts`）。
  */
 
-import { runStructured } from '@/lib/llm/run'
 import { loadActiveCourseIds } from '@/lib/tasks'
-import { COURSE_UPDATE_PARSE_SCHEMA } from '@/lib/course-update/normalize'
-import { COURSE_UPDATE_PROMPT_VERSION, buildCourseUpdateMessages } from '@/lib/course-update/prompt'
+import { parseCourseUpdate } from '@/lib/course-update/parse'
 import { getCurrentUser, internalError, jsonError, jsonOk } from '@/lib/api/response'
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
@@ -68,39 +66,17 @@ export async function POST(request: Request) {
       return jsonError(request, 404, 'not_found', '课程不存在或无权访问')
     }
 
-    const messages = buildCourseUpdateMessages(text)
-
-    const result = await runStructured<{
-      tasks: Array<{ title: string; taskType: string; dueDate: string | null; notes: string | null }>
-      exams: Array<{
-        examName: string
-        examDate: string | null
-        examTime: string | null
-        location: string | null
-        sourceExcerpt: string
-      }>
-      gradeComponents: Array<{
-        name: string
-        weightPercent: number | null
-        notes: string | null
-        sourceExcerpt: string
-      }>
-      warnings: string[]
-    }>({
+    // prompt / schema / 版本号都在 `lib/course-update/parse.ts`（公告 applier 共用同一份）。
+    const result = await parseCourseUpdate({
       userId: user.id,
+      text,
       purpose: 'course_update_parse',
-      // 版本与 prompt 一起放在 `lib/course-update/prompt.ts`（离线探针脚本共用同一份）。
-      promptVersion: COURSE_UPDATE_PROMPT_VERSION,
-      schema: COURSE_UPDATE_PARSE_SCHEMA,
-      schemaName: 'CourseUpdateParse',
-      messages,
-      temperature: 0,
     })
 
     if (!result.ok) {
       // LLM 失败：给前端一个可理解的报错，不把内部错误码裸奔出去。
-      return jsonError(request, 502, 'llm_failed', '解析服务暂时不可用，请稍后重试或手动添加', {
-        reason: result.error.code,
+      return jsonError(request, 502, result.code, `${result.message}，或手动添加`, {
+        reason: result.reason,
       })
     }
 
