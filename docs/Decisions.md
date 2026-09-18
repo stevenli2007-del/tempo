@@ -831,6 +831,53 @@ P0-3-9（对话框·截图档）需要**视觉**，而 DeepSeek 无视觉（ADR-
 
 ---
 
+### ADR-021：公告纳入 Phase 0 主动进站 + 回执/撤销 + URL 抓取（O-13 落地）
+
+- **状态**：已接受
+- **日期**：2026-09-17（晚，Steven 拍板四项）
+- **影响**：`Sync-Strategy.md` §14（撤销「公告=Non-Goal」）、`Phase-0-MVP.md` P0-3-24/3-25/3-26/3-27、`Decisions.md` **O-13（关闭）**、`messages` 表（3-26 加 `undone`）、`grade_components.source`（3-24 加 `'canvas'`）
+
+**背景**
+
+P0-3-18 消息栏验收后，Steven 提出三项"信息入站"需求：① 老师用 Canvas 公告通知 office hours/测验变更，Tempo 应抓到并反映；② 系统做了变更要给用户回执 + 允许撤销 + 原文带链接回 announcement；③ 对话框应能编排 exams/grade_components，且贴课程网页链接能自动抓取并设置 course section card。
+
+侦察（只读实测，2026-09-17）三条铁证：
+1. **编排不出考试不是模型能力问题，是一条 prompt 在拦** —— `tasks/parse` 规则 1「绝不产出 exam」（ADR-004 防幻觉）导致 Galen Quiz Dates 粘入只出 warning。解禁后 6 日期全对带 excerpt。
+2. **数据模型早支持**：`exam_dates`/`grade_components`/`submission_policies` 已有 `source`+`source_excerpt`+`is_confirmed`，所谓"对话输入无锚点"的禁令已不成立，缺的只是产出通道。
+3. **贴 URL 必须跟一层子页**：Berkeley 课程主页仅 1414B 纯导航，真数据在子页（如 `course_mechanics.html` / `exams_and_grading.html`）。
+
+且 Canvas PAT 现成可读公告（14/14 门课 71 条，零配置）；Math 53 三来源互相矛盾（公告双周 6 次 / 网页每周 / 同站"occasional"）→ 必须有来源优先级仲裁。
+
+**决策（Steven 拍板四项）**：
+
+1. **§14 改**：公告纳入 Phase 0 同步范围（批量端点 + 显式两端日期绕过 `end_date` 陷阱 + 14 天滚动窗口幂等）。
+2. **OH 去掉**：公告里的 office hours 变更**无结构化落点** → 只进消息栏给「知道了」回执，**不写任何字段**（避免造一个没人维护的 OH 模型）。
+3. **撤销窗口 = 24 小时**：变更确认后 24h 内可一键撤销还原（`payload.before` 快照 + 反向 applier）；超窗只显历史不可撤销。
+4. **轮询 = 每日 2 次**：公告进站复用现有 T3 定时（10:00/22:00 UTC），不新增 cron。
+
+**四条执行卡（M3.5，编号 3-24~3-27，执行在 3-19 之前）**：
+
+- **P0-3-24** 对话框可编排 exams/grade_components + 写入器：解禁 parse prompt 规则 1 + 注册 `exam_dates`/`grade_components` applier（复用 3-17 派生链）+ 合计≠100% 报警；迁移 `grade_components.source` 加 `'canvas'`。
+- **P0-3-25** 公告自动进站：批量端点 + 14 天窗口 + `course_announcements` 去重表 + HTML 清洗 + `html_url` 回跳；迁移 `messages.type` 加 `'announcement'` + 新建表；前置修订 §14。
+- **P0-3-26** 回执+撤销：`payload.before` 快照 + 反向 applier + `messages.status` 加 `'undone'`（24h）；迁移 `messages.status` 加 `'undone'`。
+- **P0-3-27** URL 抓取：首页→同源子页跟一层→合并→复用 3-25 清洗；护栏 http(s)/超时5s/≤1MB/≤5 子页/禁内网 SSRF。
+
+**理由**
+
+公告是"老师改主意的第一现场"，属 ADR-017「理解层」；它与 3-20 大纲漂移同源（公告是漂移证据）。hands-off 哲学（ADR-016）要求"Tempo 找人"——公告进站 + 回执 + 撤销正是把"课程动态"主动推给用户、且给用户反悔权。URL 抓取把"手动建卡"降为"贴链接"，直接降人工干预率（G0-8）。
+
+**后果**
+
+- 三个迁移均【Steven 手动】走 Supabase SQL Editor（**先 SQL 后部署**，否则 42703 全挂）。
+- 枚举扩展（3-26 `messages.status` / 3-25 `messages.type`）须过 CodingRules §10.1 第 16 条：四处同改 `types/message.ts` / `lib/messages/view.ts` / SQL CHECK / 回归脚本，否则 `toMessage()` 遇未知值返回 null = 消息静默消失。
+- 3-25 公告进站叠加在现有 T3（每日 2 次）上，不新增 cron（Steven 拍板④）；用量仍在熔断预算内（批量端点 1 请求覆盖全课）。
+
+**复审条件**
+
+Phase 1 走 OAuth 时重新评估公告 scope 申报；或出现"无落点公告"堆积过多需要结构化归类时，再评估 OH 落点。
+
+---
+
 ## 待决事项（尚未拍板，需后续决策）
 
 **约定**：每条待决事项在**最相关的那份文档**里有详细说明，`Decisions.md` 只维护索引。避免在两处各写一半导致漂移。
@@ -849,10 +896,11 @@ P0-3-9（对话框·截图档）需要**视觉**，而 DeepSeek 无视觉（ADR-
 | **O-10** | 隐私政策页面正式文案 | ⏳ Phase 0 开发中 | `Security-Privacy.md` 第 12 节 |
 | ~~O-11~~ | ~~截图档的多模态 provider 选型~~ | ✅ **已解决**（2026-09-13，Steven 拍板） | 视觉默认 **Qwen 通义千问**（中国区 DashScope，默认 `qwen-vl-plus-latest`，可用 `LLM_MODEL_VISION` 覆写；需切回 Claude 时设 `LLM_PROVIDER_VISION=claude`）。配套架构决策见 **ADR-018**（provider 按能力路由）。`Phase-0-MVP.md` P0-3-9 |
 | **O-12** | 入站邮件走"转发到专属地址"还是 Gmail API | ⏳ 已定路径：先转发（M3 P0-3-11），Gmail 留 Phase 1 | `Decisions.md` **ADR-014** |
+| **O-13** | 公告入站 + 回执/撤销 + URL 抓取（三项"信息入站"新需求） | ✅ **已解决**（2026-09-17 晚，Steven 拍板四项） | §14 撤销「公告=Non-Goal」+ `Decisions.md` **ADR-021** + `Phase-0-MVP.md` P0-3-24/3-25/3-26/3-27 |
 
 > ✅ **原阻塞项 O-06 已于 2026-09-01 解除**（PAT 入口可用），开发路径不再有任何前置阻塞，可从 `Phase-0-MVP.md` 的 P0-0-1 开始。
 > ✅ **O-08 已于 2026-09-13 解决**：全中国境内部署（文本 DeepSeek + 视觉 Qwen 通义千问，均不出境），对外发布无需再重新评估数据出境。
 
 ---
 
-*创建：2026-09-01 ｜ 最近更新：2026-09-17（新增 **ADR-020** 主动提醒走邮件出站 + 截止临近排序；**O-11** 关闭）*
+*创建：2026-09-01 ｜ 最近更新：2026-09-17 晚（新增 **ADR-020** 主动提醒走邮件出站 + **ADR-021** 公告进站/回执撤销/URL 抓取（O-13 关闭）；**O-11** 关闭）*
