@@ -29,6 +29,7 @@
     "probe:syllabus-drift": "npx -y tsx scripts/probe-syllabus-drift.ts",
     "regress:practice-tests": "npx -y tsx scripts/regress-practice-tests.ts",
     "probe:practice-test": "npx -y tsx scripts/probe-practice-test.ts",
+    "regress:exam-review": "npx -y tsx scripts/regress-exam-review.ts",
     "regress:sync": "npx -y tsx scripts/regress-sync-idempotent.ts",
     "probe:sync": "npx -y tsx scripts/probe-sync-idempotent.ts"
   },

@@ -260,6 +260,62 @@ const CASES: Case[] = [
       '⚠️ 反向断言 —— 哪天有人给它补上 CHECK，这里会变红，提醒他"你正在改一个已拍板的决定"。',
     deleteBy: `practice_test_id=eq.${BOGUS_UUID}`,
   },
+
+  // ---------- P0-3-31 新表：exam_review_summaries ----------
+  // ⚠️ 这张表**没有 `id` 列**（PK 是复合键 `(course_id, exam_key, locale)`）→ 每条都要带 `deleteBy`。
+  // 合法值会被外键（course_id → courses）拦成 23503 = 放行；非法值被 CHECK 先拦成 23514。
+  {
+    label: "exam_review_summaries.status = 'ok'（默认态）",
+    table: 'exam_review_summaries',
+    row: { course_id: BOGUS_UUID, exam_key: 'midterm1', locale: 'zh-CN', status: 'ok' },
+    expect: 'accepted',
+    why: 'P0-3-31 复习总结生成成功的落库态。**这是该卡的验收闸**：仍被拒 = 迁移没生效',
+    deleteBy: `course_id=eq.${BOGUS_UUID}`,
+  },
+  {
+    label: "exam_review_summaries.status = 'failed'（不再重试标记）",
+    table: 'exam_review_summaries',
+    row: { course_id: BOGUS_UUID, exam_key: 'midterm1', locale: 'zh-CN', status: 'failed' },
+    expect: 'accepted',
+    why: '模型稳定给不出符合 schema 的结果时落 failed → 下次不再为同一场考试重打一次模型',
+    deleteBy: `course_id=eq.${BOGUS_UUID}`,
+  },
+  {
+    label: "exam_review_summaries.status = '__bogus__'（对照组）",
+    table: 'exam_review_summaries',
+    row: { course_id: BOGUS_UUID, exam_key: 'midterm1', locale: 'zh-CN', status: '__bogus__' },
+    expect: 'rejected',
+    why: '证明 status 的 CHECK **确实在拦** —— 没有对照组，"放行"可能只是约束被整个删了',
+    deleteBy: `course_id=eq.${BOGUS_UUID}`,
+  },
+  {
+    label: "exam_review_summaries.locale = 'fr'（**应放行**，反向断言）",
+    table: 'exam_review_summaries',
+    row: { course_id: BOGUS_UUID, exam_key: 'midterm1', locale: 'fr', status: 'ok' },
+    expect: 'accepted',
+    why:
+      '与 file_summaries / practice_test_explanations 同一条决定：locale **不加 CHECK**' +
+      '（语言是数据维度不是代码分支），白名单只在 lib/review/locale.ts。' +
+      '⚠️ 反向断言 —— 哪天有人给它补上 CHECK，这里会变红，提醒他"你正在改一个已拍板的决定"。',
+    deleteBy: `course_id=eq.${BOGUS_UUID}`,
+  },
+
+  // ---------- P0-3-31 新表：exam_review_files ----------
+  // 这张表有 `id` 列（`gen_random_uuid()`），但按 `course_id` 兜底删更贴近"只删探针自己的行"。
+  {
+    label: "exam_review_files（表存在 + 必填列齐全 ⇒ 只被外键拦）",
+    table: 'exam_review_files',
+    row: {
+      course_id: BOGUS_UUID,
+      user_id: BOGUS_UUID,
+      exam_key: 'midterm1',
+      display_name: 'probe.pdf',
+      storage_path: 'probe/probe/probe.pdf',
+    },
+    expect: 'accepted',
+    why: 'P0-3-31 上传额外文件的元数据行。**这是该卡的验收闸**：仍被拒 = 迁移没生效',
+    deleteBy: `course_id=eq.${BOGUS_UUID}`,
+  },
 ]
 
 type Verdict = 'accepted' | 'rejected' | 'unexpected'
@@ -379,6 +435,8 @@ async function main(): Promise<void> {
     file_summaries: `course_file_id=eq.${BOGUS_UUID}`,
     practice_tests: `exam_file_id=eq.${BOGUS_UUID}`,
     practice_test_explanations: `practice_test_id=eq.${BOGUS_UUID}`,
+    exam_review_summaries: `course_id=eq.${BOGUS_UUID}`,
+    exam_review_files: `course_id=eq.${BOGUS_UUID}`,
   }
   console.log('\n零残留自检（每个哨兵条件都应 0 行）：')
   for (const [table, qs] of Object.entries(RESIDUE)) {

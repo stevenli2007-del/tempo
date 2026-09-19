@@ -5,6 +5,7 @@ import { AssignmentDetail } from '@/components/courses/assignment-detail'
 import { CanvasLink } from '@/components/courses/canvas-link'
 import { CourseFiles } from '@/components/courses/course-files'
 import { CourseActions } from '@/components/courses/course-actions'
+import { ExamReviewSection } from '@/components/courses/exam-review/exam-review-section'
 import { GradePie } from '@/components/courses/grade-pie'
 import { SyllabusUpload } from '@/components/courses/syllabus-upload'
 import { SectionEditor } from '@/components/sections/section-editor'
@@ -195,6 +196,9 @@ export default async function CourseDetailPage({ params }: PageProps) {
 
         {/* ---------- 资料（P0-3-19）：按 Canvas 文件夹结构分组，点开回 Canvas ---------- */}
         <CourseFiles courseId={detail.id} files={courseFiles.files} error={courseFiles.error} />
+
+        {/* ---------- 考试复习（P0-3-31）：数据源是 exam_dates（只会有考试）→ 非考试任务天然无入口 ---------- */}
+        <ExamReviewSection courseId={detail.id} exams={detail.examDates} />
 
         {/* ---------- 课程板块（原「五个板块」，含 syllabus 上传） ---------- */}
         <section className="rounded-xl border border-border bg-card p-5 shadow-sm">
