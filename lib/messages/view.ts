@@ -1,4 +1,7 @@
 import { SCHOOL_TIME_ZONE } from '@/lib/time'
+// 站内路径守卫（纯模块）：本文件与 P0-3-30 的 syllabus 导入共用同一份，
+// 两处各写一遍就会有一处忘了 `//host` 是协议相对 URL 这一种形态。
+import { readInternalPath } from '@/lib/internal-path'
 // 🔴 从 `registry`（纯模块）读，**不是** `apply`：本文件在客户端组件链上
 // （messages-view.tsx → 这里），而 apply 的动态 import 会在构建期把
 // `next/headers` 拖进客户端图，整个 build 直接失败。详见 `registry.ts` 的注释。
@@ -477,17 +480,6 @@ function readSafeUrl(value: unknown): string | null {
  * 或一个还没写的产出方就能塞进 `javascript:…`，而渲染层的 `<a href>` 会照单全收。
  * 在**唯一**的读取点挡掉，比在每个渲染点各写一遍白名单可靠（与 `readSafeUrl` 同一取舍）。
  */
-function readInternalPath(value: unknown): string | null {
-  if (typeof value !== 'string') return null
-  const path = value.trim()
-  if (path === '') return null
-  // 必须以单个 `/` 开头：拒绝 `//host`（协议相对）、`/\host`、以及任何带 scheme 的值
-  // （`https://…` / `javascript:…` 都不以 `/` 开头，天然被挡在门外）。
-  if (!path.startsWith('/') || path.startsWith('//') || path.startsWith('/\\')) return null
-  // 控制字符（含换行）：`/a\nb` 这类值进 href 会被浏览器做各种归一化，不如直接拒。
-  if (/[\u0000-\u001f\u007f]/.test(path)) return null
-  return path
-}
 
 /**
  * 摘要里最多渲染多少条。

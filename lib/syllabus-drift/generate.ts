@@ -37,7 +37,7 @@ import {
   MAX_DOWNLOAD_BYTES,
   downloadFile,
   resolveDownloadUrl,
-} from '@/lib/course-files/summary/generate'
+} from '@/lib/course-files/fetch-content'
 import { detectExtractableExtension, unsupportedReason } from '@/lib/course-files/extractable'
 import { loadDecryptedCredential } from '@/lib/canvas/credentials'
 import { EXAM_DATE_COLUMNS, toExamDate } from '@/lib/exam-dates'

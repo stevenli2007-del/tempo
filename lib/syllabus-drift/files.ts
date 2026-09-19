@@ -55,6 +55,17 @@ export type SyllabusFileCandidate = {
 const SYLLABUS_NAME_PATTERN = /syllabus|大纲/i
 
 /**
+ * 名字像不像 syllabus。
+ *
+ * ⚠️ 与 `isSyllabusFile()` 是**两件事**：那个回答"够不够格当漂移锚点"
+ * （还要抽得动、大小已知），这个只回答"要不要排在清单最前面"。
+ * 抽不动的文件也要显示 —— 只是**灰掉 + 给原因**，不能凭空消失。
+ */
+export function matchesSyllabusName(name: string): boolean {
+  return SYLLABUS_NAME_PATTERN.test(name)
+}
+
+/**
  * 选出这门课的 syllabus 文件；没有合适的返回 `null`。
  *
  * ### 候选三条件（任一不满足就出局）
@@ -79,14 +90,13 @@ export function pickSyllabusFile(files: SyllabusFileCandidate[]): SyllabusFileCa
 }
 
 /** 单个文件够不够格当"这门课的大纲"。抽出来是为了让 pick 与回归断言共用同一条判据。 */
-export function isSyllabusFile(file: SyllabusFileCandidate): boolean {
-  if (file.isDeleted) return false
+export function isSyllabusFile(file: SyllabusFileCandidate): boolean {  if (file.isDeleted) return false
   if (!SYLLABUS_NAME_PATTERN.test(file.displayName)) return false
   if (file.sizeBytes === null) return false
   return detectExtractableExtension(file.displayName, file.contentType) !== null
 }
 
-function compareCandidates(a: SyllabusFileCandidate, b: SyllabusFileCandidate): number {
+export function compareCandidates(a: SyllabusFileCandidate, b: SyllabusFileCandidate): number {
   // ① 根目录优先：实测 Chem 1A 的 `Chem1A_Syllabus_Fall2026.pdf` 就在根上，
   //    而 `Archive/` 之类目录下的同名文件多半是旧版。
   if (a.folderPath !== b.folderPath) {

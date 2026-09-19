@@ -4,7 +4,9 @@ import { useRouter } from 'next/navigation'
 import { Fragment, useRef, useState } from 'react'
 
 import { readApiErrorMessage } from '@/lib/api/client-error'
+import { readInternalPath } from '@/lib/internal-path'
 import { syllabusStatusText } from '@/components/courses/syllabus-status'
+import { SyllabusCanvasPicker, SyllabusFileLink } from '@/components/courses/syllabus-canvas-picker'
 import { createClient } from '@/lib/supabase/browser'
 import { ALLOWED_EXTENSIONS, MAX_FILE_SIZE_BYTES, extractExtension, isAllowedExtension } from '@/lib/syllabi'
 import { Button } from '@/components/ui/button'
@@ -224,6 +226,10 @@ export function SyllabusUpload({ courseId, syllabus }: SyllabusUploadProps) {
       />
 
       {syllabus ? (
+        <>
+        {/* P0-3-30：导入的 syllabus 没有存原文（`raw_text` 恒 null，ADR-026），
+            所以「重新解析」对它必然 409 —— 不给一个点了就失败的按钮，
+            要重跑就回上面的「从 Canvas 资料选一份」再导一次（幂等，不会重复写）。 */}
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="min-w-0">
             <p className="truncate text-sm font-medium text-foreground" title={syllabus.fileName}>
@@ -250,7 +256,8 @@ export function SyllabusUpload({ courseId, syllabus }: SyllabusUploadProps) {
                     : '开始解析'}
               </Button>
             ) : null}
-            {syllabus.parseStatus === 'completed' ? (
+            {syllabus.parseStatus === 'completed' &&
+            readInternalPath(syllabus.filePath) === null ? (
               <Button
                 variant="ghost"
                 size="sm"
@@ -263,14 +270,20 @@ export function SyllabusUpload({ courseId, syllabus }: SyllabusUploadProps) {
                 重新解析
               </Button>
             ) : null}
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => void handleDownload()}
-              disabled={isBusy}
-            >
-              {pending === 'downloading' ? '获取中…' : '查看'}
-            </Button>
+            {/* 导入的 syllabus 没有 Storage 对象，`filePath` 是站内路径 → 链到资料页；
+                手动上传的才走"现签下载链"那条路。 */}
+            {readInternalPath(syllabus.filePath) ? (
+              <SyllabusFileLink filePath={syllabus.filePath} />
+            ) : (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => void handleDownload()}
+                disabled={isBusy}
+              >
+                {pending === 'downloading' ? '获取中…' : '查看'}
+              </Button>
+            )}
             <Button
               variant="ghost"
               size="sm"
@@ -281,7 +294,12 @@ export function SyllabusUpload({ courseId, syllabus }: SyllabusUploadProps) {
             </Button>
           </div>
         </div>
+
+        {/* P0-3-30：第二个来源 —— 上传按钮保持原样，这里并列一个"直接用 Canvas 上已有的"。 */}
+        <SyllabusCanvasPicker courseId={courseId} hasSyllabus={true} />
+        </>
       ) : (
+        <>
         <div className="flex flex-wrap items-center justify-between gap-3">
           <p className="text-sm text-muted-foreground">还没有 syllabus</p>
           <Button
@@ -297,6 +315,10 @@ export function SyllabusUpload({ courseId, syllabus }: SyllabusUploadProps) {
                 : '上传 syllabus'}
           </Button>
         </div>
+
+        {/* 同上：还没有 syllabus 时，两个入口同样并列。 */}
+        <SyllabusCanvasPicker courseId={courseId} hasSyllabus={false} />
+        </>
       )}
 
       {/* P0-1-11：四阶段进度条，替代原先散落的单行提示，让用户看清"现在到第几步"。 */}

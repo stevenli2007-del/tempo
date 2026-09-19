@@ -25,6 +25,7 @@
     "regress:message-summaries": "npx -y tsx scripts/regress-message-summaries.ts",
     "probe:message-summaries": "npx -y tsx scripts/probe-message-summaries.ts",
     "regress:syllabus-drift": "npx -y tsx scripts/regress-syllabus-drift.ts",
+    "regress:syllabus-import": "npx -y tsx scripts/regress-syllabus-import.ts",
     "probe:syllabus-drift": "npx -y tsx scripts/probe-syllabus-drift.ts",
     "regress:practice-tests": "npx -y tsx scripts/regress-practice-tests.ts",
     "probe:practice-test": "npx -y tsx scripts/probe-practice-test.ts",

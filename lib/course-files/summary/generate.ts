@@ -21,9 +21,13 @@
  *   只是网络抖了一下的文件（3-25b 在同类问题上做了同一个区分）。
  */
 
-import { canvasGet } from '@/lib/canvas/client'
+import {
+  MAX_DOWNLOAD_BYTES,
+  checkFetchable,
+  downloadFile,
+  resolveDownloadUrl,
+} from '../fetch-content'
 import { loadDecryptedCredential } from '@/lib/canvas/credentials'
-import { detectExtractableExtension, unsupportedReason } from '@/lib/course-files/extractable'
 import { extractSyllabusText } from '@/lib/extract'
 import { runStructured } from '@/lib/llm/run'
 import { sameInstant } from '@/lib/time'
@@ -48,16 +52,9 @@ type ServerSupabase = Awaited<ReturnType<typeof createClient>>
 /** 写进 `llm_runs.purpose`（那列没有 CHECK 约束，新用途直接加字面量）。 */
 const PURPOSE = 'file_summary'
 
-/**
- * 单份材料的下载上限（字节）。
- * 实测最大的 `L1 Slides.pdf` 是 2.4 MB，留一倍余量。
- * ⚠️ 真正的第一道闸是库里已知的 `size_bytes`（见 `ensureFileSummary`）——
- * 超限的文件**连一个请求都不发**，这里只是兜住"库里的大小过时了"的情况。
- */
-export const MAX_DOWNLOAD_BYTES = 16 * 1024 * 1024
-
-/** 下载超时。课件 PDF 通常在几 MB 内，20 秒足够；再长就该让用户重试而不是干等。 */
-const DOWNLOAD_TIMEOUT_MS = 20_000
+// 下载上限 / 三道闸门 / 下载与换链都在 `../fetch-content`（P0-3-30 抽出的共用实现）：
+// 「一键总结」「自测卷」「大纲漂移」「本卡的 syllabus 一键导入」四条按需路径
+// 必须给出同一个"能不能读"的答案。
 
 /** `error_message` 上限（同 `llm_runs` 的纪律：精简、不含用户内容）。 */
 const ERROR_MESSAGE_MAX = 200
@@ -155,92 +152,8 @@ export async function loadSummaryTarget(
   }
 }
 
-/** 下载结果。`permanent` 决定要不要落 `failed` 行。 */
-export type DownloadResult =
-  | { ok: true; bytes: Buffer }
-  | { ok: false; message: string; permanent: boolean }
-
-/**
- * 下载文件字节。
- *
- * ⚠️ Canvas 的下载链**自带能力凭据**（`?verifier=…`），所以这里**不发 Bearer**
- * —— 实测加了也不影响（两种都 200），但不加更贴近这条链接的设计意图：
- * 它是"一个短时有效的下载凭据"，不是"一个要用 token 调 API"。
- */
-export async function downloadFile(url: string, maxBytes: number): Promise<DownloadResult> {
-  const controller = new AbortController()
-  const timer = setTimeout(() => controller.abort(), DOWNLOAD_TIMEOUT_MS)
-
-  try {
-    const response = await fetch(url, { signal: controller.signal, redirect: 'follow' })
-
-    if (!response.ok) {
-      // 403 / 404：链接过期或文件在 Canvas 上没了。重试无用 → 确定性。
-      const permanent = response.status === 403 || response.status === 404
-      return { ok: false, message: `下载失败（Canvas 返回 HTTP ${response.status}）`, permanent }
-    }
-
-    const declared = Number(response.headers.get('content-length') ?? '')
-    if (Number.isFinite(declared) && declared > maxBytes) {
-      return { ok: false, message: `文件太大（${formatMb(declared)}），超过总结上限`, permanent: true }
-    }
-
-    const bytes = Buffer.from(await response.arrayBuffer())
-    if (bytes.byteLength > maxBytes) {
-      return { ok: false, message: `文件太大（${formatMb(bytes.byteLength)}），超过总结上限`, permanent: true }
-    }
-
-    return { ok: true, bytes }
-  } catch (error) {
-    const aborted = error instanceof Error && error.name === 'AbortError'
-    return {
-      ok: false,
-      message: aborted ? '下载超时，请稍后重试' : '下载失败（网络问题），请稍后重试',
-      // 暂时性：网络与超时都可能下次就好了，**不落 failed 行**。
-      permanent: false,
-    }
-  } finally {
-    clearTimeout(timer)
-  }
-}
-
-function formatMb(bytes: number): string {
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
-}
-
-/**
- * 取新鲜下载链。
- *
- * 🔴 **必须先取一次单文件端点**，不能直接用库里存的 `file_url`：
- * 那个是 `/courses/:cid/files/:fid`（给人点的预览页），而我们真正要的是
- * `url` 字段里那条**带短时 verifier 的**下载链 —— 它是会过期的，不能落库。
- * 所以每次生成都现场换一条（一次请求，很便宜）。
- */
-export async function resolveDownloadUrl(params: {
-  domain: string
-  token: string
-  canvasCourseId: string
-  canvasFileId: string
-}): Promise<{ url: string | null; message: string | null; permanent: boolean }> {
-  const result = await canvasGet<{ url?: string }>(
-    params.domain,
-    params.token,
-    `/api/v1/courses/${params.canvasCourseId}/files/${params.canvasFileId}`,
-  )
-
-  if (!result.ok) {
-    // 401/403：token 失效（这是**全局**的，不是这个文件的问题）；404：文件没了（局部）。
-    const permanent = result.kind === 'not_found'
-    return { url: null, message: result.message, permanent }
-  }
-
-  if (!result.data.url) {
-    // 实测图片类文件会出现这种情况（有记录但没给下载链）。
-    return { url: null, message: 'Canvas 没有为这个文件提供下载链接', permanent: true }
-  }
-
-  return { url: result.data.url, message: null, permanent: false }
-}
+/** 下载结果。`permanent` 决定要不要落 `failed` 行（形状定义在共用实现里）。 */
+export type { DownloadResult } from '../fetch-content'
 
 /**
  * 生成（或命中缓存）一份总结。**不抛异常**，所有失败都收敛成 `SummaryOutcome`。
@@ -272,13 +185,22 @@ export async function ensureFileSummary(params: {
     return { status: 'failed', message: '找不到这个文件（可能已从 Canvas 上删除）。' }
   }
 
-  // ---------- 0) 能力边界（在发任何请求之前判，省一次下载） ----------
-  const ext = detectExtractableExtension(target.displayName, target.contentType)
-  if (!ext) {
+  // ---------- 0) 三道闸门（共用实现：扩展名/MIME → 大小已知 → 不超限） ----------
+  // 全在发任何请求之前判 —— 图片型与"大小未知"的文件连一个字节都不下。
+  const gate = checkFetchable({
+    displayName: target.displayName,
+    contentType: target.contentType,
+    sizeBytes: target.sizeBytes,
+  })
+  if (gate.kind === 'unsupported') {
     // ⚠️ **不落 failed 行**：这是"Tempo 不做"，不是"这份材料做不了"。
     // 将来支持了图片就能直接用，不需要清缓存。
-    return { status: 'unsupported', message: unsupportedReason(target.displayName, target.contentType) }
+    return { status: 'unsupported', message: gate.reason }
   }
+  if (gate.kind === 'too_large') {
+    return { status: 'failed', message: gate.reason }
+  }
+  const ext = gate.ext
 
   // ---------- 1) 缓存 ----------
   const { summary: cached, error: cacheError } = await loadSummary(supabase, courseFileId, locale)
@@ -308,15 +230,7 @@ export async function ensureFileSummary(params: {
     return { status: 'failed', message: '这个文件缺少 Canvas 标识，无法定位。' }
   }
 
-  // ---------- 3) 大小闸门（库里的已知大小，超限连请求都不发） ----------
-  if (target.sizeBytes !== null && target.sizeBytes > MAX_DOWNLOAD_BYTES) {
-    return {
-      status: 'failed',
-      message: `文件太大（${formatMb(target.sizeBytes)}），超过总结上限。`,
-    }
-  }
-
-  // ---------- 4) 下载 ----------
+  // ---------- 4) 下载（大小闸门已在第 0 步跑过） ----------
   const resolved = await resolveDownloadUrl({
     domain: credential.canvasDomain,
     token: credential.token,

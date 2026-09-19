@@ -42,7 +42,7 @@ import {
   MAX_DOWNLOAD_BYTES,
   downloadFile,
   resolveDownloadUrl,
-} from '@/lib/course-files/summary/generate'
+} from '@/lib/course-files/fetch-content'
 import { extractSyllabusText } from '@/lib/extract'
 import { runStructured } from '@/lib/llm/run'
 import { sameInstant } from '@/lib/time'
