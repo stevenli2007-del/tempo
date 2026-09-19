@@ -362,6 +362,30 @@ console.log("考试匹配（P0-3-29：改期 = 更新提案，不是新增行）
     )
     check("改期文案含 before → after", label.includes("2026-09-28") && label.includes("2026-09-27"), label)
   }
+
+  // ⑪ 词级同义折叠：test ≡ exam（口语同指一场）—— 2026-09-19 Steven 实测：
+  // Chem 1A 已有「Unit 1 Exam · 9/22」，输入「Unit 1 test 改期到 9/29」必须落到它，而不是新增。
+  {
+    const existing = [row("e1", "Unit 1 Exam", "2026-09-22")]
+    const input = { examName: "Unit 1 test", examDate: "2026-09-29", examTime: null, location: null }
+    const [r] = resolveExamTargets([input], existing)
+    check("Unit 1 test ≡ Unit 1 Exam → update", r.kind === "update" && r.target?.id === "e1", JSON.stringify(r))
+  }
+  {
+    // 折叠只限 test ≡ exam 这一对：quiz / midterm / final 与 exam 仍是不同的考试。
+    const existing = [row("e1", "Exam 1", "2026-09-22")]
+    const quiz = { examName: "Quiz 1", examDate: "2026-09-29", examTime: null, location: null }
+    const [rq] = resolveExamTargets([quiz], existing)
+    check("Quiz 1 ≠ Exam 1 → create", rq.kind === "create", JSON.stringify(rq))
+    const midterm = { examName: "Midterm 1", examDate: "2026-09-29", examTime: null, location: null }
+    const [rm] = resolveExamTargets([midterm], existing)
+    check("Midterm 1 ≠ Exam 1 → create（红线仍成立）", rm.kind === "create", JSON.stringify(rm))
+    const [rd] = resolveExamTargets(
+      [{ examName: "Unit 1 test", examDate: "2026-09-22", examTime: null, location: null }],
+      [row("e1", "Unit 1 Exam", "2026-09-22")],
+    )
+    check("折叠后一模一样 → duplicate", rd.kind === "duplicate", JSON.stringify(rd))
+  }
 }
 
 console.log("schema ↔ 校验器 一致性")

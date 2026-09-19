@@ -10,8 +10,10 @@
  * ### 🔴 三条红线
  * 1. **匹配只在同课程内做** —— 调用方传进来的 `existing` 必须是**那一门课**的行，
  *    本模块绝不接受"全部考试再按 course_id 过滤"（漏掉过滤就是跨课串数据）。
- *    判据只有**考试名归一**（小写、去标点与空格）：`Midterm1` ≡ `Midterm 1`。
- * 2. **绝不做语义别名推断** —— 不许自己得出 `Unit 1 Exam` ≡ `Midterm 1`。
+ *    判据是**考试名归一**（小写、去标点与空格）：`Midterm1` ≡ `Midterm 1`。
+ * 2. **同义折叠只做一对**：`test` ≡ `exam`（口语里同指一场考试，2026-09-19 实测：
+ *    「Unit 1 test 改期」指的是库里那条 `Unit 1 Exam`）。除此之外**绝不做语义别名推断**
+ *    —— 不许自己得出 `Unit 1 Exam` ≡ `Midterm 1` 或 `Quiz 1` ≡ `Exam 1`。
  *    猜错的代价（把 A 场考试的日期写到 B 场上）远大于不猜（多一条待确认的提案）。
  * 3. **多命中 = 不猜**。同课程有 2 条同名时返回 `ambiguous` 并把候选列出来让人挑，
  *    绝不自动选第一条。
@@ -79,17 +81,23 @@ export type ExamResolution = {
 }
 
 /**
- * 考试名归一：小写 + 只留字母数字与中日韩汉字（标点、空格、下划线全部去掉）。
+ * 考试名归一：小写 + 词级切分 + `test ≡ exam` 同义折叠 + 拼接（切分即去掉标点空格）。
  *
- * 于是 `Midterm 1` ≡ `Midterm1` ≡ `midterm-1` ≡ `MIDTERM 1`。
+ * 于是 `Midterm 1` ≡ `Midterm1` ≡ `midterm-1` ≡ `MIDTERM 1`，
+ * 且 `Unit 1 test` ≡ `Unit 1 Exam`（唯一一对同义折叠 —— 口语里 test 和 exam 同指
+ * 一场 Summative；词级替换，"protest" 这类内嵌子串不受影响）。
  *
- * ⚠️ 刻意**不**做同义词折叠（不把 `Final Exam` 归一成 `Final`）：
- * 折叠会让 `Midterm 1` 与 `Exam 1` 撞成同一个键 —— 那是把两场不同的考试
- * 当成一场，比多出一条待确认的提案危险得多。
+ * ⚠️ 刻意**不**做更多折叠：`quiz` / `midterm` / `final` 是**不同的考试类型**，
+ * 不与 `exam` 互折 —— 否则 `Midterm 1` 与 `Exam 1` 会撞成同一个键，
+ * 那是把两场不同的考试当成一场，比多出一条待确认的提案危险得多。
  */
 export function normalizeExamName(name: string): string {
-  // 保留：字母数字 + CJK（含日文假名，台湾/香港课程名偶尔出现）。
-  return name.toLowerCase().replace(/[^a-z0-9\u3000-\u303f\u3040-\u30ff\u4e00-\u9fff]/g, '')
+  // 分隔符 = 允许字符（字母数字 + CJK，含日文假名）的补集；切完折叠再拼回。
+  return name
+    .toLowerCase()
+    .split(/[^a-z0-9\u3000-\u303f\u3040-\u30ff\u4e00-\u9fff]+/)
+    .map((token) => (token === 'test' || token === 'tests' ? 'exam' : token))
+    .join('')
 }
 
 /**
