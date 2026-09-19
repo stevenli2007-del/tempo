@@ -131,7 +131,12 @@ function testRoundToScale(): void {
   // 否则"库里读回的值 vs 本次算出的值"就还会判成变了。
   const samples = [9.923076923076923, 9.892857142857142, 12.345, -2.555, 0.005, 1e-7, 0]
   const notIdempotent = samples.filter((x) => roundToScale(roundToScale(x)) !== roundToScale(x))
-  check('定标幂等（定一次 = 定两次）', notIdempotent.length === 0, `反例 ${notIdempotent}`)
+  check(
+    '定标幂等（定一次 = 定两次）',
+    notIdempotent.length === 0,
+    // 通过时不打印"反例"字样：空数组会渲染成「— 反例 」，看着像有反例。
+    notIdempotent.length === 0 ? `${samples.length} 个样本` : `反例 ${notIdempotent}`,
+  )
 }
 
 // ---------- ② 差量判定：真值不再判"变了"，真变化仍然要判"变了" ----------
