@@ -33,7 +33,7 @@
 | [`P0-1.md`](./P0-1.md) | P0-1 M1 执行卡（11 张） | 极少（已完成） |
 | [`P0-2.md`](./P0-2.md) | P0-2 M2 执行卡（4 张 🎫 + 6 段二级卡） | 查 M2 刷新 / 状态 UI / 提醒 / 撤销细节 |
 | [`P0-3-overview.md`](./P0-3-overview.md) | P0-3 排序纪律 + 「明确移出 M3」+ 执行卡前言 | 判断「下一张该做哪张」 |
-| [`P0-3-<卡号>.md`](./P0-3-1.md) | 每张 P0-3 卡一个文件（23 个） | **开工时只读当前那张** |
+| [`P0-3-<卡号>.md`](./P0-3-1.md) | 每张 P0-3 卡一个文件（**29 个**：23 张来自拆分 + `P0-3-28` ~ `P0-3-34` 为拆分后新开） | **开工时只读当前那张** |
 | [`../Phase-0-changelog.md`](../Phase-0-changelog.md) | 原「变更记录」段 | 查「某天改了什么」 |
 
 ---
@@ -66,6 +66,16 @@
 | `P0-3-20` | 大纲漂移检测 | [`P0-3-20.md`](./P0-3-20.md) | ✅ Steven 验收通过 2026-09-18 |
 | `P0-3-23` | practice test 生成（类型 A） | [`P0-3-23.md`](./P0-3-23.md) | ✅ Steven 验收通过 2026-09-18 |
 | `P0-3-28` | 同步写入幂等（`numeric` 定标） | [`P0-3-28.md`](./P0-3-28.md) | 🔵 代码完成 + 本地验收通过 2026-09-18，待 Steven 验收 |
+| `P0-3-29` | 考试写入去重：改期 = 更新提案 | [`P0-3-29.md`](./P0-3-29.md) | ⚪ **第二批 · 当前卡** |
+| `P0-3-30` | Canvas syllabus 自动发现 + 一键导入 | [`P0-3-30.md`](./P0-3-30.md) | ⚪ 第二批 |
+| `P0-3-31` | 考试复习模式 v1（含上传额外文件） | [`P0-3-31.md`](./P0-3-31.md) | ⚪ 第二批 |
+| `P0-3-32` | 新手引导 + 侧栏反馈链接（占位符） | [`P0-3-32.md`](./P0-3-32.md) | ⚪ 第二批 |
+| `P0-3-33` | 视觉区分强化（考试 / 课程色 / 水印） | [`P0-3-33.md`](./P0-3-33.md) | ⚪ 第二批 |
+| `P0-3-34` | 成绩速记（最小版 + 成绩条） | [`P0-3-34.md`](./P0-3-34.md) | ⚪ 第二批 |
+
+> **M3 第二批（29~34）**：2026-09-19 Steven 拍板新增，六张全部排在 `P0-3-12` 之前，之后进 3-13 freeze。
+> 它们**不在**拆分基线 `f625a5a` 的卡号集合里，已按闸门要求在
+> `scripts/verify-phase0-docs-split.py` 的 `DECLARED_NEW_CARDS` 逐张登记（**新开卡必须先登记，否则校验红**）。
 
 ---
 
@@ -98,6 +108,22 @@
   [`../Database.md`](../Database.md)（`practice_tests` 两表）
 - **按需**：[`../API-Contract.md`](../API-Contract.md)
 - **grep 范围**：`lib/practice-test/**`、`lib/course-files/**`
+
+### 样板 E — `P0-3-29` 考试写入去重（数据完整性卡，开工前先读代码）
+
+- **必读**：[`../Decisions.md`](../Decisions.md) **ADR-015**（已确认的绝不被自动覆盖）+ **ADR-021**（写入器前提）
+- **必读代码**（这不是推演，是现状）：`lib/course-update/apply.ts` 的 `insertExams()`（只 `insert` 不查重，bug 根源）、
+  `lib/messages/appliers/syllabus-drift.ts` + `lib/messages/undoers/syllabus-drift.ts`（update + `examRestores` 结构化还原的现成范式，**复用不重写**）
+- **按需**：[`../Phase-0-MVP.md`](../Phase-0-MVP.md) 的 P0-3-20 / 3-24 / 3-25 / 3-26 行（验收手法的来源）
+- **不读**：UI 相关的一切（本卡只动写入器）
+- **grep 范围**：`lib/course-update/**`、`lib/messages/appliers/**`、`lib/messages/undoers/**`
+
+### 样板 F — `P0-3-31` 考试复习模式（含上传，跨 Inventory 与 LLM 两条路径）
+
+- **必读**：[`../Decisions.md`](../Decisions.md) **ADR-027**（只切用户选的题、**绝不出新题**）+ **ADR-024**（懒生成 + 缓存）+ **ADR-026**（按需读取三道闸门）
+- **按需**：[`../Database.md`](../Database.md)（`course_files` / `practice_tests` 两处落点）
+- **不读**：[`../Sync-Strategy.md`](../Sync-Strategy.md)（本卡不进同步路径）—— 但**必须回头确认**自己没偷跑进同步
+- **grep 范围**：`lib/review/**`、`lib/practice-test/**`、`app/(routes)/courses/**`
 
 > **照抄格式**：恒定必读（CodingRules + TechStack §2）不必重复写；每张卡写「必读 / 按需 / 不读 / grep 范围」四行。
 
