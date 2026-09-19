@@ -77,8 +77,16 @@
 --   where relname in ('exam_review_files','exam_review_summaries');  -- 期望两行都是 t
 --   select id, public, file_size_limit from storage.buckets where id = 'exam_review';
 --   select policyname, cmd from pg_policies
---   where schemaname='storage' and tablename='objects' and policyname like 'exam_review_%';
---   -- 期望 4 行
+--   where schemaname='storage' and tablename='objects' and policyname like 'exam_review_objects_%'
+--   order by policyname;
+--   -- 期望 **6 行**，不是 4 行 —— 新 UI 建 UPDATE / DELETE 时会**各自动附加一条 SELECT 策略**
+--   -- （`…_update_own_<后缀>_0` = UPDATE、`_1` = SELECT；`…_delete_own_*` 同理），
+--   -- 因为带返回值的更新 / 删除需要 SELECT 才拿得到行。同一用户下会看到：
+--   --   delete_own _0=DELETE / _1=SELECT ｜ insert_own _0=INSERT
+--   --   select_own _0=SELECT ｜ update_own _0=UPDATE / _1=SELECT
+--   -- 看到 6 行**不是建多了**；看到 4 行要确认是不是 UPDATE / DELETE 少了伴随 SELECT 那半。
+--   -- ⚠️ 行数只证明"策略在"，**不证明"策略在拦"** —— 唯一判据是
+--   --    `npm run probe:exam-review` ⑥（自己目录放行 / 别人目录 403 / 正控签得出可下载 / 负控 anon 签不出）。
 -- ⚠️ 面板的 `Success` **不构成证据**；真正的确认走 `npm run probe:schema` 与只读真接口探针。
 -- =============================================================
 

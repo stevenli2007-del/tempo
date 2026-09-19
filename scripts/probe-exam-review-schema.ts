@@ -35,7 +35,11 @@
  *      - 传到自己 uid 段（`{uid}/…`）→ **允许**（线上正常路径）；
  *      - 传到别人的 uid 段（全零 UUID）→ **必须被拒**（策略 `(storage.foldername(name))[1]
  *        = auth.uid()::text` 在拦 —— 这是"把对象挪进别人目录"的唯一防线）。
- *    再加：`anon` 不该能签出签名 URL（桶是私有的）。
+ *    再加两条**成对**的签名 URL 断言（正控 + 负控，缺一不可）：
+ *      - 正控：用户会话**签得出** URL，且该 URL **匿名 GET 真的 200** —— 这就是线上
+ *        「原文 ↗」点开的真实动作（签名 URL 自带凭据，绕过 RLS）；
+ *      - 负控：`anon` **签不出**签名 URL（桶是私有的）。
+ *    🔴 只留负控是**假绿**：路径写错时 `anon` 同样拿 404 `NoSuchKey`，看起来像"被拦住了"。
  *
  * ### 副作用（必须知情）
  * - 会**短暂**写入 2 行（`exam_review_files` / `exam_review_summaries` 各 1 行，都带
@@ -523,11 +527,30 @@ async function main(): Promise<void> {
       }
     }
     {
+      // 正控（缺了它，下面的负控是假绿）：用户会话必须签得出 URL，且签出来的 URL
+      // **匿名 GET 要真的 200** —— 这正是线上「原文 ↗」点开的行为（签名 URL 自带凭据）。
+      // 只验负控时，路径写错也会拿 404 NoSuchKey，长得跟"被策略拦住"一模一样。
+      const { data, error } = await asUser.storage
+        .from(EXAM_REVIEW_BUCKET)
+        .createSignedUrl(probeStoragePath, 60)
+      if (error || !data?.signedUrl) {
+        fail('用户会话签得出签名 URL（正控）', error ? describe(error) : '拿到了空 signedUrl')
+      } else {
+        const res = await fetch(data.signedUrl)
+        if (res.ok) pass('用户会话签得出签名 URL + 匿名 GET 能下载（正控）', `HTTP ${res.status}`)
+        else
+          fail(
+            '用户会话签得出签名 URL + 匿名 GET 能下载（正控）',
+            `HTTP ${res.status} —— 线上点上传件的「原文 ↗」会打不开`,
+          )
+      }
+    }
+    {
       const { data, error } = await anonBare.storage
         .from(EXAM_REVIEW_BUCKET)
         .createSignedUrl(probeStoragePath, 60)
-      if (error || !data?.signedUrl) pass('anon 签不出签名 URL（私有桶）', error ? describe(error) : '')
-      else fail('anon 签不出签名 URL（私有桶）', '匿名居然签出来了 —— 桶可能是公开的')
+      if (error || !data?.signedUrl) pass('anon 签不出签名 URL（私有桶 · 负控）', error ? describe(error) : '')
+      else fail('anon 签不出签名 URL（私有桶 · 负控）', '匿名居然签出来了 —— 桶可能是公开的')
     }
   }
 
