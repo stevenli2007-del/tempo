@@ -39,7 +39,13 @@
 --    `CREATE POLICY on storage.objects` 报 `42501: must be owner of table objects`
 --    （owner 是平台角色 supabase_storage_admin，SQL Editor 的 postgres 不是 owner）。
 --    ✅ 步骤 1：Dashboard → Storage → New bucket
---         Name = exam_review ／ Public = **关闭** ／ File size limit = 20971520
+--         Name = exam_review ／ Public = **关闭**
+--         File size limit = **20**（🔴 单位下拉选 **MB**）
+--             = 20971520 字节，与 `lib/review/storage.ts` 的 REVIEW_MAX_FILE_SIZE_BYTES 一致。
+--         ⚠️⚠️ **别照着「20971520」填** —— 那串数字是**字节数**，而输入框按 MB 解释，
+--             照填会变成 20 TB（2026-09-19 实测踩到，文件头原来的写法本身就是歧义源）。
+--             另：`Edit bucket` 弹窗会把库里的**字节原值**（20971520）回填进单位是 MB 的框里
+--             —— 不假思索点 Save 同样会把它放大成 20 TB。**存之前先把框里的值改成 20。**
 --         Allowed MIME types = **留空**（docx/pptx 在真实浏览器常报 octet-stream，
 --         桶层白名单会误拒；类型校验由服务端按扩展名做，见 `lib/review/storage.ts`）
 --    ✅ 步骤 2：Dashboard → Storage → Policies → New policy ×4
