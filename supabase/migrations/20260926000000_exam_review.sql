@@ -52,6 +52,11 @@
 --         Target roles 一律 `authenticated`，四条表达式**完全相同**（含桶限定）：
 --             bucket_id = 'exam_review' and (storage.foldername(name))[1] = auth.uid()::text
 --         （策略名照 `syllabi` 桶的约定，便于用下面的 SQL 点名核对）
+--         ⚠️⚠️ **弹窗默认只预填 `bucket_id = 'exam_review'`，归属判据那半句是空的** ——
+--             照预填值保存 = **全桶放行**（任何登录用户可读所有人上传的文件），而策略
+--             「看起来是建好了的」（`pg_policies` 里有名字）。**必须手动补全整条表达式。**
+--             `Target roles` 同样默认空（= public），必须手动选 `authenticated`。
+--             （2026-09-19 实测踩到；判据只有行为验证，见 `npm run probe:exam-review` ⑥）
 --         ┌────────────────────────────────┬───────────────────┬──────────────────────────┐
 --         │ Policy name                    │ Allowed operation │ 表达式填在哪里           │
 --         ├────────────────────────────────┼───────────────────┼──────────────────────────┤
