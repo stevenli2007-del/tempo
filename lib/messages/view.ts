@@ -227,6 +227,19 @@ export type MessageView = {
    * 是因为它的 `points` 为空时界面上什么都没有；这里不是。
    */
   needsDrift: boolean
+  /**
+   * 这条**有落点的公告还没算出考试提案**（P0-3-29）。
+   *
+   * 与 `needsDrift` 同一用途（客户端只按这一个字段决定"要不要请求"），
+   * 但**语义不同**：算不算得出来**不影响「确认」能不能点** —— 没算出来时
+   * applier 会退回"确认那一刻解析"那条路。所以它只驱动一次请求，不参与
+   * `blockReason`（卡住按钮只会让用户没法处理一条本来能处理的公告）。
+   *
+   * 判据里"没有 `examProposalsStatus`"= 从没算过 **或** 上次是暂时性失败
+   * （那种情况服务端刻意不写状态，下次打开自然重试）。`ready` / `clean` / `failed`
+   * 三种终态都不再请求 —— 与要点那边的 `failed` 同一条"别再问了"纪律（ADR-024）。
+   */
+  needsExamProposals: boolean
 }
 
 export function toMessageView(
@@ -324,6 +337,25 @@ export function toMessageView(
     typeof message.payload.syllabusFileId === 'string' &&
     typeof message.payload.courseId === 'string'
 
+  /**
+   * 考试提案（P0-3-29）：只给**有落点的公告**、且**还没算出结论**的那几条发一次请求。
+   *
+   * 四个条件：① 类型是公告；② 仍待处理（已确认/忽略的不该再花一次模型钱）；
+   * ③ `landing === true`（无落点的摘要消息没有考试可谈）；
+   * ④ 状态字段还没有终态（缺字段 = 从没算过或上次是暂时性失败，都该再试一次）。
+   */
+  const examProposalsStatus =
+    typeof message.payload.examProposalsStatus === 'string'
+      ? message.payload.examProposalsStatus
+      : null
+  const needsExamProposals =
+    message.type === 'announcement' &&
+    isPending &&
+    message.payload.landing === true &&
+    examProposalsStatus === null &&
+    typeof message.payload.courseId === 'string' &&
+    typeof message.payload.announcementId === 'string'
+
   return {
     id: message.id,
     type: message.type,
@@ -369,6 +401,7 @@ export function toMessageView(
     needsSummary,
     summaryBusyLabel: summaryPendingLabel(locale),
     needsDrift,
+    needsExamProposals,
   }
 }
 

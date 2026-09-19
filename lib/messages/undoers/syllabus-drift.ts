@@ -28,8 +28,14 @@ import type { MessageApplied, MessageExamRestore } from '@/types/message'
  * - 任一步失败 → 明确失败，**绝不假装撤销成功**（ADR-016 R3）。
  */
 
-/** 一条旧值快照（形状不对就不撤它 —— 宁可不还原，也不拿半截值去写库）。 */
-function toRestore(raw: unknown): MessageExamRestore | null {
+/**
+ * 一条旧值快照（形状不对就不撤它 —— 宁可不还原，也不拿半截值去写库）。
+ *
+ * ⚠️ 公告的撤销器（P0-3-29 起它也会更正已有行）**import 这一份**：
+ * "什么形状才算一份能用的旧值快照"必须只有一个答案，两处各写一遍就会出现
+ * "漂移能还原、公告还原不了"这种只在真数据上才看得出的分叉。
+ */
+export function toRestore(raw: unknown): MessageExamRestore | null {
   if (typeof raw !== 'object' || raw === null) return null
   const record = raw as Record<string, unknown>
   if (typeof record.id !== 'string' || record.id === '') return null

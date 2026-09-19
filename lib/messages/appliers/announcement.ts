@@ -1,4 +1,8 @@
 import { applyCourseUpdate, summarizeApply } from '@/lib/course-update/apply'
+import {
+  readComponentProposals,
+  readExamProposals,
+} from '@/lib/messages/exam-proposals/ensure'
 import { validateExamInput, validateGradeComponentInput } from '@/lib/course-update/normalize'
 import { parseCourseUpdate } from '@/lib/course-update/parse'
 import type { ParsedExam, ParsedGradeComponent } from '@/lib/course-update/normalize'
@@ -21,6 +25,18 @@ import type { ApplyContext, ApplyOutcome, MessageApplier } from '@/lib/messages/
  * （模型挂了会连累作业同步，那是本末倒置）。所以同步只做关键词粗筛
  * （`lib/course-update/landing.ts`），真正的解析在用户点确认时做 ——
  * 与 3-24「解析不落库、确认才写」完全同形（ADR-015）。
+ *
+ * ### 🔴 P0-3-29：改期类公告**提前到打开消息栏时**解析，确认时**复用**
+ * 「Midterm 1 改期到 9/27」这种最常见的公告，用户点的是一个"会把哪一条改成什么"的按钮 ——
+ * 点之前必须看到 `9/28 → 9/27`。所以消息栏打开时会调一次
+ * `POST /api/v1/messages/exam-proposals`，把提案（含 `before → after` 与"落到哪一行"）
+ * 算好写进 `payload.examProposals`。
+ *
+ * 本 applier 因此有**两条路**：
+ * - `examProposalsStatus` 是 `ready` / `clean` → **照提案写**（不回查正文、不再解析）。
+ *   "所见即所写"：重新解析一次可能给出不同结论，那回执就和界面上那句对不上了；
+ * - 其余（没算过 / 算失败 / 老数据）→ 退回上面的老路（确认这一刻解析）。
+ *   这样懒补那趟链路挂了也**不会让用户没法处理这条公告**。
  *
  * ### 🔴 与对话框写入器共用 `applyCourseUpdate`（不是重写一遍）
  * 那条通道的纪律（只追加、复用 `syncExamToTask` 派生链、按 source 分组合计校验）
@@ -92,12 +108,30 @@ export const announcementApplier: MessageApplier = async (
   }
 
   const courseId = typeof payload.courseId === 'string' ? payload.courseId : ''
-  const announcementId = typeof payload.announcementId === 'string' ? payload.announcementId : ''
-  if (courseId === '' || announcementId === '') {
+  if (courseId === '') {
     return {
       ok: false,
       code: 'announcement_payload_incomplete',
-      message: '这条公告消息缺少课程或公告标识，无法写入，请改用对话框处理',
+      message: '这条公告消息缺少课程标识，无法写入，请改用对话框处理',
+    }
+  }
+
+  // ---------- 2') 提案已算好 → 照它写（P0-3-29） ----------
+  //
+  // 消息栏里那份结论**就是用户看到的那份**：他看到的「9/28 → 9/27」必须等于真正
+  // 写进库的东西。这里再解析一次，两处就可能给出不同答案 —— 那回执里那句
+  // "更正 1 条"就成了用户核对不了的东西（CodingRules §10.1 第 21 条的形状）。
+  const proposalStatus = payload.examProposalsStatus
+  if (proposalStatus === 'ready' || proposalStatus === 'clean') {
+    return applyFromProposals({ ctx, courseId })
+  }
+
+  const announcementId = typeof payload.announcementId === 'string' ? payload.announcementId : ''
+  if (announcementId === '') {
+    return {
+      ok: false,
+      code: 'announcement_payload_incomplete',
+      message: '这条公告消息缺少公告标识，无法写入，请改用对话框处理',
     }
   }
 
@@ -201,9 +235,96 @@ export const announcementApplier: MessageApplier = async (
   }
 
   // 透传本次写入的行 id：撤销（P0-3-26）按它精准回滚，绝不整表清空。
+  // ⚠️ `examRestores`（被更正的旧值）也要一并透传 —— 撤销时对它们是**写回旧值**，
+  // 不是删除。漏掉它们的表现是：改期被撤销后，用户原本那条考试的日期没回来。
   const applied = result.applied
   const hasApplied =
-    (applied.examDateIds?.length ?? 0) > 0 || (applied.gradeComponentIds?.length ?? 0) > 0
+    (applied.examDateIds?.length ?? 0) > 0 ||
+    (applied.gradeComponentIds?.length ?? 0) > 0 ||
+    (applied.examRestores?.length ?? 0) > 0
+  return {
+    ok: true,
+    summary: parts.join(' · '),
+    ...(hasApplied ? { applied } : {}),
+  }
+}
+
+/**
+ * 照**已经算好的提案**写（P0-3-29 的新路径）。
+ *
+ * ### 三条纪律
+ * 1. **只写 `create` / `update` 两类**。多命中 / 名字不可辨识 / 已存在一模一样的
+ *    一条都不写，并在回执里点名 —— 猜错比不猜更糟（ADR-016 R3：不许静默失败）。
+ * 2. `update` 带 `targetExamId`，`create` 带 `null`（强制新增）——
+ *    **所见即所写**，写入器不再重新解析一遍。
+ * 3. 写入仍然走 `applyCourseUpdate`（不另写一条写库路径）：
+ *    只追加 / 复用 `syncExamToTask` / 留旧值快照这三条纪律一条都不能少。
+ */
+async function applyFromProposals(input: {
+  ctx: ApplyContext
+  courseId: string
+}): Promise<ApplyOutcome> {
+  const { ctx, courseId } = input
+  const proposals = readExamProposals(ctx.payload)
+  const components = readComponentProposals(ctx.payload)
+
+  // `update` 却没有目标 id = 半截数据（手工改库 / 老数据）。不算可写，也不许退化成新增。
+  const isWritable = (item: { kind: string; targetId: string | null }) =>
+    item.kind === 'create' || (item.kind === 'update' && item.targetId !== null)
+  const writable = proposals.filter(isWritable)
+  const blocked = proposals.filter((item) => !isWritable(item))
+
+  if (writable.length === 0 && components.length === 0) {
+    const first = blocked[0]
+    // 空写入的按钮/回执必须是「知道了」（R3）：这里确实一个字段都不会写。
+    return {
+      ok: true,
+      summary: first
+        ? `知道了（${first.examName}：${first.reason ?? '没有可写入的变更'}）`
+        : '知道了（这条公告里没有可写入的考试 / 成绩构成）',
+    }
+  }
+
+  const exams: ParsedExam[] = writable.map((item) => ({
+    examName: item.examName,
+    examDate: item.examDate,
+    examTime: item.examTime,
+    location: item.location,
+    sourceExcerpt: item.sourceExcerpt,
+    // `create` 显式传 null = "用户看过了，就是要新增一条"。
+    targetExamId: item.kind === 'update' ? item.targetId : null,
+  }))
+  const gradeComponents: ParsedGradeComponent[] = components.map((item) => ({
+    name: item.name,
+    weightPercent: item.weightPercent,
+    notes: item.notes,
+    sourceExcerpt: item.sourceExcerpt,
+  }))
+
+  let result
+  try {
+    result = await applyCourseUpdate(ctx.supabase, { courseId, exams, gradeComponents })
+  } catch (error) {
+    const code = (error as { code?: string }).code
+    if (code === 'not_found') {
+      return { ok: false, code: 'not_found', message: '课程不存在或无权访问，已停止写入' }
+    }
+    console.error('[messages] 公告写入失败（提案路径）:', error)
+    return { ok: false, code: 'apply_failed', message: '写入失败，请稍后重试或到课程页手动处理' }
+  }
+
+  const parts = [summarizeApply(result)]
+  if (blocked.length > 0) {
+    parts.push(
+      `另有 ${blocked.length} 条没写（${blocked[0].examName}：${blocked[0].reason ?? '未写入'}）`,
+    )
+  }
+
+  const applied = result.applied
+  const hasApplied =
+    (applied.examDateIds?.length ?? 0) > 0 ||
+    (applied.gradeComponentIds?.length ?? 0) > 0 ||
+    (applied.examRestores?.length ?? 0) > 0
   return {
     ok: true,
     summary: parts.join(' · '),

@@ -13,9 +13,9 @@ import { useRef } from "react"
 
 import { sourceLabel } from "@/lib/course-update/weights"
 import { Button } from "@/components/ui/button"
+import { examScheduleLabel } from "@/lib/course-update/exam-match"
 import {
   candidateHint,
-  examKey,
   formatDay,
   gradeKey,
   isEditable,
@@ -307,13 +307,22 @@ function TaskReview({ flow }: { flow: CourseUpdateFlow }) {
 }
 
 /**
- * 考试分区（P0-3-24）。
+ * 考试分区（P0-3-24，P0-3-29 改成"改期 = 更新提案"）。
  *
  * 三条都要显示，缺一条用户就无法核对：
  * 1. **逐字原文摘录**（`sourceExcerpt`）—— 没有它用户没法判断模型有没有编日期，
  *    而服务端校验器要求非空，所以这里必然有值；
  * 2. **日期待定**如实写成待定（`examDate === null`），不当成"没识别出来"而隐藏；
- * 3. **与现有考试重名时提示**——本通道是追加不是覆盖，重名会真的多出一条。
+ * 3. **这条到底会改哪一行**（`examResolutions`）—— 命中已有考试就写「更新 旧 → 新」，
+ *    确无命中才写「新增」。
+ *
+ * 🔴 判定**不在这里做**：`flow.examResolutions` 由 `resolveExamTargets()` 算出
+ * （服务端写入器用的是同一份函数）。这里只负责把它画出来 —— 界面上写"更新"、
+ * 库里却新增了一条，是最难发现的那类错（P0-3-15 同形）。
+ *
+ * 🔴 多命中 / 名字不可辨识 → **列出来让人挑**，绝不默认选第一条。
+ * 在"改哪一场"这件事上替用户猜，猜错的代价（把 A 场的日期写到 B 场上）
+ * 远大于多一次点击。
  */
 function ExamReview({ flow }: { flow: CourseUpdateFlow }) {
   const exams = flow.parsed?.exams ?? []
@@ -324,9 +333,13 @@ function ExamReview({ flow }: { flow: CourseUpdateFlow }) {
       </p>
       {exams.map((exam, index) => {
         const picked = flow.examPicked[index] !== false
-        // 精确重复（同名 + 同日期）→ 默认没勾、并说明原因；同名不同日期只给提醒（可能是补考/改期）。
-        const existed = flow.existingExamKeys.includes(examKey(exam.examName, exam.examDate))
-        const duplicated = flow.existingExamNames.includes(exam.examName)
+        const resolution = flow.examResolutions[index]
+        const decision = flow.examDecisions[index] ?? { mode: "unset" as const }
+        const kind = resolution?.kind ?? "create"
+        const target = resolution?.target ?? null
+        const needsChoice = kind === "ambiguous" || kind === "unidentifiable"
+        const labelOf = (row: { examName: string; examDate: string | null; examTime: string | null; location: string | null }) =>
+          examScheduleLabel(row)
         return (
           <div key={index} className="rounded-lg border border-border bg-muted/40 p-3">
             <label className="flex cursor-pointer items-start gap-2 text-sm">
@@ -344,9 +357,24 @@ function ExamReview({ flow }: { flow: CourseUpdateFlow }) {
                   {exam.examTime ? ` · ${exam.examTime}` : ""}
                   {exam.location ? ` · ${exam.location}` : ""}
                 </span>
-                {existed && (
+                {kind === "update" && (
+                  <span className="ml-1 rounded bg-muted px-1 text-xs text-muted-foreground">
+                    更新已有那一条
+                  </span>
+                )}
+                {kind === "create" && (
+                  <span className="ml-1 rounded bg-muted px-1 text-xs text-muted-foreground">
+                    新增
+                  </span>
+                )}
+                {kind === "duplicate" && (
                   <span className="ml-1 rounded bg-muted px-1 text-xs text-muted-foreground">
                     已存在
+                  </span>
+                )}
+                {needsChoice && (
+                  <span className="ml-1 rounded bg-muted px-1 text-xs text-muted-foreground">
+                    待你指定
                   </span>
                 )}
               </span>
@@ -354,16 +382,53 @@ function ExamReview({ flow }: { flow: CourseUpdateFlow }) {
             <p className="mt-1 border-l-2 border-border pl-2 text-xs text-muted-foreground">
               原文：{exam.sourceExcerpt}
             </p>
-            {existed && (
-              <p className="mt-1 text-xs text-muted-foreground">
-                这门课已有同名同日期的一条 —— 已默认不勾选。仍想再写一条就把它勾上。
+
+            {kind === "update" && target && (
+              <p className="mt-1 text-xs text-amber-600 dark:text-amber-400">
+                改期：{labelOf(target)} → {labelOf(exam)}
+                <br />
+                同名考试已存在，勾选后是改这一条，不会多出一条
               </p>
             )}
-            {!existed && duplicated && (
-              <p className="mt-1 text-xs text-amber-600 dark:text-amber-400">
-                这门课已有一条同名考试（日期不同）—— 这里是追加，勾选后会变成两条（若只是改期，
-                请到课程页改）
+            {kind === "duplicate" && target && (
+              <p className="mt-1 text-xs text-muted-foreground">
+                这门课已有一条一模一样的（{labelOf(target)}）—— 已默认不勾选。仍想再写一条就把它勾上。
               </p>
+            )}
+            {kind === "missing" && (
+              <p className="mt-1 text-xs text-muted-foreground">
+                {resolution?.reason ?? "目标行已不存在，未写入"}
+              </p>
+            )}
+
+            {needsChoice && (
+              <div className="mt-2 space-y-1 rounded border border-border bg-background p-2">
+                <p className="text-xs text-amber-600 dark:text-amber-400">
+                  {resolution?.reason ?? "请指定要改哪一条"}
+                </p>
+                <label className="flex cursor-pointer items-start gap-2 text-xs">
+                  <input
+                    type="radio"
+                    name={`exam-target-${index}`}
+                    checked={decision.mode === "new"}
+                    onChange={() => flow.chooseExamDecision(index, { mode: "new" })}
+                    className="mt-0.5"
+                  />
+                  <span>新建一条（这门课没有对得上的考试）</span>
+                </label>
+                {(resolution?.candidates ?? []).map((row) => (
+                  <label key={row.id} className="flex cursor-pointer items-start gap-2 text-xs">
+                    <input
+                      type="radio"
+                      name={`exam-target-${index}`}
+                      checked={decision.mode === "update" && decision.id === row.id}
+                      onChange={() => flow.chooseExamDecision(index, { mode: "update", id: row.id })}
+                      className="mt-0.5"
+                    />
+                    <span>改这一条：{labelOf(row)}</span>
+                  </label>
+                ))}
+              </div>
             )}
           </div>
         )

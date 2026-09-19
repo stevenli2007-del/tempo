@@ -229,6 +229,18 @@ export type MessagePayload = {
    * 或者给站内路径加上 `target="_blank"`。
    */
   paperPath?: string
+  /**
+   * 考试 / 成绩构成提案（P0-3-29，懒补产出）。**只有 `announcement` 类型有**。
+   *
+   * `examProposalsStatus` 为 `ready` 时 applier 直接照它写（不再解析正文）；
+   * 为 `pending` / `failed` / 字段缺失时退回"确认时解析"。
+   */
+  examProposals?: MessageExamProposal[]
+  /** 与考试提案同批解析出来的成绩构成（同样是为了省掉确认时那次解析）。 */
+  componentProposals?: MessageComponentProposal[]
+  examProposalsStatus?: MessageExamProposalsStatus
+  /** 核对不出来的人话原因（`examProposalsStatus='failed'` 时必有）。 */
+  examProposalsError?: string
   [key: string]: unknown
 }
 
@@ -255,6 +267,59 @@ export type MessageSummary = {
   status: 'ok' | 'failed'
   createdAt: string
 }
+
+/**
+ * 一条**考试提案**（P0-3-29，懒补产出）。
+ *
+ * ### 为什么要在点「确认」**之前**就把它算出来
+ * 老师公告「Midterm 1 改期到 9/27」时，真正要用户裁决的是
+ * 「要不要把 9/28 那条改成 9/27」。若等用户点了确认才解析，他点的是一个
+ * 不知道会改哪一条的按钮 —— 那与 ADR-015「已确认的绝不被自动覆盖」直接冲突。
+ * 所以打开消息栏时先算一次（`POST /api/v1/messages/exam-proposals`），
+ * 把 `before → after` 写进 `payload.details` 给本人看。
+ *
+ * ### 确认时**复用**这一份
+ * applier 不再重新解析公告正文：一是省一次模型调用，二是"所见即所写" ——
+ * 重新解析可能给出不一样的结论，那回执就和界面上那句对不上了。
+ */
+export type MessageExamProposal = {
+  examName: string
+  examDate: string | null
+  examTime: string | null
+  location: string | null
+  sourceExcerpt: string
+  /** 与 `lib/course-update/exam-match.ts` 的 `ExamResolutionKind` 同一套取值。 */
+  kind: 'create' | 'update' | 'duplicate' | 'ambiguous' | 'unidentifiable' | 'missing'
+  /** `update` 时命中的那一行 id；其余为 null。 */
+  targetId: string | null
+  /** 旧值的人话（`update` 时必有）—— 界面与回执都用它，不许再拼一遍。 */
+  beforeLabel: string | null
+  /** 新值的人话。 */
+  afterLabel: string
+  /** 多命中 / 不可辨识时列出来让人挑（id + 人话）。 */
+  candidates: { id: string; label: string }[]
+  /** 不写的原因（人话）。`create` / `update` 为 null。 */
+  reason: string | null
+}
+
+/** 一条成绩构成提案（P0-3-29，与考试提案同批懒补 —— 省掉确认时那次解析）。 */
+export type MessageComponentProposal = {
+  name: string
+  weightPercent: number | null
+  notes: string | null
+  sourceExcerpt: string
+}
+
+/**
+ * 考试提案的核对进度（P0-3-29）—— 与 `driftStatus` 同一套形状，同一个理由：
+ * 它是**这一条提案**的属性，与 `receipt` / `applied` 同级，另开一张表会让
+ * "重放同步"与"重算提案"互相踩（ADR-024）。
+ *
+ * ⚠️ **与 drift 不同**：`pending` / `failed` **不禁用「确认」**。
+ * 公告没有提案也能确认（applier 会退回"确认时解析"那条老路），
+ * 卡住按钮只会让用户没法处理一条本来能处理的公告。
+ */
+export type MessageExamProposalsStatus = 'pending' | 'ready' | 'clean' | 'failed'
 
 /** 提案（camelCase，供 UI 使用；snake_case 的列名只出现在 `lib/messages.ts`）。 */
 export type Message = {

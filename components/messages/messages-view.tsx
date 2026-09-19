@@ -61,6 +61,15 @@ const MAX_SUMMARY_ROUNDS = 4
 const MAX_DRIFT_ROUNDS = 2
 
 /**
+ * 考试提案请求最多跑几轮（P0-3-29）。
+ *
+ * 一轮 3 条（见 `exam-proposals/ensure.ts`），一轮一次打开最多 12 次模型调用。
+ * 与要点 / 漂移同一个形状：服务端一轮只算几条，剩下的靠 `remaining` 续轮，
+ * 避免"要点一次刷新才补齐"那种"看起来没生效"的观感。
+ */
+const MAX_EXAM_PROPOSAL_ROUNDS = 4
+
+/**
  * 从接口响应里挑出漂移消息，只取 `payload`。
  *
  * 🔴 **只取 payload**，不是整条替换：`POST /messages/drift` 回的是服务端那一刻的
@@ -122,6 +131,8 @@ export function MessagesView({
   const askedRef = useRef<Set<string>>(new Set())
   /** 同理，防止同一次访问里反复重问漂移（P0-3-20）。 */
   const askedDriftRef = useRef<Set<string>>(new Set())
+  /** 同理，防止同一次访问里反复重算考试提案（P0-3-29）。 */
+  const askedExamProposalsRef = useRef<Set<string>>(new Set())
 
   // 服务端带下来的要点 + 客户端补进来的：后者优先（它是更新的那一次）。
   const views: MessageView[] = useMemo(
@@ -247,6 +258,53 @@ export function MessagesView({
       } catch {
         // 网络层失败：静默。占位文案还在，用户点「原文 ↗」照样能看到 Canvas 上那份。
         // 下次打开消息栏由服务端的 `driftStatus='pending'` 自然重试。
+      }
+    })()
+  }, [views])
+
+  /**
+   * 懒算考试提案（P0-3-29）：**只对"有落点、还没算过"的公告**发一次请求。
+   *
+   * 算出来的东西会追加到 `payload.details`（「考试改期：Midterm 1 9/28 → 9/27」），
+   * 所以**没有额外的忙态文案**：算之前气泡里就是公告正文那几行，算完多几行，
+   * 没有"在算"这个中间态需要表达 —— 与 drift 那边"占位文案本来就写着"同理。
+   *
+   * 🔴 这条链路失败**不弹错、也不禁用按钮**：没提案也能确认（applier 会退回
+   * "确认那一刻解析"）。它挂了的表现只是"看不到 before → after 那行"。
+   */
+  useEffect(() => {
+    const missing = views
+      .filter((view) => view.needsExamProposals && !askedExamProposalsRef.current.has(view.id))
+      .map((view) => view.id)
+    if (missing.length === 0) return
+
+    for (const id of missing) askedExamProposalsRef.current.add(id)
+
+    void (async () => {
+      try {
+        for (let round = 0; round < MAX_EXAM_PROPOSAL_ROUNDS; round += 1) {
+          const res = await fetch("/api/v1/messages/exam-proposals", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ messageIds: missing }),
+          })
+          if (!res.ok) return
+
+          const data = await res.json()
+          const incoming = readIncomingDrift(data?.data?.messages)
+          if (incoming.length > 0) {
+            const byId = new Map(incoming.map((entry) => [entry.id, entry.payload]))
+            setMessages((prev) =>
+              prev.map((message) => {
+                const payload = byId.get(message.id)
+                return payload ? { ...message, payload } : message
+              }),
+            )
+          }
+          if ((data?.meta?.remaining ?? 0) <= 0) return
+        }
+      } catch {
+        // 网络层失败：静默。下次打开消息栏由"状态字段仍是缺失"自然重试。
       }
     })()
   }, [views])

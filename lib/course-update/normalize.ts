@@ -34,6 +34,17 @@ export type ParsedExam = {
   location: string | null
   /** 原文逐字摘录。**没有摘录的考试一律不收**（见 `validateExamInput`）。 */
   sourceExcerpt: string | null
+  /**
+   * 用户**显式指定**要改哪一条已有考试（P0-3-29）。
+   *
+   * 三态是有意的：
+   * - 不传 / `undefined` = 没挑过 → 由 `resolveExamTargets()` 按名字解析；
+   * - `null` = 明确要「新建一条」（即便有同名行，用户看过了）；
+   * - id = 明确要改这一条（多命中 / 名字不可辨识时由用户挑出来）。
+   *
+   * ⚠️ **不进 LLM schema** —— 这是人的裁决，不是模型该猜的东西。
+   */
+  targetExamId?: string | null
 }
 
 /** 一条解析出来的成绩构成（`grade_components` 的候选行）。 */
@@ -204,6 +215,19 @@ export function validateExamInput(raw: unknown): { ok: true; value: ParsedExam }
     return { ok: false, message: `「${name.value}」缺少原文摘录（sourceExcerpt），无法核对，已跳过` }
   }
 
+  // 目标行（P0-3-29）：不传 = 由写入器解析；null = 强制新增；id = 强制改这一条。
+  // 只放行 uuid —— 它会被拼进 `.eq('id', …)`，格式不收口就是让客户端塞任意值进来。
+  let targetExamId: string | null | undefined = undefined
+  if (r.targetExamId !== undefined) {
+    if (r.targetExamId === null) {
+      targetExamId = null
+    } else if (typeof r.targetExamId === 'string' && UUID_PATTERN.test(r.targetExamId.trim())) {
+      targetExamId = r.targetExamId.trim()
+    } else {
+      return { ok: false, message: `「${name.value}」的 targetExamId 必须是考试行 id 或 null` }
+    }
+  }
+
   return {
     ok: true,
     value: {
@@ -212,6 +236,7 @@ export function validateExamInput(raw: unknown): { ok: true; value: ParsedExam }
       examTime: time.value,
       location: location.value,
       sourceExcerpt: excerpt.value,
+      ...(targetExamId !== undefined ? { targetExamId } : {}),
     },
   }
 }

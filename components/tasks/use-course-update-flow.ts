@@ -26,6 +26,11 @@ import { useState } from "react"
 import { useRouter } from "next/navigation"
 
 import {
+  resolveExamTargets,
+  type ExamResolution,
+  type ExamRowRef,
+} from "@/lib/course-update/exam-match"
+import {
   summarizeWeightTotals,
   weightWarnings,
   type WeightedItem,
@@ -103,15 +108,21 @@ export type ApplySummary = {
 }
 
 /**
- * 去重键（考试：名称 + 日期；构成：名称 + 占比）。导出给渲染层判断"这条已存在"。
+ * 一条考试的**去向裁决**（P0-3-29）。
  *
- * 为什么需要：本通道是**只追加**（不是 PUT 全量替换），把同一条公告粘第二遍就会写出
- * 重复行。这里不"静默跳过"（那是 ADR-016 R3 的静默失败），而是**把默认勾选取消**——
- * 用户看得见那个空勾选框、也看得见旁边写的"已存在"，想再写一条可以自己勾回来。
+ * 三态对应界面上的三种情形：
+ * - `new`：新增一条（默认；用户显式要"再写一条"时也是它）；
+ * - `update`：改这一条（命中已有考试 / 用户从候选里挑了一场）；
+ * - `unset`：**还没决定**（多命中或名字不可辨识）→ 默认不勾选，必须由用户挑。
+ *
+ * 🔴 服务端会按 `targetExamId` 照办：`new` 传 `null`（强制新增）、`update` 传 id、
+ * `unset` 不传（让服务端重新解析并拒绝）。所以这里**绝不能**在没有用户选择时
+ * 悄悄填一个默认值 —— 那是替用户猜哪一场考试。
  */
-export function examKey(name: string, date: string | null): string {
-  return `${name.trim().toLowerCase()}|${date ?? ''}`
-}
+export type ExamDecision =
+  | { mode: "new" }
+  | { mode: "update"; id: string }
+  | { mode: "unset" }
 
 export function gradeKey(name: string, weightPercent: number | null): string {
   return `${name.trim().toLowerCase()}|${weightPercent ?? ''}`
@@ -196,13 +207,21 @@ export function useCourseUpdateFlow(options: { initialCourses?: CourseOption[] }
    * 只看本次输入就是在制造假警报（与 `lib/course-update/weights.ts` 里"按 source 分组"同一条纪律）。
    */
   const [existingWeights, setExistingWeights] = useState<WeightedItem[]>([])
-  /** 现有考试名（用于提示"这条会和已有考试重名"，因为本通道是追加、不覆盖）。 */
-  const [existingExamNames, setExistingExamNames] = useState<string[]>([])
-  /** 现有考试 / 构成的**精确去重键**（同名 + 同日期 / 同名 + 同占比）→ "已存在"提示与默认不勾选。 */
-  const [existingExamKeys, setExistingExamKeys] = useState<string[]>([])
-  const [existingGradeKeys, setExistingGradeKeys] = useState<string[]>([])
   /** 现有构成没取到（网络/接口问题）→ 合计预览不可信，如实说明而不是装作算过。 */
   const [weightPreviewUnavailable, setWeightPreviewUnavailable] = useState(false)
+  /**
+   * P0-3-29：该课**已有的考试行**（id + 名称 + 日期），供写入前解析"这条落到哪一行"。
+   *
+   * 🔴 判定用的是**服务端那一份纯函数**（`resolveExamTargets`）—— 界面上写的
+   * 「更新 9/28 → 9/27」必须等于真正发生的事，两边各判一遍就是 P0-3-15 那种分叉。
+   */
+  const [existingExamRows, setExistingExamRows] = useState<ExamRowRef[]>([])
+  /** 每条解析出的考试 → 它落到哪一行（`create` / `update` / 不写）。 */
+  const [examResolutions, setExamResolutions] = useState<Record<number, ExamResolution>>({})
+  /** 每条考试的**去向裁决**（见 `ExamDecision`）。多命中时默认为 `unset`（不替用户猜）。 */
+  const [examDecisions, setExamDecisions] = useState<Record<number, ExamDecision>>({})
+  /** 现有成绩构成的**精确去重键**（同名 + 同占比）→ "已存在"提示与默认不勾选。 */
+  const [existingGradeKeys, setExistingGradeKeys] = useState<string[]>([])
 
   // 打开时拉一次课程列表（已拉过就不再拉）。改用「打开」事件触发，避免 effect 内同步 setState（react-hooks/set-state-in-effect）。
   function loadCourses() {
@@ -228,8 +247,9 @@ export function useCourseUpdateFlow(options: { initialCourses?: CourseOption[] }
     setResolutions({})
     setExamPicked({})
     setGradePicked({})
-    setExistingExamKeys([])
     setExistingGradeKeys([])
+    setExamResolutions({})
+    setExamDecisions({})
     setError(null)
   }
 
@@ -240,21 +260,27 @@ export function useCourseUpdateFlow(options: { initialCourses?: CourseOption[] }
    * 与列表端点 `{ data, meta }` 不一致 —— 这是项目里已知的包装不统一（见 MEMORY）。
    * 所以这里按裸对象读，别照抄别处的 `d.data`。
    *
-   * @returns 现有考试 / 构成的去重键（调用方用它决定默认勾选）。
+   * @returns 现有的考试行（含 id）与构成的去重键（调用方用它定默认勾选）。
    */
   async function loadExistingContext(
     cid: string,
-  ): Promise<{ examKeys: string[]; gradeKeys: string[] }> {
+  ): Promise<{ examRows: ExamRowRef[]; gradeKeys: string[] }> {
     setWeightPreviewUnavailable(false)
     try {
       const res = await fetch(`/api/v1/courses/${encodeURIComponent(cid)}`)
       if (!res.ok) {
         setWeightPreviewUnavailable(true)
-        return { examKeys: [], gradeKeys: [] }
+        return { examRows: [], gradeKeys: [] }
       }
       const detail = (await res.json()) as {
         gradeComponents?: { name?: string | null; source?: string | null; weightPercent?: number | null }[]
-        examDates?: { examName?: string | null; examDate?: string | null }[]
+        examDates?: {
+          id?: string | null
+          examName?: string | null
+          examDate?: string | null
+          examTime?: string | null
+          location?: string | null
+        }[]
       }
       const grades = Array.isArray(detail.gradeComponents) ? detail.gradeComponents : []
       setExistingWeights(
@@ -264,12 +290,22 @@ export function useCourseUpdateFlow(options: { initialCourses?: CourseOption[] }
         })),
       )
       const exams = Array.isArray(detail.examDates) ? detail.examDates : []
-      const examKeys = exams
-        .map((row) => examKey(String(row.examName ?? ""), row.examDate ?? null))
-        .filter((key) => key !== "|")
-      setExistingExamNames(exams.map((row) => String(row.examName ?? "")).filter((n) => n !== ""))
+      // 拿不到 id 的行**不进候选**：匹配结果要能落到具体一行，没有 id 就是"看得见改不动"。
+      const examRows: ExamRowRef[] = exams.flatMap((row) =>
+        typeof row.id === "string" && row.id !== ""
+          ? [
+              {
+                id: row.id,
+                examName: String(row.examName ?? ""),
+                examDate: row.examDate ?? null,
+                examTime: row.examTime ?? null,
+                location: row.location ?? null,
+              },
+            ]
+          : [],
+      )
       return {
-        examKeys,
+        examRows,
         gradeKeys: grades.map((row) =>
           gradeKey(String(row.name ?? ""), typeof row.weightPercent === "number" ? row.weightPercent : null),
         ),
@@ -278,7 +314,7 @@ export function useCourseUpdateFlow(options: { initialCourses?: CourseOption[] }
       // 取不到就**如实标记**（渲染层会说"合计校验将在写入后给出"），
       // 不能默默按"零条现有构成"算 —— 那会报一个不存在的缺口。
       setWeightPreviewUnavailable(true)
-      return { examKeys: [], gradeKeys: [] }
+      return { examRows: [], gradeKeys: [] }
     }
   }
 
@@ -291,10 +327,11 @@ export function useCourseUpdateFlow(options: { initialCourses?: CourseOption[] }
     resetInput()
     setSummary(null)
     setExistingWeights([])
-    setExistingExamNames([])
-    setExistingExamKeys([])
+    setExistingExamRows([])
     setExistingGradeKeys([])
     setWeightPreviewUnavailable(false)
+    setExamResolutions({})
+    setExamDecisions({})
   }
 
   // ---------------------------------------------------------------
@@ -425,7 +462,9 @@ export function useCourseUpdateFlow(options: { initialCourses?: CourseOption[] }
     setExamPicked({})
     setGradePicked({})
     setExistingWeights([])
-    setExistingExamNames([])
+    setExistingExamRows([])
+    setExamResolutions({})
+    setExamDecisions({})
     setWeightPreviewUnavailable(false)
     setSummary(null)
     if (!courseId) {
@@ -544,30 +583,76 @@ export function useCourseUpdateFlow(options: { initialCourses?: CourseOption[] }
 
     setParsed({ tasks: safeTasks, exams, gradeComponents, warnings })
 
-    // 先取现有数据、再定默认勾选：已存在（同名 + 同日期 / 同名 + 同占比）的条目
-    // **默认不勾选**。注意这不是"静默跳过"——空勾选框 + 旁边的「已存在」说明就是给用户看的
-    // （静默跳过等于假装成功，是 R3 红线）。
-    let examKeys: string[] = []
+    // 先取现有数据、再定去向：命中已有考试 → **更新那条**（改期），确无命中才新增。
+    //
+    // 🔴 判定用服务端那份纯函数（`resolveExamTargets`），不在这里另写一条"同名即重复"：
+    // 旧的 `examKey(名称+日期)` 只在"同名**且**同日期"时命中，改期（同名不同日期）
+    // 恰恰不命中 —— 于是"Midterm 1 改到 9/27"被当成新增，库里两条并存（P0-3-29 的根因）。
+    let examRows: ExamRowRef[] = []
     let gradeKeys: string[] = []
     if (exams.length > 0 || gradeComponents.length > 0) {
       const existing = await loadExistingContext(cid)
-      examKeys = existing.examKeys
+      examRows = existing.examRows
       gradeKeys = existing.gradeKeys
     }
+    setExistingExamRows(examRows)
+
+    const resolutions = resolveExamTargets(
+      exams.map((exam) => ({
+        examName: exam.examName,
+        examDate: exam.examDate,
+        examTime: exam.examTime,
+        location: exam.location,
+      })),
+      examRows,
+    )
 
     const nextExamPicks: Record<number, boolean> = {}
-    exams.forEach((exam, index) => {
-      nextExamPicks[index] = !examKeys.includes(examKey(exam.examName, exam.examDate))
+    const nextResolutions: Record<number, ExamResolution> = {}
+    const nextDecisions: Record<number, ExamDecision> = {}
+    exams.forEach((_, index) => {
+      const resolution = resolutions[index]
+      nextResolutions[index] = resolution
+      if (resolution.kind === "update" && resolution.target) {
+        // 改期：默认勾选 + 指向那一行。用户看得见"9/28 → 9/27"，取消勾选就不改。
+        nextDecisions[index] = { mode: "update", id: resolution.target.id }
+        nextExamPicks[index] = true
+        return
+      }
+      if (resolution.kind === "create") {
+        nextDecisions[index] = { mode: "new" }
+        nextExamPicks[index] = true
+        return
+      }
+      if (resolution.kind === "duplicate") {
+        // 已经有一模一样的：默认不勾选（勾上 = 你明确要再加一条）。
+        nextDecisions[index] = { mode: "new" }
+        nextExamPicks[index] = false
+        return
+      }
+      // 多命中 / 名字不可辨识 / 目标行没了：**不替用户猜**，默认不勾选、等他挑。
+      nextDecisions[index] = { mode: "unset" }
+      nextExamPicks[index] = false
     })
     const nextGradePicks: Record<number, boolean> = {}
     gradeComponents.forEach((item, index) => {
       nextGradePicks[index] = !gradeKeys.includes(gradeKey(item.name, item.weightPercent))
     })
-    setExistingExamKeys(examKeys)
     setExistingGradeKeys(gradeKeys)
+    setExamResolutions(nextResolutions)
+    setExamDecisions(nextDecisions)
     setExamPicked(nextExamPicks)
     setGradePicked(nextGradePicks)
     return true
+  }
+
+  /** 用户为一条考试挑了去向（多命中 / 不可辨识时"列出来让他挑"）。 */
+  function chooseExamDecision(index: number, decision: ExamDecision) {
+    setExamDecisions((prev) => ({ ...prev, [index]: decision }))
+    // 挑了就要生效：否则界面上是"选了但仍未勾选"，用户会以为选了没用（R3 的形状）。
+    if (decision.mode !== "unset") {
+      setExamPicked((prev) => ({ ...prev, [index]: true }))
+    }
   }
 
   /** 截图档解析分支（P0-3-9）。 */
@@ -748,20 +833,39 @@ export function useCourseUpdateFlow(options: { initialCourses?: CourseOption[] }
       // ---------------------------------------------------------------
       // 为什么不复用 `PUT /courses/:id/exam-dates`：那个是全量替换，会把已有条目删掉。
       // 对话输入不是"这门课的完整构成"，用户完全不会预期自己的旧数据被清空。
+      //
+      // P0-3-29：每条考试带上 `targetExamId` —— 界面上写的是「更新 9/28 → 9/27」
+      // 还是「新增」，必须由**用户在界面上看到的那次判定**决定，不能让服务端再猜一遍
+      // （两边不一致的表现：用户以为改了日期，结果多出一条）。
+      const examPayload = (parsed.exams ?? [])
+        .map((exam, index) => ({ exam, index }))
+        .filter(({ index }) => examPicked[index] !== false)
+        .map(({ exam, index }) => {
+          const decision = examDecisions[index] ?? { mode: "new" as const }
+          return {
+            examName: exam.examName,
+            examDate: exam.examDate,
+            examTime: exam.examTime,
+            location: exam.location,
+            sourceExcerpt: exam.sourceExcerpt,
+            // `update` → 改这一条；`new` → null（强制新增，即便有同名行）；
+            // `unset` → 不传（让服务端重新解析，它会因为多命中而拒绝写入）。
+            ...(decision.mode === "update"
+              ? { targetExamId: decision.id }
+              : decision.mode === "new"
+                ? { targetExamId: null }
+                : {}),
+          }
+        })
+
       let apply: ApplySummary | null = null
-      if (pickedExams.length > 0 || pickedGrades.length > 0) {
+      if (examPayload.length > 0 || pickedGrades.length > 0) {
         const res = await fetch("/api/v1/course-updates", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             courseId,
-            exams: pickedExams.map((e) => ({
-              examName: e.examName,
-              examDate: e.examDate,
-              examTime: e.examTime,
-              location: e.location,
-              sourceExcerpt: e.sourceExcerpt,
-            })),
+            exams: examPayload,
             gradeComponents: pickedGrades.map((g) => ({
               name: g.name,
               weightPercent: g.weightPercent,
@@ -857,8 +961,9 @@ export function useCourseUpdateFlow(options: { initialCourses?: CourseOption[] }
     pickedGradeCount,
     previewWarnings,
     existingTotals,
-    existingExamNames,
-    existingExamKeys,
+    existingExamRows,
+    examResolutions,
+    examDecisions,
     existingGradeKeys,
     weightPreviewUnavailable,
     // 动作
@@ -876,6 +981,7 @@ export function useCourseUpdateFlow(options: { initialCourses?: CourseOption[] }
     chooseCandidate,
     toggleExam,
     toggleGrade,
+    chooseExamDecision,
     handleConfirm,
   }
 }

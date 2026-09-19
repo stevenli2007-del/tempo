@@ -21,6 +21,12 @@ import {
   validateExamInput,
   validateGradeComponentInput,
 } from "@/lib/course-update/normalize"
+import {
+  examChangeLabel,
+  isGenericExamName,
+  normalizeExamName,
+  resolveExamTargets,
+} from "@/lib/course-update/exam-match"
 import { summarizeWeightTotals, weightWarning, weightWarnings } from "@/lib/course-update/weights"
 
 let passed = 0
@@ -224,6 +230,138 @@ console.log("weights（按 source 分组 / 缺口留灰）")
 
   check("空数组 → 空分组（不造假分组）", summarizeWeightTotals([]).length === 0)
   check("source 缺失时归 manual", summarizeWeightTotals([{ weightPercent: 50 }])[0].source === "manual")
+}
+
+console.log("考试匹配（P0-3-29：改期 = 更新提案，不是新增行）")
+{
+  const row = (id: string, name: string, date: string | null) => ({
+    id,
+    examName: name,
+    examDate: date,
+    examTime: null,
+    location: null,
+  })
+
+  // ① 卡面验收①：同名不同日期 → 命中那一行，产出 update（绝不新增）。
+  {
+    const existing = [row("e1", "Midterm 1", "2026-09-28")]
+    const input = { examName: "Midterm 1", examDate: "2026-09-27", examTime: null, location: null }
+    const [r] = resolveExamTargets([input], existing)
+    check("同名不同日期 → update", r.kind === "update" && r.target?.id === "e1", JSON.stringify(r))
+  }
+
+  // ② 归一：大小写 / 空格 / 标点不算差异（Midterm1 ≡ Midterm 1）。
+  {
+    const existing = [row("e1", "Midterm 1", "2026-09-28")]
+    const input = { examName: "MIDTERM1", examDate: "2026-09-27", examTime: null, location: null }
+    const [r] = resolveExamTargets([input], existing)
+    check("名字归一后仍命中", r.kind === "update", JSON.stringify(r))
+  }
+
+  // ③ 名字完全一致、日期也一样 → duplicate（不写第二遍）。
+  {
+    const existing = [row("e1", "Midterm 1", "2026-09-28")]
+    const input = { examName: "Midterm 1", examDate: "2026-09-28", examTime: null, location: null }
+    const [r] = resolveExamTargets([input], existing)
+    check("一模一样 → duplicate", r.kind === "duplicate", JSON.stringify(r))
+  }
+
+  // ④ 卡面约束2：多命中不猜。
+  {
+    const existing = [row("e1", "Midterm 1", "2026-09-28"), row("e2", "Midterm 1", "2026-11-02")]
+    const input = { examName: "Midterm 1", examDate: "2026-09-27", examTime: null, location: null }
+    const [r] = resolveExamTargets([input], existing)
+    check("同名多行 → ambiguous", r.kind === "ambiguous" && r.candidates.length === 2, JSON.stringify(r))
+    check("ambiguous 不指定 target", r.target === null)
+  }
+
+  // ⑤ 卡面约束6：名字不可辨识 + 该课已有考试 → 不许悄悄新增。
+  {
+    const existing = [row("e1", "Midterm 1", "2026-09-28")]
+    const input = { examName: "the exam", examDate: "2026-09-27", examTime: null, location: null }
+    const [r] = resolveExamTargets([input], existing)
+    check("只写「考试」→ unidentifiable", r.kind === "unidentifiable", JSON.stringify(r))
+    check("unidentifiable 列出全部候选", r.candidates.length === 1)
+  }
+  {
+    // 一门课一条考试都没有时，「考试」指唯一那一场，新增是安全的。
+    const input = { examName: "考试", examDate: "2026-09-27", examTime: null, location: null }
+    const [r] = resolveExamTargets([input], [])
+    check("空课 + 通称 → create", r.kind === "create", JSON.stringify(r))
+  }
+
+  // ⑥ 跨课不串：existing 只给这一门课的行（调用方负责过滤），别的课的行不在里面就不可能命中。
+  {
+    const existing = [row("e9", "Midterm 1", "2026-09-28")]
+    const input = { examName: "Midterm 1", examDate: "2026-09-27", examTime: null, location: null }
+    const [r] = resolveExamTargets([input], existing.filter((item) => item.id === "e1"))
+    check("候选不含别课的行 → create", r.kind === "create")
+  }
+
+  // ⑦ 批内占位：两条输入命中同一行 → 第二条 duplicate（否则旧值快照会被覆盖）。
+  {
+    const existing = [row("e1", "Midterm 1", "2026-09-28")]
+    const inputs = [
+      { examName: "Midterm 1", examDate: "2026-09-27", examTime: null, location: null },
+      { examName: "Midterm 1", examDate: "2026-09-26", examTime: null, location: null },
+    ]
+    const rs = resolveExamTargets(inputs, existing)
+    check("批内第二条不重复落同一行", rs[0].kind === "update" && rs[1].kind === "duplicate", JSON.stringify(rs.map((r) => r.kind)))
+  }
+
+  // ⑧ 用户显式裁决优先于名字解析。
+  {
+    const existing = [row("e1", "Midterm 1", "2026-09-28"), row("e2", "Final", "2026-12-10")]
+    const picked = {
+      examName: "Midterm 1",
+      examDate: "2026-09-27",
+      examTime: null,
+      location: null,
+      targetExamId: "e2",
+    }
+    const [r] = resolveExamTargets([picked], existing)
+    check("显式指定 → 照指定的那行", r.kind === "update" && r.target?.id === "e2")
+  }
+  {
+    const existing = [row("e1", "Midterm 1", "2026-09-28")]
+    const forced = {
+      examName: "Midterm 1",
+      examDate: "2026-09-27",
+      examTime: null,
+      location: null,
+      targetExamId: null,
+    }
+    const [r] = resolveExamTargets([forced], existing)
+    check("显式 targetExamId=null → 强制新增", r.kind === "create")
+  }
+  {
+    const stale = {
+      examName: "Midterm 1",
+      examDate: "2026-09-27",
+      examTime: null,
+      location: null,
+      targetExamId: "00000000-0000-4000-8000-000000000000",
+    }
+    const [r] = resolveExamTargets([stale], [row("e1", "Midterm 1", "2026-09-28")])
+    check("目标行不在 → missing（不退化成新增）", r.kind === "missing", JSON.stringify(r))
+  }
+
+  // ⑨ 归一与通称判定的边界：不许把 Exam 1 与 Midterm 1 当成一场。
+  check("normalizeExamName 去标点空格", normalizeExamName("Midterm-1 (Exam)") === "midterm1exam")
+  check("Midterm 1 与 Exam 1 键不同", normalizeExamName("Midterm 1") !== normalizeExamName("Exam 1"))
+  check("isGenericExamName('the exam')", isGenericExamName("the exam"))
+  check("isGenericExamName('考试')", isGenericExamName("考试"))
+  check("isGenericExamName('Midterm 1') = false", !isGenericExamName("Midterm 1"))
+
+  // ⑩ 改期文案：回执与界面共用同一句（两处各拼一遍就会说法不一）。
+  {
+    const target = row("e1", "Midterm 1", "2026-09-28")
+    const label = examChangeLabel(
+      { examName: "Midterm 1", examDate: "2026-09-27", examTime: null, location: null },
+      target,
+    )
+    check("改期文案含 before → after", label.includes("2026-09-28") && label.includes("2026-09-27"), label)
+  }
 }
 
 console.log("schema ↔ 校验器 一致性")
