@@ -554,6 +554,48 @@ async function main(): Promise<void> {
     )
   }
 
+  const reviewOkCase = results.find(
+    (r) => r.c.label === "exam_review_summaries.status = 'ok'（默认态）",
+  )
+  const reviewControl = results.find(
+    (r) => r.c.label === "exam_review_summaries.status = '__bogus__'（对照组）",
+  )
+  const reviewFilesCase = results.find(
+    (r) => r.c.label === "exam_review_files（表存在 + 必填列齐全 ⇒ 只被外键拦）",
+  )
+  if (reviewOkCase?.verdict === 'accepted' && reviewControl?.verdict === 'rejected') {
+    console.log(
+      '  ✅ P0-3-31 迁移生效：exam_review_summaries / exam_review_files 已建，' +
+        'status 接受 ok/failed，且 CHECK 仍在拦非法值。',
+    )
+  } else if (reviewOkCase?.verdict !== 'accepted') {
+    console.log(
+      '  ❌ P0-3-31 迁移**未生效** —— 回到 SQL Editor 重跑 `20260926000000_exam_review.sql`。',
+    )
+  } else {
+    console.log(
+      '  ❌ 对照组异常：exam_review_summaries.status 的 CHECK 没有拦下非法值 —— 约束可能被整体删掉了，人工核对。',
+    )
+  }
+  if (reviewOkCase?.verdict === 'accepted' && reviewFilesCase?.verdict !== 'accepted') {
+    console.log(
+      '  ⚠️  exam_review_files 存在但必填列不全 —— 迁移可能只跑了一半（`create table` 过了、' +
+        '`alter table` 没跑），人工核对迁移文件。',
+    )
+  }
+  const reviewLocaleCase = results.find(
+    (r) => r.c.label === "exam_review_summaries.locale = 'fr'（**应放行**，反向断言）",
+  )
+  if (reviewLocaleCase?.verdict === 'rejected') {
+    console.log(
+      '  ⚠️  exam_review_summaries.locale 被加上了 CHECK —— 与 ADR-026 相反（同 file_summaries），' +
+        '请人工确认是不是有意改的。',
+    )
+  }
+  console.log(
+    '  ℹ️  桶与 storage 策略**不在 SQL 里**（Dashboard UI 手建）—— 用 `npm run probe:exam-review` 验。',
+  )
+
   console.log(`\n${failed === 0 ? '全部通过' : `${failed} 条不符合预期`}\n`)
   process.exit(failed === 0 ? 0 : 1)
 }
