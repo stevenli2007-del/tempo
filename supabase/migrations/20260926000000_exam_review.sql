@@ -38,10 +38,23 @@
 -- 🔴 **桶与策略必须在 Dashboard UI 建，不能在 SQL Editor 建**（2026-09-02 实测）：
 --    `CREATE POLICY on storage.objects` 报 `42501: must be owner of table objects`
 --    （owner 是平台角色 supabase_storage_admin，SQL Editor 的 postgres 不是 owner）。
---    步骤：Dashboard → Storage → New bucket（name=exam_review, public=off, size=20971520）
---         → Storage → Policies → New policy ×4（SELECT/INSERT/UPDATE/DELETE, role=authenticated）
---    四条表达式均为： (storage.foldername(name))[1] = auth.uid()::text
---    （UPDATE 的 USING 与 WITH CHECK 都填，防止把对象"挪"进别人目录）
+--    ✅ 步骤 1：Dashboard → Storage → New bucket
+--         Name = exam_review ／ Public = **关闭** ／ File size limit = 20971520
+--         Allowed MIME types = **留空**（docx/pptx 在真实浏览器常报 octet-stream，
+--         桶层白名单会误拒；类型校验由服务端按扩展名做，见 `lib/review/storage.ts`）
+--    ✅ 步骤 2：Dashboard → Storage → Policies → New policy ×4
+--         Target roles 一律 `authenticated`，四条表达式**完全相同**（含桶限定）：
+--             bucket_id = 'exam_review' and (storage.foldername(name))[1] = auth.uid()::text
+--         （策略名照 `syllabi` 桶的约定，便于用下面的 SQL 点名核对）
+--         ┌────────────────────────────────┬───────────────────┬──────────────────────────┐
+--         │ Policy name                    │ Allowed operation │ 表达式填在哪里           │
+--         ├────────────────────────────────┼───────────────────┼──────────────────────────┤
+--         │ exam_review_objects_select_own │ SELECT            │ USING                    │
+--         │ exam_review_objects_insert_own │ INSERT            │ WITH CHECK               │
+--         │ exam_review_objects_update_own │ UPDATE            │ USING 和 WITH CHECK 都填 │
+--         │ exam_review_objects_delete_own │ DELETE            │ USING                    │
+--         └────────────────────────────────┴───────────────────┴──────────────────────────┘
+--         UPDATE 两条都填的原因：防止把对象「挪」到别人目录下（读得到 + 写进去的路径也得是自己的）。
 --
 -- ---------------------------------------------------------------------------
 -- 验收（执行后跑，应看到两张表 + RLS 均已开 + courses 无变化）：
