@@ -234,13 +234,13 @@ console.log("weights（按 source 分组 / 缺口留灰）")
 
 console.log("考试匹配（P0-3-29：改期 = 更新提案，不是新增行）")
 {
-  const row = (id: string, name: string, date: string | null) => ({
-    id,
-    examName: name,
-    examDate: date,
-    examTime: null,
-    location: null,
-  })
+  // ⚠️ 这里刻意用**函数声明**而不是 `const row = (…) => ({ … })`：
+  // 箭头 + 圆括号包的对象体 + 紧跟着一个裸块 `{` 会被 TS 解析器误判
+  // （报 "Identifier expected. 'null' is a reserved word"，位置还指错行）。
+  // 加个分号也能解，但本仓库是无分号风格 —— 换成函数声明最干净。
+  function row(id: string, name: string, date: string | null) {
+    return { id, examName: name, examDate: date, examTime: null, location: null }
+  }
 
   // ① 卡面验收①：同名不同日期 → 命中那一行，产出 update（绝不新增）。
   {
