@@ -1,3 +1,4 @@
+import Link from 'next/link'
 import { redirect } from 'next/navigation'
 
 import { Button } from '@/components/ui/button'
@@ -70,6 +71,23 @@ export default async function SettingsPage() {
             </form>
           </div>
           <p className="text-sm text-ink-muted">登录邮箱：{email}</p>
+        </section>
+
+        {/* 「重看新手教程」入口之一（P0-3-32）：另一处在侧栏底部。
+            链接带上 `?tutorial=1` 回总览页 —— 引导卡住在那边的页面流里，
+            不重复实现一份（两处各写一遍就会有一处忘改）。 */}
+        <section className="space-y-3">
+          <h2 className="text-sm font-medium text-muted-foreground">使用帮助</h2>
+          <p className="text-sm text-muted-foreground">
+            忘了 Canvas 的 access token 怎么配？{' '}
+            <Link
+              href="/dashboard?tutorial=1"
+              className="font-medium text-accent-blue underline-offset-4 hover:underline"
+            >
+              重看新手教程
+            </Link>
+            （四张卡片，含每一步的跳转链接）。
+          </p>
         </section>
 
         <section className="space-y-3">

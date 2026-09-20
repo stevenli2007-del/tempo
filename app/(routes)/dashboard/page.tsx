@@ -1,7 +1,9 @@
+import { cookies } from 'next/headers'
 import { redirect } from 'next/navigation'
 
 import { Button } from '@/components/ui/button'
 import { DemoControls } from '@/components/courses/demo-controls'
+import { OnboardingCards } from '@/components/onboarding/onboarding-cards'
 import { TodayTasks } from '@/components/overview/today-tasks'
 import { WeekCalendar } from '@/components/overview/week-calendar'
 import { SyncControls } from '@/components/sync/sync-controls'
@@ -25,6 +27,7 @@ import {
   canBeOverdue,
 } from '@/lib/tasks/progress'
 import { createClient } from '@/lib/supabase/server'
+import { hasSeenOnboarding, ONBOARDING_COOKIE } from '@/lib/onboarding/content'
 import {
   recordUsageEvent,
   recordUsageEventOncePerUtcDay,
@@ -96,7 +99,16 @@ function toListItems(tasks: Task[], now: Date): TaskListItem[] {
 // 但这里显式声明，避免将来有人调整调用顺序时又退化成静态页。
 export const dynamic = 'force-dynamic'
 
-export default async function DashboardPage() {
+export default async function DashboardPage({
+  searchParams,
+}: {
+  /**
+   * Next 16：`searchParams` 是 Promise，必须 await。
+   * 目前只认一个参数 —— `?tutorial=1`（从「重看新手教程」入口进来，P0-3-32）；
+   * 其余参数一律忽略。
+   */
+  searchParams: Promise<Record<string, string | string[] | undefined>>
+}) {
   const supabase = await createClient()
   const {
     data: { user },
@@ -112,6 +124,25 @@ export default async function DashboardPage() {
   // 「打开」= 服务端渲染一次页面，包括同步成功后的 router.refresh()：刷一次算一次。
   // 写失败不影响页面（函数内部只告警），埋点是度量不是功能。
   await recordUsageEvent(supabase, user.id, 'dashboard_view')
+
+  /**
+   * 新手引导（P0-3-32）的显隐判定。
+   *
+   * - `replay`：从侧栏/设置页的「重看新手教程」进来（`/dashboard?tutorial=1`）——
+   *   看过也要再放一遍，这是那个入口存在的全部意义。
+   * - 否则读 **cookie**（不是 localStorage）：服务端读得到，引导卡就能进**首屏 HTML**，
+   *   不必等客户端 JS 挂载后再补（那样会闪一下）。
+   *
+   * 🔴 判据是「cookie 值 === 当前用户 id」而不是「cookie 存在」——
+   * 同一台电脑上换个账号登录，标记对不上，引导照常出现（卡面要求「每用户」）。
+   * 🔴 绝不在注册流程里预先写上这个标记：那是「新注册即见」的假标记，
+   * 会让引导对所有人永久消失（卡面约束 ④）。
+   */
+  const { tutorial } = await searchParams
+  const replay = tutorial === '1'
+  const cookieStore = await cookies()
+  const onboardingOpen =
+    replay || !hasSeenOnboarding(cookieStore.get(ONBOARDING_COOKIE)?.value, user.id)
 
   const { data, error } = await supabase
     .from('courses')
@@ -263,6 +294,20 @@ export default async function DashboardPage() {
         <TokenExpiryBanner view={expiryView} reconnectHref={reconnectHref} />
 
         <SyncStatusBar overview={syncOverview} now={now} />
+
+        {/* 新手引导（P0-3-32）。**内联**在页面流里，不是覆盖层 —— 空态下紧跟着的
+            就是 Demo Workspace 的「✨ 先看看效果」，两者同屏可见，谁也不挤掉谁（卡面约束 ③）。
+            `key` 随 `replay` 变化 → 从侧栏点「重看新手教程」时组件重挂载，
+            上一轮点过「跳过」留下的本地收起状态被重置（React 官方「用 key 重置状态」）。
+            服务端已经用 cookie 判过一遍，故这里只需要透传判定结果。 */}
+        <OnboardingCards
+          key={replay ? 'replay' : 'auto'}
+          userId={user.id}
+          // 站内那一步链到第一门课（关联过就链关联的那门）；一门课都没有 → 课程列表页。
+          connectHref={reconnectHref ?? '/courses'}
+          initialOpen={onboardingOpen}
+          replay={replay}
+        />
 
         {/* 「今日任务」的取数与周历/清单同源（`overview.tasks`）—— 取数失败时**藏起卡片**，
             而不是显示成"今天没有任务"（一个空的卡会被读成"今天没事"，正是静默的错误数据，

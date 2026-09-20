@@ -43,7 +43,7 @@ export type MessageDigestItem = {
   title: string
   courseName?: string
   postedAtLabel?: string
-  /** 原文链接。渲染前过 http(s) 白名单（见 `lib/messages/view.ts` 的 `readSafeUrl`）。 */
+  /** 原文链接。渲染前过 http(s) 白名单（见 `lib/safe-url.ts` 的 `readSafeUrl`）。 */
   sourceUrl?: string | null
 }
 

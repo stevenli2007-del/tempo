@@ -3,9 +3,11 @@
 import { useEffect, useState } from "react"
 import Link from "next/link"
 import { usePathname } from "next/navigation"
-import { BookOpen, GraduationCap, LayoutDashboard, MessageSquare, Settings } from "lucide-react"
+import { BookOpen, ExternalLink, GraduationCap, LayoutDashboard, MessageSquare, Settings } from "lucide-react"
 
 import { cn } from "@/lib/utils"
+import { FEEDBACK_URL } from "@/lib/constants"
+import { readSafeUrl } from "@/lib/safe-url"
 import { MESSAGES_UPDATED_EVENT } from "@/lib/messages/event"
 import { SIDEBAR_W } from "./shell-widths"
 
@@ -42,6 +44,8 @@ const NAV = [
 export function Sidebar() {
   const pathname = usePathname()
   const [pending, setPending] = useState(0)
+  /** 反馈链接（P0-3-32）：常量 → 守卫 → 渲染，判定只在这里做一次。 */
+  const feedbackHref = readSafeUrl(FEEDBACK_URL)
 
   useEffect(() => {
     let cancelled = false
@@ -110,7 +114,31 @@ export function Sidebar() {
         })}
       </nav>
 
-      <div className="px-5 py-4 text-xs text-ink-muted">Course OS · v0.1</div>
+      <div className="space-y-1.5 px-5 py-4 text-xs text-ink-muted">
+        <p>Course OS · v0.1</p>
+        {/* 「重看教程」放在导航之外的底部角落：它是一次性的辅助入口，
+            不该占一个导航位（P0-3-32 约束 ③）。 */}
+        <Link
+          href="/dashboard?tutorial=1"
+          className="block w-fit rounded-button transition-colors hover:text-ink focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
+        >
+          重看新手教程
+        </Link>
+        {/* 反馈入口（P0-3-32 ②）。URL 住 `lib/constants.ts` 的 FEEDBACK_URL —— 换一个常量即全站生效。
+            ⚠️ 仍然过一遍 `readSafeUrl()`：常量写坏（漏协议等）时**宁可不画**，也不画一个点不动的链接。 */}
+        {feedbackHref ? (
+          <a
+            href={feedbackHref}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex w-fit items-center gap-1 rounded-button transition-colors hover:text-ink focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
+          >
+            反馈
+            <ExternalLink className="size-3" aria-hidden />
+            <span className="sr-only">（在新标签页打开）</span>
+          </a>
+        ) : null}
+      </div>
     </aside>
   )
 }

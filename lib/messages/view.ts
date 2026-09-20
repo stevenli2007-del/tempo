@@ -2,6 +2,9 @@ import { SCHOOL_TIME_ZONE } from '@/lib/time'
 // 站内路径守卫（纯模块）：本文件与 P0-3-30 的 syllabus 导入共用同一份，
 // 两处各写一遍就会有一处忘了 `//host` 是协议相对 URL 这一种形态。
 import { readInternalPath } from '@/lib/internal-path'
+// 外链守卫（纯模块）。**原先这里是私有副本**，P0-3-32 的教程卡也要用同一份判据，
+// 故抽到 `lib/safe-url.ts`；本文件改为 import，行为一字未变。
+import { readSafeUrl } from '@/lib/safe-url'
 // 🔴 从 `registry`（纯模块）读，**不是** `apply`：本文件在客户端组件链上
 // （messages-view.tsx → 这里），而 apply 的动态 import 会在构建期把
 // `next/headers` 拖进客户端图，整个 build 直接失败。详见 `registry.ts` 的注释。
@@ -441,26 +444,12 @@ function readDetails(payload: MessagePayload): string[] {
 }
 
 /**
- * 读一个 URL 字段。🔴 **只放行 http(s)**。
+ * 读一个 URL 字段的守卫：**已搬到 `lib/safe-url.ts`**（P0-3-32 抽公共）。
  *
- * `payload` 是 `jsonb`，写入方现在只有公告同步一处，但类型上没有约束。
- * 哪天某个产出方（或一次手工改库）塞个 `javascript:…` 进来，渲染层的 `<a href>`
- * 就成了"点一下就执行"的口子 —— 而它长得和普通链接一模一样，评审时看不出来。
- * 在**唯一**的读取点挡掉，比在每个渲染点各写一遍白名单可靠。
- *
- * ⚠️ 入参刻意是 `unknown` 而不是 `string`：摘要（`digest`）里也有链接，
- * 那条路的形状更"野"（数组里的对象），必须是同一个函数挡，不能各写一遍。
+ * 判据（只放行 http(s)）与原来的私有副本**完全一致**，这里不再留实现 ——
+ * 白名单只该有一份，两处各写一份时早晚有一处漏掉 `javascript:` 之外的新形态。
+ * ⚠️ 站内路径走下面的 `readInternalPath()`，**不要**混用（会判 null → 链接凭空消失）。
  */
-function readSafeUrl(value: unknown): string | null {
-  if (typeof value !== 'string' || value.trim() === '') return null
-  try {
-    const parsed = new URL(value)
-    if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') return null
-    return parsed.toString()
-  } catch {
-    return null
-  }
-}
 
 /**
  * 读一个**站内**路径字段（P0-3-23 的 `payload.paperPath`）。
