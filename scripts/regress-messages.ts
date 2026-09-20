@@ -185,8 +185,13 @@ console.log("公告视图（P0-3-25）")
   const legacy = toMessageView(makeMessage("announcement", "pending"))
   check("缺 landing → 仍是「确认」", legacy.confirmLabel === "确认", legacy.confirmLabel)
 
-  // 10. 非公告类型不受影响。
-  check("material 文案仍是「确认」", toMessageView(makeMessage("material", "pending")).confirmLabel === "确认")
+  // 10. 资料索引通知同样是**空写入**（applier 只回执、不碰任何业务表，见
+  //     `lib/messages/apply.ts` 的 materialApplier）→ 与自测卷同一口径，叫「知道了」。
+  //     P0-3-33 改：此前这条故意钉的是「确认」，留着一条"已知的不一致"；
+  //     现在四种同性质类型口径统一（见 `lib/messages/view.ts` 的 ACK_LABEL 注释）。
+  const material = toMessageView(makeMessage("material", "pending"))
+  check("material（空写入）→ 文案「知道了」", material.confirmLabel === "知道了", material.confirmLabel)
+  check("material 仍可确认（走空写入回执）", material.canAccept === true)
 
   // 11. 🔴 sourceUrl 白名单：payload 是 jsonb，只放行 http(s)。
   //     `javascript:` 如果漏过去，渲染层的 <a href> 就成了"点一下执行"的口子，

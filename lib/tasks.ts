@@ -278,7 +278,7 @@ export async function loadUpcomingTasks(
 
   const { data, error } = await supabase
     .from('tasks')
-    .select('id, course_id, title, due_date, source, status, submission_state')
+    .select('id, course_id, title, due_date, task_type, source, status, submission_state')
     .in('course_id', courseIds)
     .eq('is_deleted', false)
     .eq('status', 'pending')
@@ -300,6 +300,7 @@ export async function loadUpcomingTasks(
       course_id: string
       title: string
       due_date: string | null
+      task_type: string
       source: string
       status: string
       submission_state: string | null
@@ -308,6 +309,9 @@ export async function loadUpcomingTasks(
         id: row.id,
         title: row.title,
         dueDate: row.due_date,
+        // P0-3-33：卡片要标「考试」，所以把 task_type 一并收窄带出去 ——
+        // 判据仍然是 `isExamTask()` 那一处，不在展示层比较字符串。
+        taskType: toEnum<TaskType>(row.task_type, TASK_TYPES, 'task_type'),
         source: toEnum<TaskSource>(row.source, TASK_SOURCES, 'source'),
         // 查询已经 `.eq('status','pending')`，但这里照样做**真收窄**而不是硬写 'pending' ——
         // 将来若放开这个过滤，展示层的判据（canBeOverdue）不会跟着静默变错。

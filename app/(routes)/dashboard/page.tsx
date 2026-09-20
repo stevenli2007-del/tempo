@@ -86,6 +86,9 @@ function toListItems(tasks: Task[], now: Date): TaskListItem[] {
       isOverdue: isOverdue && canBeOverdue(task),
       status: task.status,
       source: task.source,
+      // P0-3-33：清单行的「考试」标记判据收在 `isExamTask(task)`（看 `taskType`）——
+      // 所以这里必须把 `taskType` 传下去，让组件直接用那一个判据。
+      taskType: task.taskType,
       isDerived: task.isDerived,
       submissionState: task.submissionState,
       submittedAt: task.submittedAt,

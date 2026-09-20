@@ -1,5 +1,6 @@
 import Link from 'next/link'
 
+import { ExamMark } from '@/components/tasks/exam-mark'
 import { examScheduleLabel } from '@/lib/course-update/exam-match'
 import type { StoredExamDate } from '@/types/sections'
 
@@ -46,10 +47,14 @@ export function ExamReviewSection({
             data-exam-review-entry={exam.id}
           >
             <div className="min-w-0">
-              <p className="text-sm font-medium break-words text-foreground">
+              <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm font-medium break-words text-foreground">
+                {/* 考试标记（P0-3-33）：与周历 pill / 今日任务行 / 待办清单是**同一套视觉**
+                    （`components/tasks/exam-mark.tsx`）—— 同一场考试在哪个页面都该长得一样。
+                    这里数据源是 `exam_dates`，每一行必然是考试，标记的作用是"跨页面认得出是它"。 */}
+                <ExamMark />
                 {exam.examName}
                 {exam.status === 'tbd' ? (
-                  <span className="ml-2 align-middle rounded-full border border-border px-1.5 py-0.5 text-[10px] font-normal text-ink-faint">
+                  <span className="rounded-full border border-border px-1.5 py-0.5 text-[10px] font-normal text-ink-faint">
                     日期待定
                   </span>
                 ) : null}

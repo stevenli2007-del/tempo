@@ -1,5 +1,6 @@
+import { ExamMark } from '@/components/tasks/exam-mark'
 import { formatDue } from '@/lib/tasks/format'
-import { canBeOverdue, isEffectivelyDone } from '@/lib/tasks/progress'
+import { canBeOverdue, isEffectivelyDone, isExamTask } from '@/lib/tasks/progress'
 import { SUBMISSION_BADGE_CLASS, submissionBadge } from '@/lib/tasks/submission'
 import type { Task } from '@/types/task'
 
@@ -137,9 +138,10 @@ function TaskRow({ task, now }: { task: Task; now: Date }) {
             </span>
           ) : null}
 
-          {task.taskType === 'exam' ? (
-            <span className="shrink-0 text-xs text-muted-foreground/70">考试</span>
-          ) : null}
+          {/* 考试标记（P0-3-33）：原先是一段 12px 灰字「考试」，与提交态徽标混在一起；
+              现在换成带边框底色的徽标，与周历 pill / 今日任务行 / 待办清单**同一套视觉**。
+              判据是 `isExamTask(task)` 一处，不在这里重写 `taskType === 'exam'`。 */}
+          {isExamTask(task) ? <ExamMark /> : null}
         </div>
         <p className={`mt-0.5 text-xs ${showOverdue ? 'text-destructive' : 'text-muted-foreground'}`}>
           {label ?? '日期待定'}

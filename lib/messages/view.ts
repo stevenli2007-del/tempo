@@ -53,14 +53,16 @@ const CONFIRM_LABEL = '确认'
  * 没有东西可写的提案：「确认」什么都不会写，叫它「知道了」才是诚实的说法
  * （ADR-016 R3：不许让用户以为写进去了）。
  *
- * ### 目前谁用它
+ * ### 谁用它（四种）
  * ① 无落点的公告（P0-3-25）—— 只有一句"本周课取消"可看；
  * ② 核对完确认没差异的漂移提案（P0-3-20）；
- * ③ 自测卷通知（P0-3-23）—— 卷子在生成那一刻就落库了，消息只是"去用它"的入口。
+ * ③ 自测卷通知（P0-3-23）—— 卷子在生成那一刻就落库了，消息只是"去用它"的入口；
+ * ④ 资料索引通知（P0-3-19 产出）—— 写入器**刻意**是空写入
+ *    （`lib/messages/apply.ts` 的 `materialApplier`："确认只代表看到了"）。
  *
- * ⚠️ **已知的不一致（留待统一）**：`material`（资料索引通知）同样是空写入，
- * 按钮却仍是「确认」。改它属于 3-19 的范围（`regress-messages.ts` 有一条断言钉住），
- * 本卡不动它 —— 但这里记一笔，免得后人以为"空写入 → 知道了"这条规则只在部分类型上生效。
+ * ④ 是 P0-3-33 补上的：在此之前它虽然与 ③ 完全同性质，按钮却仍叫「确认」——
+ * 那时留了一笔"已知的不一致"注释（属于 3-19 的范围，且有回归断言钉着）。
+ * 现在四种同性质类型口径一致：**空写入 → 知道了**。
  */
 const ACK_LABEL = '知道了'
 
@@ -389,14 +391,15 @@ export function toMessageView(
     paperUrl: readInternalPath(message.payload.paperPath),
     digestItems: readDigest(message.payload),
     digestOverflow: readDigestOverflow(message.payload),
-    // 只有**确实什么都不写**的三种情况才改按钮文案 —— 叫「确认」是在含糊其辞：
+    // 只有**确实什么都不写**的四种情况才改按钮文案 —— 叫「确认」是在含糊其辞：
     // ① 明确标了「无落点」的公告；② 核对完确认没差异的漂移提案；
-    // ③ 自测卷通知（卷子早已落库，消息只是入口）。
+    // ③ 自测卷通知（卷子早已落库，消息只是入口）；④ 资料索引通知（写入器刻意空写入）。
     // 其余（含字段缺失）一律按「确认」。
     confirmLabel:
       (message.type === 'announcement' && message.payload.landing === false) ||
       (message.type === 'syllabus_drift' && driftStatus === 'clean') ||
-      message.type === 'practice_test'
+      message.type === 'practice_test' ||
+      message.type === 'material'
         ? ACK_LABEL
         : CONFIRM_LABEL,
     summaryPoints,

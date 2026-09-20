@@ -5,7 +5,8 @@ import { useRouter } from 'next/navigation'
 import { useState } from 'react'
 
 import { syllabusStatusText } from '@/components/courses/syllabus-status'
-import { courseColorKey, courseColorVar } from '@/lib/courses/course-color'
+import { ExamMark } from '@/components/tasks/exam-mark'
+import { courseColorClasses, courseColorKey } from '@/lib/courses/course-color'
 import type { CourseSyncLine } from '@/lib/sync/status'
 import { SUBMISSION_BADGE_CLASS, submissionBadge } from '@/lib/tasks/submission'
 import type { Course } from '@/types/course'
@@ -42,6 +43,12 @@ export interface UpcomingTaskView {
   source: TaskSource
   /** Canvas 提交态（P0-3-10）；null = 不追踪。卡片显示「已评分」等轻量徽标。 */
   submissionState: TaskSubmissionState | null
+  /**
+   * 是不是考试（P0-3-33）。判据来自 `isExamTask()`（`taskType === 'exam'`），
+   * **在这里算好**再传进来 —— 卡片与总览清单必须用同一套考试视觉，
+   * 而"是不是考试"的判定全站只有一处。
+   */
+  isExam: boolean
 }
 
 interface CourseCardProps {
@@ -79,6 +86,9 @@ function UpcomingTasks({ tasks }: { tasks: UpcomingTaskView[] }) {
         return (
           <li key={task.id} className="flex items-baseline gap-2 text-xs">
             <span className="truncate text-foreground/80">{task.title}</span>
+            {/* 考试标记（P0-3-33）：卡片上的近期任务同样要能认出考试 ——
+                这里与总览清单、周历 pill 用**同一个** `ExamMark`。 */}
+            {task.isExam ? <ExamMark /> : null}
             <span
               className={`shrink-0 ${task.isOverdue ? 'text-destructive' : 'text-muted-foreground'}`}
             >
@@ -134,31 +144,41 @@ export function CourseCard({
     }
   }
 
-  const meta = [course.courseCode, course.instructorName].filter(Boolean).join(' · ')
+  const color = courseColorClasses(courseColorKey(course.id))
+  /**
+   * 课程编码既然已经单独做成彩色的 chip（见下），这一行就只剩教师。
+   * 两者都没有时仍然要写清楚"没填" —— 留一行空白会被读成"加载失败"。
+   */
+  const teacherLine = course.instructorName ?? (course.courseCode ? '未填写教师' : '未填写编码与教师')
 
   return (
-    <div className="rounded-xl border border-border bg-card p-5 shadow-sm">
+    <div className="relative overflow-hidden rounded-xl border border-border bg-card p-5 shadow-sm">
+      {/* 课程色条（P0-3-33）：从一颗 3px 圆点升级成整张卡高的 4px 色条 ——
+          圆点太小，一屏十几张卡扫不出哪张是哪门课（Steven 2026-09-20：
+          「单单一颗很小的颜色亮点不足以区分」）。同一门课在课程卡 / 待办清单 /
+          周历 pill / 今日任务行上是**同一个颜色**（`courseColorKey()` 一处决定）。
+          `overflow-hidden` + 绝对定位：色条贴着卡片的圆角走，不会从圆角里戳出一截直角。 */}
+      <span className={`absolute inset-y-0 left-0 w-1 ${color.bar}`} aria-hidden />
       <div className="flex items-start justify-between gap-4">
         <Link href={`/courses/${course.id}`} className="min-w-0 flex-1">
           <div className="flex items-center gap-2">
-            {/* 课程色点（P0-3-6 配套）：与总览任务列表共用同一颗色，形成对应。 */}
-            <span
-              className="h-3 w-3 shrink-0 rounded-full"
-              style={{ backgroundColor: courseColorVar(courseColorKey(course.id)) }}
-              aria-hidden
-            />
             <h3 className="truncate text-base font-semibold text-card-foreground underline-offset-4 hover:underline">
               {course.courseName}
             </h3>
+            {course.courseCode ? (
+              <span
+                className={`shrink-0 rounded-badge px-1.5 py-0.5 text-[11px] font-medium ${color.chip}`}
+              >
+                {course.courseCode}
+              </span>
+            ) : null}
             {course.isDemo ? (
               <span className="shrink-0 rounded-full bg-primary/10 px-2 py-0.5 text-xs font-medium text-primary">
                 示例
               </span>
             ) : null}
           </div>
-          <p className="mt-1 truncate text-sm text-muted-foreground">
-            {meta || '未填写编码与教师'}
-          </p>
+          <p className="mt-1 truncate text-sm text-muted-foreground">{teacherLine}</p>
           <p className="mt-2 text-xs text-muted-foreground">{syllabusStatusText(syllabus)}</p>
 
           {/* 同步状态行：失败时是红色并带原因（hover 看原文）。

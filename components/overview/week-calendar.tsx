@@ -1,6 +1,7 @@
 import Link from 'next/link'
 
-import { courseColorKey, courseColorVar } from '@/lib/courses/course-color'
+import { EXAM_CHIP_CLASS, ExamMark } from '@/components/tasks/exam-mark'
+import { courseColorClasses, courseColorKey } from '@/lib/courses/course-color'
 import type { CalendarPill, UpcomingExam, WeekCalendarModel } from '@/lib/tasks/progress'
 
 /**
@@ -14,25 +15,32 @@ import type { CalendarPill, UpcomingExam, WeekCalendarModel } from '@/lib/tasks/
  * ### 三个刻意的决定（都别"顺手优化"掉）
  * 1. **逾期不散落在过去的格子里**，收成顶部一整条 —— 过去的日子没人会往回翻，
  *    散落在上个月的格子里等于把它们藏起来（与 Tempo「不隐藏问题」冲突）。
- * 2. **考试用 lime 实心块** —— 一门课一学期只有 3-5 次考试，是天然少数派，
- *    值得抢眼（「标签的价值在于标出少数派」）。同时带一个「考」字，
- *    不靠颜色单独传达信息。
- * 3. **pill 里不做勾选** —— 格子里塞 checkbox 既点不准，又会让「标记完成」出现两套交互。
+ * 2. **考试用「边框 + 底色 + 图标 + 考」** —— 一门课一学期只有 3-5 次考试，是天然少数派，
+ *    值得抢眼（「标签的价值在于标出少数派」）。P0-3-33 之前它是**实心 lime 块 + 一个「考」字**，
+ *    而总览页别处又各是另一套画法；现在统一走 `components/tasks/exam-mark.tsx` 那一套，
+ *    全站同一场考试长得一样。**不靠颜色单独传达信息**：边框与图标在全色盲下依然在。
+ * 3. **每个 pill 左边一根课程色条**（P0-3-33）—— 之前只有一颗 1.5px 的圆点，
+ *    小到看不出区别（Steven：「单单一颗很小的颜色亮点不足以区分」）。
+ *    现在改成 `border-l-2` 的整高色边，扫描一列 pill 就能按颜色分组。
+ * 4. **pill 里不做勾选** —— 格子里塞 checkbox 既点不准，又会让「标记完成」出现两套交互。
  *    pill 只负责跳到课程详情；**改 `status` 的唯一入口仍是下方「全部待办」清单**
  *    （`TaskList`，PATCH 只允许改 status，ADR-004）。
  */
 
 function Pill({ pill }: { pill: CalendarPill }) {
   const title = `${pill.courseName} · ${pill.title}${pill.isExam ? '（考试）' : ''}`
+  // 课程色三件套（P0-3-33）：类名是静态字面量（`lib/courses/course-color.ts`），
+  // 不是 `border-l-${color}` 这种运行时拼接 —— 拼接出来的类 Tailwind 扫不到、不生成。
+  const color = courseColorClasses(courseColorKey(pill.courseId))
 
   if (pill.isExam) {
     return (
       <Link
         href={`/courses/${pill.courseId}`}
         title={title}
-        className="flex items-center gap-1 rounded-badge bg-lime px-1.5 py-1 text-[11px] font-medium leading-tight text-on-lime"
+        className={`flex items-center gap-1 rounded-badge border-l-2 px-1.5 py-1 text-[11px] font-medium leading-tight text-lime-dark ${color.edge} ${EXAM_CHIP_CLASS}`}
       >
-        <span className="shrink-0 font-semibold">考</span>
+        <ExamMark bare />
         <span className="truncate">{pill.title}</span>
       </Link>
     )
@@ -42,13 +50,8 @@ function Pill({ pill }: { pill: CalendarPill }) {
     <Link
       href={`/courses/${pill.courseId}`}
       title={title}
-      className="flex items-center gap-1 rounded-badge bg-surface2 px-1.5 py-1 text-[11px] leading-tight hover:bg-nav-active"
+      className={`flex items-center gap-1 rounded-badge border-l-2 bg-surface2 px-1.5 py-1 text-[11px] leading-tight hover:bg-nav-active ${color.edge}`}
     >
-      <span
-        className="h-1.5 w-1.5 shrink-0 rounded-full"
-        style={{ backgroundColor: courseColorVar(courseColorKey(pill.courseId)) }}
-        aria-hidden
-      />
       <span className={`truncate ${pill.isOverdue ? 'text-destructive' : 'text-ink-muted'}`}>
         {pill.title}
       </span>
@@ -91,7 +94,9 @@ function UpcomingExams({ exams }: { exams: UpcomingExam[] }) {
             <Link
               href={`/courses/${exam.courseId}`}
               title={`${exam.courseName} · ${exam.title} · ${exam.dateLabel}`}
-              className="flex items-center gap-1.5 rounded-badge bg-lime/20 px-2 py-1 text-[11px] hover:bg-lime/30"
+              className={`flex items-center gap-1.5 rounded-badge border-l-2 bg-lime/20 px-2 py-1 text-[11px] hover:bg-lime/30 ${
+                courseColorClasses(courseColorKey(exam.courseId)).edge
+              }`}
             >
               <span className="shrink-0 font-semibold text-lime-dark">
                 {exam.daysUntil === 0 ? '今天' : `还有 ${exam.daysUntil} 天`}

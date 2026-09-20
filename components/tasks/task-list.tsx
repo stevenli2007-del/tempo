@@ -4,10 +4,11 @@ import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { useState } from 'react'
 
-import { courseColorVar, courseColorKey } from '@/lib/courses/course-color'
-import { isCanvasDone, isEffectivelyDone } from '@/lib/tasks/progress'
+import { EXAM_SURFACE_CLASS, ExamMark } from '@/components/tasks/exam-mark'
+import { courseColorClasses, courseColorKey } from '@/lib/courses/course-color'
+import { isCanvasDone, isEffectivelyDone, isExamTask } from '@/lib/tasks/progress'
 import { SUBMISSION_BADGE_CLASS, submissionBadge } from '@/lib/tasks/submission'
-import type { TaskSource, TaskStatus, TaskSubmissionState } from '@/types/task'
+import type { TaskSource, TaskStatus, TaskSubmissionState, TaskType } from '@/types/task'
 
 /**
  * 跨课程近期任务列表（P0-1-9，PRD F5）。
@@ -47,6 +48,12 @@ export interface TaskListItem {
    * 所以行数据必须带 `source`，口径收在 `submissionBadge()` 一处。
    */
   source: TaskSource
+  /**
+   * 任务类型（P0-3-33）。行上的「考试」标记判据是 `isExamTask(item)` —— **唯一来源**
+   * 在 `lib/tasks/progress.ts`。原先这里用的是 `isDerived`，而判据应当只看 `taskType`
+   * （`is_derived` 的语义是"派生的缓存"，将来出现非考试的派生任务会误判成考试，见该函数注释）。
+   */
+  taskType: TaskType
   /** 派生任务（考试）不可在此编辑内容，但**允许**标记完成 —— 完成状态是用户自己的。 */
   isDerived: boolean
   /** Canvas 提交态（P0-3-10）；null = 不追踪。 */
@@ -110,8 +117,23 @@ function TaskRow({ item, busy, onToggle }: TaskRowProps) {
       ? 'border-primary bg-primary text-primary-foreground'
       : 'border-border hover:border-foreground/50'
 
+  const color = courseColorClasses(courseColorKey(item.courseId))
+
+  /**
+   * 考试行整行铺考试底（P0-3-33）。
+   *
+   * ⚠️ 底色与边框色**成对替换**，不是往上叠 —— 本行原本就写了 `border-border bg-card`，
+   * 再叠一层 `border-lime-dark/30` 就是两个"同性质的边框色类"打架，
+   * 谁生效取决于产物 CSS 里两条规则的先后（不可预期）。替换掉就不存在这个问题。
+   */
+  const surfaceClass = isExamTask(item)
+    ? `${EXAM_SURFACE_CLASS} hover:bg-lime/20`
+    : 'border-border bg-card'
+
   return (
-    <li className="flex items-start gap-3 rounded-lg border border-border bg-card px-4 py-3">
+    <li
+      className={`flex items-start gap-3 rounded-lg border-l-2 px-4 py-3 ${color.edge} ${surfaceClass}`}
+    >
       <button
         type="button"
         onClick={() => onToggle(item)}
@@ -164,15 +186,12 @@ function TaskRow({ item, busy, onToggle }: TaskRowProps) {
           <Link
             href={`/courses/${item.courseId}`}
             title={`查看「${item.courseName}」课程详情`}
-            className="inline-flex shrink-0 items-center gap-1.5 text-xs text-muted-foreground underline-offset-4 hover:underline"
+            className={`inline-flex shrink-0 items-center rounded-badge px-1.5 py-0.5 text-xs underline-offset-4 hover:underline ${color.chip}`}
           >
-            {/* 课程色点（P0-3-6 配套）：同 courseId 永远同色，与课程卡一致，
-                一眼区分任务归属；色值随主题切换。 */}
-            <span
-              className="h-2.5 w-2.5 shrink-0 rounded-full"
-              style={{ backgroundColor: courseColorVar(courseColorKey(item.courseId)) }}
-              aria-hidden
-            />
+            {/* 课程色（P0-3-33）：从一颗 2.5px 圆点升级成"浅底 + 同色文字"的 chip ——
+                圆点太小看不出区别（Steven 2026-09-20：「单单一颗很小的颜色亮点不足以区分」）。
+                同 courseId 永远同色，与课程卡、周历、今日任务一致；
+                色值走主题令牌（`lib/courses/course-color.ts` 的静态类名表），随主题切换。 */}
             {item.courseName}
           </Link>
           {/* 提交态徽标：每个任务名后都有（Canvas 不追踪时 `submissionBadge()` 返回 null，不标）。 */}
@@ -184,9 +203,10 @@ function TaskRow({ item, busy, onToggle }: TaskRowProps) {
               {badge.label}
             </span>
           ) : null}
-          {item.isDerived ? (
-            <span className="shrink-0 text-xs text-muted-foreground/70">考试</span>
-          ) : null}
+          {/* 考试标记（P0-3-33）：原先是一段 12px 的灰字「考试」，与"提交态徽标"混在一起
+              分不出谁是谁；现在换成带底色边框与图标的徽标，与周历 / 今日任务 / 课程页同一套。
+              判据 `isExamTask(item)` = `taskType === 'exam'`，唯一来源见 `lib/tasks/progress.ts`。 */}
+          {isExamTask(item) ? <ExamMark /> : null}
         </div>
         <p className={`mt-0.5 text-xs ${item.isOverdue ? 'text-destructive' : 'text-muted-foreground'}`}>
           {item.dueLabel ?? '日期待定'}

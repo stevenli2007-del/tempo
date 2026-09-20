@@ -101,6 +101,11 @@ export type UpcomingTask = {
   /** null = TBD，卡片上同样按 TBD 渲染。 */
   dueDate: string | null
   /**
+   * 任务类型（P0-3-33）。课程卡上的「考试」标记判据是 `isExamTask()`
+   * （`taskType === 'exam'`）—— 与总览清单、周历共用同一处判定，卡片不另写一份。
+   */
+  taskType: TaskType
+  /**
    * 任务来源（P0-3-17）。徽标「需手动确认」只给 **Canvas 来源** 的 null 态，
    * 所以卡片也必须有它 —— 否则课程卡与总览清单会对同一条任务标出不同的徽标。
    */

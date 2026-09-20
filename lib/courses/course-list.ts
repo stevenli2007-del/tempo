@@ -3,7 +3,7 @@ import { SYLLABUS_COLUMNS, toSyllabus } from '@/lib/syllabi'
 import type { SyllabusRow } from '@/lib/syllabi'
 import { createClient } from '@/lib/supabase/server'
 import { formatDue } from '@/lib/tasks/format'
-import { canBeOverdue } from '@/lib/tasks/progress'
+import { canBeOverdue, isExamTask } from '@/lib/tasks/progress'
 import type { Course } from '@/types/course'
 import type { Syllabus } from '@/types/syllabus'
 import type { UpcomingTask } from '@/types/task'
@@ -62,6 +62,8 @@ export function toUpcomingViews(
       isOverdue: isOverdue && canBeOverdue(task),
       source: task.source,
       submissionState: task.submissionState,
+      // 考试标记（P0-3-33）：卡片与总览清单要长得一样，判据共用 `isExamTask()` 一处。
+      isExam: isExamTask(task),
     }
   })
 }
