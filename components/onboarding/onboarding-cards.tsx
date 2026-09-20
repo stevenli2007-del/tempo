@@ -63,6 +63,7 @@ export function OnboardingCards({
 
   const total = ONBOARDING_STEPS.length
   const step = ONBOARDING_STEPS[index]
+  const media = step.media
   const isLast = index === total - 1
 
   const externalHref = step.external === null ? null : readSafeUrl(step.external.url)
@@ -128,55 +129,98 @@ export function OnboardingCards({
         <h2 className="text-lg font-semibold tracking-tight text-ink">{step.title}</h2>
         <p className="text-sm text-ink-muted">{step.lead}</p>
 
-        {step.points.length > 0 ? (
-          <ul className="space-y-1.5 pl-1">
-            {step.points.map((point) => (
-              <li key={point} className="flex gap-2 text-sm text-ink-muted">
-                <span aria-hidden className="mt-[7px] size-1 shrink-0 rounded-full bg-ink-faint" />
-                <span>{point}</span>
-              </li>
-            ))}
-          </ul>
-        ) : null}
+        {/* 有动图时宽屏走两列（文字左、动图右）—— 目的是让卡片**高度基本不变**，
+            下面的「✨ 先看看效果」仍然留在首屏（卡面约束 ③：不许挡住冷启动）。
+            窄屏退回单列（`order-first` 让动图先出现），卡片变高是必然的，
+            所以动图**不做限高裁切** —— 裁掉的是画面中间那块对话框，正好是最该看的部分。 */}
+        <div className={cn(media !== null && 'lg:flex lg:items-start lg:gap-6')}>
+          {media === null ? null : (
+            <figure className="order-first mb-3 lg:order-last lg:mb-0 lg:w-[46%] lg:shrink-0">
+              {/* 🔴 autoplay 的三个前提缺一不可：`muted`（不静音浏览器直接拒播）、
+                  `playsInline`（iOS 上否则强制全屏）、`loop`（这只是个循环演示）。
+                  `aria-hidden` 是因为视频对读屏软件没有意义 —— 语义由下面那行
+                  figcaption 承担（它也顺带兜住「不播视频也看得懂」）。 */}
+              <video
+                src={media.src}
+                poster={media.poster}
+                autoPlay
+                muted
+                loop
+                playsInline
+                preload="auto"
+                aria-hidden
+                tabIndex={-1}
+                className="w-full rounded-card border border-line bg-muted motion-reduce:hidden"
+              />
+              {/* 「减弱动态效果」下的替代品：同一张首帧，纯 CSS 切换。
+                  刻意不读 `matchMedia` —— 那要 `setState` 于 effect（撞本仓
+                  `react-hooks/set-state-in-effect`），且 SSR 会 hydration 不匹配。 */}
+              {/* 这里刻意不用 `next/image`：它是 `public/` 里已经压好的静态 webp
+                  （24–41KB），优化器没有收益；而且它必须在「减弱动态效果」下
+                  **不依赖 JS** 就显示出来 —— 普通 `<img>` 正好。 */}
+              {/* eslint-disable-next-line @next/next/no-img-element -- 理由同上 */}
+              <img
+                src={media.poster}
+                alt=""
+                aria-hidden
+                className="hidden w-full rounded-card border border-line motion-reduce:block"
+              />
+              <figcaption className="mt-2 text-xs text-ink-faint">{media.caption}</figcaption>
+            </figure>
+          )}
 
-        <div className="flex flex-wrap items-center gap-3 pt-1">
-          {step.external !== null && externalHref !== null ? (
-            <a
-              href={externalHref}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="inline-flex h-8 items-center gap-1.5 rounded-button border border-line bg-background px-3 text-sm font-medium text-ink transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
-            >
-              {step.external.label}
-              <ExternalLink className="size-3.5" aria-hidden />
-              <span className="sr-only">（在新标签页打开）</span>
-            </a>
-          ) : null}
+          <div className={cn('space-y-3', media !== null && 'min-w-0 lg:flex-1')}>
+            {step.points.length > 0 ? (
+              <ul className="space-y-1.5 pl-1">
+                {step.points.map((point) => (
+                  <li key={point} className="flex gap-2 text-sm text-ink-muted">
+                    <span aria-hidden className="mt-[7px] size-1 shrink-0 rounded-full bg-ink-faint" />
+                    <span>{point}</span>
+                  </li>
+                ))}
+              </ul>
+            ) : null}
 
-          {internalHref !== null ? (
-            <Link
-              href={internalHref}
-              className="inline-flex h-8 items-center gap-1.5 rounded-button bg-lime px-3 text-sm font-medium text-on-lime transition-colors hover:bg-lime/80 focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
-            >
-              {connectHref === '/courses' ? '去我的课程' : '打开这门课'}
-              <ArrowRight className="size-3.5" aria-hidden />
-            </Link>
-          ) : null}
+            <div className="flex flex-wrap items-center gap-3 pt-1">
+              {step.external !== null && externalHref !== null ? (
+                <a
+                  href={externalHref}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex h-8 items-center gap-1.5 rounded-button border border-line bg-background px-3 text-sm font-medium text-ink transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
+                >
+                  {step.external.label}
+                  <ExternalLink className="size-3.5" aria-hidden />
+                  <span className="sr-only">（在新标签页打开）</span>
+                </a>
+              ) : null}
+
+              {internalHref !== null ? (
+                <Link
+                  href={internalHref}
+                  className="inline-flex h-8 items-center gap-1.5 rounded-button bg-lime px-3 text-sm font-medium text-on-lime transition-colors hover:bg-lime/80 focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
+                >
+                  {connectHref === '/courses' ? '去我的课程' : '打开这门课'}
+                  <ArrowRight className="size-3.5" aria-hidden />
+                </Link>
+              ) : null}
+            </div>
+
+            {isLast && feedbackHref !== null ? (
+              <p className="pt-2 text-xs text-ink-faint">
+                哪一步卡住了？{' '}
+                <a
+                  href={feedbackHref}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="font-medium text-accent-blue underline-offset-4 hover:underline"
+                >
+                  告诉我们
+                </a>
+              </p>
+            ) : null}
+          </div>
         </div>
-
-        {isLast && feedbackHref !== null ? (
-          <p className="pt-2 text-xs text-ink-faint">
-            哪一步卡住了？{' '}
-            <a
-              href={feedbackHref}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="font-medium text-accent-blue underline-offset-4 hover:underline"
-            >
-              告诉我们
-            </a>
-          </p>
-        ) : null}
       </div>
 
       <div className="mt-6 flex items-center justify-between gap-4 border-t border-line pt-4">

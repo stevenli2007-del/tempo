@@ -19,6 +19,9 @@
  *    解码失败的值则必须按「没看过」处理（宁可多看一次，不能让新用户的引导被坏 cookie 吞掉）。
  */
 
+import { existsSync, statSync } from "node:fs"
+import { join } from "node:path"
+
 import { FEEDBACK_URL } from "@/lib/constants"
 import {
   CANVAS_HOME_URL,
@@ -42,6 +45,12 @@ function check(name: string, cond: boolean, detail?: string) {
     failed += 1
     console.error(`  ✗ ${name}${detail ? ` — ${detail}` : ""}`)
   }
+}
+
+/** 读 `public/` 下某个静态资源的大小（KB）；文件不在返回 `null`。 */
+function assetKb(rel: string): number | null {
+  const abs = join(process.cwd(), "public", rel)
+  return existsSync(abs) ? statSync(abs).size / 1024 : null
 }
 
 console.log("外链守卫 readSafeUrl（唯一实现，P0-3-25 与本卡共用）")
@@ -140,6 +149,62 @@ console.log("「看过」标记（cookie 值 = 用户 id）")
   check("写坏的值 → 出现（宁可多看一次，不能被坏 cookie 吞掉）", hasSeenOnboarding("%", me) === false)
   check("缺 userId → 出现", hasSeenOnboarding(onboardingCookieValue(me), "") === false)
   check("编码往返稳定（uuid 不含需转义字符，值可读）", onboardingCookieValue(me) === me)
+}
+
+console.log("")
+console.log("演示动图（P0-3-32 扩展）—— 路径写错的表现是卡片上一个空白框，构建不报错")
+{
+  const withMedia = ONBOARDING_STEPS.flatMap((step) =>
+    step.media === null ? [] : [{ id: step.id, media: step.media }],
+  )
+
+  check(
+    "确实有卡带动图（全 null 时下面这段等于没跑，要显式看见）",
+    withMedia.length >= 1,
+    String(withMedia.length),
+  )
+
+  for (const { id, media } of withMedia) {
+    check(`[${id}] src 是 /onboarding/ 下的站内路径`, media.src.startsWith("/onboarding/"), media.src)
+    check(`[${id}] src 是 .mp4`, media.src.endsWith(".mp4"), media.src)
+    check(`[${id}] poster 是 .webp`, media.poster.endsWith(".webp"), media.poster)
+    check(
+      `[${id}] caption 非空（视频对读屏软件是隐藏的，语义只能靠它）`,
+      media.caption.trim() !== "",
+    )
+    check(
+      `[${id}] src 与 poster 同目录`,
+      media.src.slice(0, media.src.lastIndexOf("/")) ===
+        media.poster.slice(0, media.poster.lastIndexOf("/")),
+    )
+  }
+
+  // 🔴 这一组是本卡最值钱的断言：**文件名打错时页面不报错、构建不报错**，
+  //    用户看到的就是卡片上一个空白方块 —— 只有真去看文件在不在才拦得住。
+  for (const { id, media } of withMedia) {
+    for (const rel of [media.src, media.poster]) {
+      const abs = join(process.cwd(), "public", rel)
+      check(`[${id}] 文件真的在：${rel}`, existsSync(abs), abs)
+    }
+  }
+
+  // 体积闸门：单条 ≤ 700KB、封面 ≤ 120KB。超了要回头调 crf / fps / 宽度，
+  // 而不是把大文件塞进仓库 —— 二进制一旦进了 git 历史就永久占位。
+  for (const { id, media } of withMedia) {
+    const kb = assetKb(media.src)
+    check(
+      `[${id}] 动图 ≤ 700KB（当前 ${kb === null ? "文件缺失" : `${kb.toFixed(0)}KB`}）`,
+      kb !== null && kb <= 700,
+    )
+    const posterKb = assetKb(media.poster)
+    check(
+      `[${id}] 封面 ≤ 120KB（当前 ${posterKb === null ? "文件缺失" : `${posterKb.toFixed(0)}KB`}）`,
+      posterKb !== null && posterKb <= 120,
+    )
+  }
+
+  const totalKb = withMedia.reduce((sum, { media }) => sum + (assetKb(media.src) ?? 0), 0)
+  check(`全部动图合计 ≤ 2MB（当前 ${totalKb.toFixed(0)}KB）`, totalKb <= 2048)
 }
 
 console.log("")

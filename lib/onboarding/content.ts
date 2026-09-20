@@ -49,6 +49,31 @@ export type OnboardingStep = {
   external: { label: string; url: string } | null
   /** 站内跳转：`connect` = 去第一门课的「Canvas 关联」区块。 */
   internal: 'connect' | null
+  /**
+   * 演示动图（P0-3-32 扩展）。`null` = 这张卡不放媒体，卡片自动退回单列。
+   *
+   * ⚠️ **路径必须指向 `public/` 下真实存在的文件** —— 指向不存在的文件等于画一个假东西
+   * （和「守卫判 null 时宁可不画链接」同一条纪律）。`scripts/regress-onboarding.ts`
+   * 会 `fs.existsSync` 逐条钉住，写错文件名回归立刻红、不会等到线上才发现一个空框。
+   */
+  media: OnboardingMedia | null
+}
+
+/** 一张卡的演示动图（`public/onboarding/` 下的静态资源）。 */
+export type OnboardingMedia = {
+  /** 站内绝对路径，如 `/onboarding/new-token.mp4`。 */
+  src: string
+  /**
+   * 首帧封面。两处用：`<video poster>`，以及 `prefers-reduced-motion` 降级时
+   * 顶替视频的那张静止图（纯 CSS 切换，不读 `matchMedia` —— 那会撞
+   * `react-hooks/set-state-in-effect` 且 SSR 会 hydration 不匹配）。
+   */
+  poster: string
+  /**
+   * 一句话说明画面在演什么。视频对读屏软件是隐藏的，这句是它唯一的语义载体；
+   * 同时它也承担「不播视频也看得懂」的兜底。
+   */
+  caption: string
 }
 
 /**
@@ -70,6 +95,7 @@ export const ONBOARDING_STEPS: readonly OnboardingStep[] = [
     ],
     external: null,
     internal: null,
+    media: null,
   },
   {
     id: 'open-canvas',
@@ -78,6 +104,19 @@ export const ONBOARDING_STEPS: readonly OnboardingStep[] = [
     points: ['右上角头像同样能进 Settings，两个入口是同一个页面。'],
     external: { label: '去 bCourses', url: CANVAS_HOME_URL },
     internal: null,
+    /**
+     * 🔴 这张卡**刻意不放动图**（2026-09-20 Steven 录的那一条没采用）。
+     *
+     * 两条独立的理由，任一条都足以否掉它：
+     * 1. **内容不对**：它演的是「账号菜单 → 无障碍设置弹窗」，不是这张卡要教的
+     *    「Account → Settings」这条路；
+     * 2. **姓名挡不住**：真名出现在**动态弹出的浮层**里 —— 浮层是页面加载之后才渲染的，
+     *    「先跑脚本改 DOM 再录」那招够不着它（脚本跑完了，浮层才把姓名插进来）。
+     *    同样的问题也出现在头像上（页面里是模糊了，浮层里那张是原图）。
+     *
+     * 要补齐的话，录之前先把浮层**展开并停住**再跑清理脚本，或者按区域框选录制。
+     */
+    media: null,
   },
   {
     id: 'new-token',
@@ -91,6 +130,20 @@ export const ONBOARDING_STEPS: readonly OnboardingStep[] = [
     ],
     external: { label: '直接打开 Settings', url: CANVAS_SETTINGS_URL },
     internal: null,
+    /**
+     * 录屏 2026-09-20（Steven 本机，全屏 3024×1898）。
+     *
+     * 裁切做了两件事：去掉浏览器窗口（顶栏里没有任何 token，但也没必要露），
+     * 以及**把右栏整条切掉** —— Canvas 的 Settings 页右栏是「Ways to Contact」，
+     * 里面就是登录邮箱。那串邮箱**从第 0 帧就在画面里**（它比清理脚本渲染得晚，
+     * 所以脚本没改到它），只能靠裁切解决。左边界取 420 而不是 670：
+     * 670 会把「+ New Access Token」按钮整块切没（按钮从 x≈482 开始）。
+     */
+    media: {
+      src: '/onboarding/new-token.mp4',
+      poster: '/onboarding/new-token-poster.webp',
+      caption: '动画演示：在 Settings 页找到「+ New Access Token」，填写 Purpose 与过期日期。',
+    },
   },
   {
     id: 'connect',
@@ -102,6 +155,18 @@ export const ONBOARDING_STEPS: readonly OnboardingStep[] = [
     ],
     external: null,
     internal: 'connect',
+    /**
+     * 录屏 2026-09-20（同一批）。裁掉了浏览器窗口与 Tempo 侧栏，只留内容区；
+     * 时间轴取原片 13s→34s（前 13 秒在演「新建课程」，与这张卡要教的「粘回 token」无关）。
+     *
+     * ✅ token 输入框是 `type="password"`（`canvas-connect-form.tsx`），所以粘进去
+     * 的那串东西在画面里**只有圆点**。这条不是靠肉眼保证的，是靠输入框类型保证的。
+     */
+    media: {
+      src: '/onboarding/connect.mp4',
+      poster: '/onboarding/connect-poster.webp',
+      caption: '动画演示：回到 Tempo 打开一门课 →「Canvas 关联」→ 粘贴 token、选过期时间。',
+    },
   },
 ]
 
