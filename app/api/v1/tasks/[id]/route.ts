@@ -1,16 +1,18 @@
 import { TASK_COLUMNS, loadTaskById, toTask } from '@/lib/tasks'
 import type { TaskRow } from '@/lib/tasks'
 import { normalizeDueDate } from '@/lib/tasks/manual'
+import { normalizeScoreInput } from '@/lib/tasks/score'
 import { getCurrentUser, internalError, jsonError, jsonOk } from '@/lib/api/response'
 import { UUID_PATTERN } from '@/lib/api/params'
-import type { TaskStatus } from '@/types/task'
+import type { TaskScoreSource, TaskStatus } from '@/types/task'
 
 /**
  * 单条任务端点（API-Contract.md 第 5 节）。
  *
- * PATCH 可改两类字段：
+ * PATCH 可改三类字段：
  * - **`status`**（pending / done）：任务状态的唯一入口，**任何来源都可改** —— 这是「标记完成」。
  * - **`title` / `dueDate`**（内容字段）：**只有 `source='manual'` 的任务可改**（P0-3-8b）。
+ * - **`score`**（`{ score, possible }`，或 `null` 清除）：手记分数（P0-3-34），**任何来源都可改**。
  *
  * ### 🔴 为什么内容字段按 `source` 分准入（P0-3-8b）
  * 每个来源有各自的权威源，绕过去改 = 造一个下次同步就被覆盖的假相：
@@ -22,6 +24,13 @@ import type { TaskStatus } from '@/types/task'
  * - **`source='manual'`**：真相就在 Tempo，用户主权 → **允许直接改**。
  *
  * 这样"改日期"这类诉求就不会出现「改了又被同步改回」的最难查的一类 bug。
+ *
+ * ### 🔴 为什么 `score` **不**按 `source` 分准入（P0-3-34）
+ * 分数与标题 / 日期不是一类东西：标题与日期的**真相在 Canvas**，绕过去改就是造一个
+ * 下次同步被覆盖的假相；而「老师只把分登在 Gradescope 上」时，Canvas 那两列的真相
+ * 就是空的 —— 分数是**用户提供的事实**，属于用户主权那一侧（ADR-015）。
+ * 所以它与 `status` 同级：任何来源都可写；写的同时打上 `score_source='manual'`，
+ * 由同步侧跳过这两列（否则下一轮同步会把它抹回 null，见 P0-3-34 卡面「最大坑」）。
  *
  * ### 关于 404
  * 不存在 / 不属于当前用户 / **所在课程已归档** 三种情况统一 404（ADR-010）。
@@ -75,13 +84,15 @@ export async function PATCH(request: Request, { params }: RouteContext) {
 
     const presentContentFields = CONTENT_FIELDS.filter((field) => raw[field] !== undefined)
     const hasStatus = raw.status !== undefined
+    /** 手记分数（P0-3-34）：`{ score, possible }` 对象，或 `null` 表示清除。 */
+    const hasScore = raw.score !== undefined
 
-    if (presentContentFields.length === 0 && !hasStatus) {
+    if (presentContentFields.length === 0 && !hasStatus && !hasScore) {
       return jsonError(
         request,
         400,
         'bad_request',
-        '请求体必须包含 status（改状态）或 title / dueDate（改内容）',
+        '请求体必须包含 status（改状态）、score（记分数）或 title / dueDate（改内容）',
       )
     }
 
@@ -108,13 +119,43 @@ export async function PATCH(request: Request, { params }: RouteContext) {
     }
 
     // 只组装请求里真实出现的字段，避免把没传的字段误写成 null。
-    const update: { status?: TaskStatus; title?: string; due_date?: string | null } = {}
+    const update: {
+      status?: TaskStatus
+      title?: string
+      due_date?: string | null
+      submission_score?: number | null
+      points_possible?: number | null
+      score_source?: TaskScoreSource | null
+    } = {}
 
     if (hasStatus) {
       if (typeof raw.status !== 'string' || !STATUSES.includes(raw.status as TaskStatus)) {
         return jsonError(request, 400, 'validation_failed', 'status 只能是 pending 或 done')
       }
       update.status = raw.status as TaskStatus
+    }
+
+    if (hasScore) {
+      // 与 status 同为「用户主权」那一侧，所以**不看 source**（理由见文件头）。
+      // ⚠️ 派生任务（考试）也放行：考试的分数同样是用户提供的事实，而
+      //    `syncExamToTask()` 只写 title / due_date，不会碰这两列。
+      //    已知边界：syllabus 重解析会把考试行连同派生任务**重建**，那上面的手记分数会丢
+      //    （与 P0-3-31 复习数据「按 id 存会静默丢」同源）。这里如实记着，不藏。
+      if (raw.score === null) {
+        // 清除手记 → 三列一起置空，把这两列的权威交还给 Canvas（下一轮同步会重新填）。
+        update.submission_score = null
+        update.points_possible = null
+        update.score_source = null
+      } else {
+        const parsed = normalizeScoreInput(raw.score)
+        if (!parsed.ok) {
+          return jsonError(request, 400, 'validation_failed', parsed.message)
+        }
+        update.submission_score = parsed.value.score
+        update.points_possible = parsed.value.possible
+        // 🔴 这个标记就是同步侧的闸：见 `canvasTaskColumns()`。
+        update.score_source = 'manual'
+      }
     }
 
     if (presentContentFields.includes('title')) {

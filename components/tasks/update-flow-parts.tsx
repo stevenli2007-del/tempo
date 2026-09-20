@@ -132,6 +132,18 @@ export function UpdateComposer({ flow }: { flow: CourseUpdateFlow }) {
               {flow.summary.skipped > 0 ? ` · 跳过 ${flow.summary.skipped} 条` : ""} ✓
             </p>
           )}
+          {/* P0-3-34：手记分数的回执。与任务分开说 —— 它写的是"某次作业考了多少"，
+              不是"新增了一条任务"，混在一句里用户会以为库里多了一条。 */}
+          {flow.summary.scores > 0 && (
+            <p className="text-sm text-emerald-500">分数：已记录 {flow.summary.scores} 条 ✓</p>
+          )}
+          {/* 勾了却没写成的（没匹配到任务）—— **必须显眼**：
+              用户以为记上了、库里没有，是 R3 里最坏的那种静默失败。 */}
+          {flow.summary.scoresSkipped > 0 && (
+            <p className="text-xs text-amber-600 dark:text-amber-400">
+              ⚠ 有 {flow.summary.scoresSkipped} 条分数没写：这门课里没找到对应的任务，请先在课程页把它建成任务
+            </p>
+          )}
           {/* 回执文案由**服务端**拼（`lib/course-update/apply.ts` 的 `summarizeApply`），
               3-26 的消息栏回执共用同一份措辞 —— 不在这里另写一遍，否则两处说法会漂移。 */}
           {flow.summary.apply && flow.summary.apply.text !== "" && (
@@ -155,10 +167,11 @@ export function UpdateReview({ flow }: { flow: CourseUpdateFlow }) {
   if (!parsed) return null
 
   const hasTasks = parsed.tasks.length > 0
-  // 三个分区各自独立：只贴了一段 "Quiz 1: Sep 4 …" 时不该因为 tasks 为空就整块不渲染。
+  // 四个分区各自独立：只贴了一段 "Quiz 1: Sep 4 …" 时不该因为 tasks 为空就整块不渲染。
   const hasExams = (parsed.exams?.length ?? 0) > 0
   const hasGrades = (parsed.gradeComponents?.length ?? 0) > 0
-  if (!hasTasks && !hasExams && !hasGrades) return null
+  const hasScores = (parsed.scores?.length ?? 0) > 0
+  if (!hasTasks && !hasExams && !hasGrades && !hasScores) return null
 
   return (
     <div className="mb-3 space-y-3">
@@ -166,6 +179,7 @@ export function UpdateReview({ flow }: { flow: CourseUpdateFlow }) {
       {hasTasks && <TaskReview flow={flow} />}
       {hasExams && <ExamReview flow={flow} />}
       {hasGrades && <GradeReview flow={flow} />}
+      {hasScores && <ScoreReview flow={flow} />}
     </div>
   )
 }
@@ -523,6 +537,101 @@ function GradeReview({ flow }: { flow: CourseUpdateFlow }) {
   )
 }
 
+/**
+ * 分数分区（P0-3-34）。
+ *
+ * 与考试 / 构成有两点不同，都要在界面上说清楚：
+ * 1. **它没有自己的落点表** —— 分数记到某一条**现有任务**上，所以每条都得指定目标；
+ * 2. **没检索到候选就不勾选**，并明说"这条不会写入" ——
+ *    "以为记上了、其实没写"是 R3 里最坏的形状。
+ *
+ * 🔴 目标默认取检索结果第一条（`matchTasks` 已按相似度降序），但**展示出来且随时可改**：
+ * 在"这笔分属于哪次作业"上多花一次点击，远比把 A 的分写到 B 上便宜。
+ */
+function ScoreReview({ flow }: { flow: CourseUpdateFlow }) {
+  const scores = flow.parsed?.scores ?? []
+  return (
+    <div className="space-y-3">
+      <p className="text-xs text-muted-foreground">
+        分数 — {scores.length} 条（记到对应的任务上，不改任务内容）
+      </p>
+      {scores.map((item, index) => {
+        const candidates = flow.scoreCandidatesFor[index] ?? []
+        const picked = flow.scorePicked[index] === true
+        const targetId = flow.scoreTargets[index] ?? null
+        return (
+          <div key={index} className="rounded-lg border border-border bg-muted/40 p-3">
+            <label className="flex cursor-pointer items-start gap-2 text-sm">
+              <input
+                type="checkbox"
+                checked={picked}
+                // 没有候选 = 写不了，别让用户以为勾上就会记进去。
+                disabled={candidates.length === 0}
+                onChange={() => flow.toggleScore(index)}
+                className="mt-1"
+              />
+              <span>
+                <span className="text-ink">{item.title}</span>
+                <span className="text-xs text-muted-foreground">
+                  {" "}
+                  · 得分 {item.score} / {item.possible}
+                </span>
+              </span>
+            </label>
+            <p className="mt-1 border-l-2 border-border pl-2 text-xs text-muted-foreground">
+              原文：{item.sourceExcerpt}
+            </p>
+
+            {flow.searching ? (
+              <p className="mt-2 text-xs text-muted-foreground">正在匹配现有任务…</p>
+            ) : candidates.length === 0 ? (
+              <p className="mt-2 text-xs text-amber-600 dark:text-amber-400">
+                这门课里没找到对得上的任务 —— 这条**不会写入**。可以先去课程页把它建成任务，再回来记分。
+              </p>
+            ) : (
+              <div className="mt-2 space-y-1">
+                <p className="text-xs text-muted-foreground">记到哪一条？</p>
+                {candidates.map((candidate) => (
+                  <label
+                    key={candidate.id}
+                    className="flex cursor-pointer items-start gap-2 text-sm"
+                  >
+                    <input
+                      type="radio"
+                      name={`score-target-${index}`}
+                      checked={targetId === candidate.id}
+                      onChange={() => flow.chooseScoreTarget(index, candidate.id)}
+                      className="mt-1"
+                    />
+                    <span>
+                      <span className="text-ink">{candidate.title}</span>
+                      <span className="text-xs text-muted-foreground">
+                        {" "}
+                        · 截止 {formatDay(candidate.dueDate)} · {candidateHint(candidate).label}
+                      </span>
+                    </span>
+                  </label>
+                ))}
+              </div>
+            )}
+
+            {candidates.length > 0 && (
+              <label className="mt-2 flex cursor-pointer items-center gap-2 text-xs text-muted-foreground">
+                <input
+                  type="checkbox"
+                  checked={flow.scoreMarkDone[index] !== false}
+                  onChange={() => flow.toggleScoreMarkDone(index)}
+                />
+                同时标记为已完成（老师给了分通常意味着这条结束了）
+              </label>
+            )}
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
 /** 警告（解析器给的提醒，不是错误）+ 底部动作行。 */
 export function UpdateActions({
   flow,
@@ -531,12 +640,13 @@ export function UpdateActions({
   flow: CourseUpdateFlow
   onConfirmSuccess?: () => void
 }) {
-  // 三个分区任意一个有内容，就进入"确认"态（只贴考试日期时 tasks 是空的，不能再按 tasks 判）。
+  // 四个分区任意一个有内容，就进入"确认"态（只贴考试日期时 tasks 是空的，不能再按 tasks 判）。
   const hasAny =
     !!flow.parsed &&
     (flow.parsed.tasks.length > 0 ||
       (flow.parsed.exams?.length ?? 0) > 0 ||
-      (flow.parsed.gradeComponents?.length ?? 0) > 0)
+      (flow.parsed.gradeComponents?.length ?? 0) > 0 ||
+      (flow.parsed.scores?.length ?? 0) > 0)
 
   // 文案只列非零项：否则只写了一门课的考试时会看到"新增 0 · 更新 0 · 考试 6"这种噪音。
   const picked = [
@@ -544,6 +654,7 @@ export function UpdateActions({
     flow.updateCount > 0 ? `更新 ${flow.updateCount}` : "",
     flow.pickedExamCount > 0 ? `考试 ${flow.pickedExamCount}` : "",
     flow.pickedGradeCount > 0 ? `成绩构成 ${flow.pickedGradeCount}` : "",
+    flow.pickedScoreCount > 0 ? `分数 ${flow.pickedScoreCount}` : "",
   ].filter((part) => part !== "")
   const nothingPicked = picked.length === 0
 

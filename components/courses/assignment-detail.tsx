@@ -155,6 +155,11 @@ function TaskRow({ task, now }: { task: Task; now: Date }) {
       {hasScore ? (
         <div className="w-full shrink-0 sm:w-40">
           <ScoreBar score={task.submissionScore as number} possible={task.pointsPossible as number} />
+          {/* P0-3-34：手记的分数要标出来 —— 用户有权知道这条不是 Canvas 给的，
+              因此也不会被下一轮同步抹掉（同步侧见 `score_source='manual'` 就跳过这两列）。 */}
+          {task.scoreSource === 'manual' ? (
+            <p className="mt-0.5 text-[10px] text-ink-faint">手记 · 同步不会覆盖</p>
+          ) : null}
         </div>
       ) : null}
     </li>

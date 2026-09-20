@@ -192,16 +192,29 @@ export const announcementApplier: MessageApplier = async (
   const exams = validateExams(parsed.data.exams)
   const components = validateGradeComponents(parsed.data.gradeComponents)
   const taskCount = Array.isArray(parsed.data.tasks) ? parsed.data.tasks.length : 0
+  /**
+   * P0-3-34：这条公告里识别到的分数条数。
+   *
+   * ⚠️ 公告这条路**永远不写分数**（它写不了）：分数必须落到一条**现有任务**上，
+   * 而"记到哪一条"是用户的裁决（对话框里有候选列表让人挑）。
+   * 无人确认的公告路径替用户猜目标 = 把分记到错的作业上，比不记更糟。
+   * 所以这里只**如实说清有几条没写**，绝不静默丢（R3）。
+   */
+  const scoreCount = Array.isArray(parsed.data.scores) ? parsed.data.scores.length : 0
 
   if (exams.items.length === 0 && components.items.length === 0) {
     // 粗筛说"有落点"但实际解析不出可写入的东西 —— 如实报错（不是静默成功）。
     const detail = exams.skipped[0] ?? components.skipped[0] ?? ''
+    const extra =
+      scoreCount > 0
+        ? `（另有 ${scoreCount} 条分数信息 —— 分数要你来指定记到哪一条作业上，请用对话框确认）`
+        : ''
     return {
       ok: false,
       code: 'nothing_to_write',
       message: detail
-        ? `这条公告里没有可写入的考试或成绩构成（${detail}），请到课程页手动处理`
-        : '这条公告里没有可写入的考试或成绩构成，请到课程页手动处理',
+        ? `这条公告里没有可写入的考试或成绩构成（${detail}），请到课程页手动处理${extra}`
+        : `这条公告里没有可写入的考试或成绩构成，请到课程页手动处理${extra}`,
     }
   }
 
@@ -232,6 +245,10 @@ export const announcementApplier: MessageApplier = async (
     // 作业类的改动需要匹配已有任务再改期，那是"有人看着"的对话框的活 ——
     // 这里**明确说出来**，不让用户以为全部都写进去了。
     parts.push(`另有 ${taskCount} 条作业类信息未写入，请用对话框确认`)
+  }
+  if (scoreCount > 0) {
+    // 同理，且分数还多一层：连目标都要用户指定（见上面 `scoreCount` 的注释）。
+    parts.push(`另有 ${scoreCount} 条分数信息未写入（分数需你指定记到哪一条作业），请用对话框确认`)
   }
 
   // 透传本次写入的行 id：撤销（P0-3-26）按它精准回滚，绝不整表清空。

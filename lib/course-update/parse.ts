@@ -34,6 +34,20 @@ export type RawCourseUpdate = {
     notes: string | null
     sourceExcerpt: string
   }>
+  /**
+   * 某一次作业 / 测验的得分（P0-3-34）。
+   *
+   * ⚠️ 与上面三个数组的**去向不同**：它不写 `exam_dates` / `grade_components`，
+   * 也不新建任务 —— 它要落到一条**现有任务**上（用户在对话框里挑），
+   * 走 `PATCH /api/v1/tasks/:id` 的 `score` 字段组。所以这里不做服务端校验过滤；
+   * 校验由 `lib/tasks/score.ts` 的 `normalizeScoreInput()` 负责（对话框过滤 + 写入时各一次）。
+   */
+  scores: Array<{
+    title: string
+    score: number
+    possible: number
+    sourceExcerpt: string
+  }>
   warnings: string[]
 }
 

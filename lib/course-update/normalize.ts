@@ -373,11 +373,17 @@ export function toGradeComponentInsertRow(
 // ---------------------------------------------------------------
 
 /**
- * 对话框解析的 schema（P0-3-24 解禁 exam 之后的版本）。
+ * 对话框解析的 schema（P0-3-24 解禁 exam 之后的版本；P0-3-34 加 `scores`）。
  *
  * 放在这里而不是端点文件里，是为了让 `scripts/regress-course-updates.ts`
  * 能断言「schema 要求的字段 ⊆ 校验器接受的字段」——
  * 这两个一旦漂移，模型会产出校验器拒收的值，表现为"解析成功但一条都写不进去"。
+ *
+ * ⚠️ `scores`（P0-3-34）与前四个数组走的路**不一样**：它不经过
+ * `POST /api/v1/course-updates`，而是记到某一条**现有任务**上
+ * （`PATCH /api/v1/tasks/:id` 的 `score` 字段组）。它的校验器是
+ * `lib/tasks/score.ts` 的 `normalizeScoreInput()`（服务端写入与对话框过滤共用一份），
+ * 所以这里没有对应的 `validateScoreInput` —— 别以为漏了。
  */
 export const COURSE_UPDATE_PARSE_SCHEMA: JSONSchema = {
   type: 'object',
@@ -459,11 +465,36 @@ export const COURSE_UPDATE_PARSE_SCHEMA: JSONSchema = {
         required: ['name', 'weightPercent', 'notes', 'sourceExcerpt'],
       },
     },
+    scores: {
+      type: 'array',
+      description:
+        '文本里**明确给出某一次作业 / 测验的得分**时才有（如 "Discussion quiz 得分 9.5/10"、"HW3: 18/20"）。没有就返回空数组',
+      items: {
+        type: 'object',
+        properties: {
+          title: {
+            type: 'string',
+            description:
+              '这条得分属于哪一次作业 / 测验，写原文里的名字（Tempo 会拿它去检索对应的现有任务）',
+          },
+          score: {
+            type: 'number',
+            description: '得分（分子）。原文写的是多少就是多少，小数照写（9.5 就写 9.5）',
+          },
+          possible: { type: 'number', description: '满分（分母），必须大于 0' },
+          sourceExcerpt: {
+            type: 'string',
+            description: '**必填**。支持这条得分的原文逐字摘录（≤200 字符）',
+          },
+        },
+        required: ['title', 'score', 'possible', 'sourceExcerpt'],
+      },
+    },
     warnings: {
       type: 'array',
       items: { type: 'string' },
-      description: '无法归到上面三类的事项：歧义、与课程无关的内容等',
+      description: '无法归到上面四类的事项：歧义、与课程无关的内容等',
     },
   },
-  required: ['tasks', 'exams', 'gradeComponents', 'warnings'],
+  required: ['tasks', 'exams', 'gradeComponents', 'scores', 'warnings'],
 } as const

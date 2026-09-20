@@ -391,7 +391,7 @@ console.log("考试匹配（P0-3-29：改期 = 更新提案，不是新增行）
 console.log("schema ↔ 校验器 一致性")
 {
   const props = COURSE_UPDATE_PARSE_SCHEMA.properties ?? {}
-  check("schema 要求四个顶层字段", (COURSE_UPDATE_PARSE_SCHEMA.required ?? []).length === 4)
+  check("schema 要求五个顶层字段", (COURSE_UPDATE_PARSE_SCHEMA.required ?? []).length === 5)
 
   const examProps = props.exams?.items?.properties ?? {}
   const examRequired = props.exams?.items?.required ?? []
@@ -402,6 +402,25 @@ console.log("schema ↔ 校验器 一致性")
   const gradeRequired = props.gradeComponents?.items?.required ?? []
   check("gradeComponents.required 含 sourceExcerpt", gradeRequired.includes("sourceExcerpt"))
   check("gradeComponents 字段与校验器读的字段同名", gradeRequired.every((key) => key in gradeProps))
+
+  // P0-3-34：scores。这条通道的校验器在 `lib/tasks/score.ts`（不在本文件的 validate* 里），
+  // 所以这里只断言"模型必须按形状给"—— 少一个字段模型就得整条不产出，而不是给 null。
+  const scoreProps = props.scores?.items?.properties ?? {}
+  const scoreRequired = props.scores?.items?.required ?? []
+  check("顶层 required 含 scores", (COURSE_UPDATE_PARSE_SCHEMA.required ?? []).includes("scores"))
+  check("scores.required 含 sourceExcerpt", scoreRequired.includes("sourceExcerpt"))
+  check(
+    "scores.required 含 score 与 possible（缺一不可）",
+    scoreRequired.includes("score") && scoreRequired.includes("possible"),
+    scoreRequired.join("|"),
+  )
+  check("scores 字段与 properties 同名", scoreRequired.every((key) => key in scoreProps))
+  check(
+    "scores.score / possible 是 number（不许 null）",
+    scoreProps.score?.type === "number" && scoreProps.possible?.type === "number",
+    `score=${String(scoreProps.score?.type)} possible=${String(scoreProps.possible?.type)}`,
+  )
+  check("scores.title 是 string（检索靠它）", scoreProps.title?.type === "string")
 
   // tasks 里不该再出现 exam —— 解禁是"搬到 exams 字段"，不是"放宽 tasks"。
   const taskTypes = props.tasks?.items?.properties?.taskType?.enum ?? []

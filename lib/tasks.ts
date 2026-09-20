@@ -3,6 +3,7 @@ import { createClient } from '@/lib/supabase/server'
 import type {
   Task,
   TaskCandidate,
+  TaskScoreSource,
   TaskSource,
   TaskStatus,
   TaskSubmissionState,
@@ -47,11 +48,13 @@ export type TaskRow = {
   /** `numeric` 列在 JSON 里可能退化成字符串 → 过 `toNumberOrNull()` 收窄（P0-3-17）。 */
   points_possible: number | string | null
   submission_score: number | string | null
+  /** 分数来源（P0-3-34）：null / 'canvas' / 'manual'。见迁移 `20260927000000`。 */
+  score_source: string | null
 }
 
 /** 列表与单条查询统一用这份 select，避免各处字段不齐导致形状漂移。 */
 export const TASK_COLUMNS =
-  'id, course_id, title, due_date, task_type, source, status, is_derived, submission_state, submitted_at, canvas_url, points_possible, submission_score'
+  'id, course_id, title, due_date, task_type, source, status, is_derived, submission_state, submitted_at, canvas_url, points_possible, submission_score, score_source'
 
 const TASK_TYPES = new Set<string>(['assignment', 'exam', 'reading', 'other'])
 const TASK_SOURCES = new Set<string>(['canvas', 'syllabus', 'manual'])
@@ -64,6 +67,8 @@ const TASK_SUBMISSION_STATES = new Set<string>([
   'missing',
   'external_unconfirmed',
 ])
+/** 分数来源（P0-3-34）；null 是合法取值，不走这里收窄。 */
+const TASK_SCORE_SOURCES = new Set<string>(['canvas', 'manual'])
 
 /**
  * 收窄枚举列。
@@ -98,6 +103,11 @@ export function toTask(row: TaskRow, courseName: string): Task {
     canvasUrl: row.canvas_url,
     pointsPossible: toNumberOrNull(row.points_possible),
     submissionScore: toNumberOrNull(row.submission_score),
+    // P0-3-34：分数来源。null = 从未被手工覆盖（不是"没有分数"——那是上面两列为 null 的含义）。
+    scoreSource:
+      row.score_source === null
+        ? null
+        : toEnum<TaskScoreSource>(row.score_source, TASK_SCORE_SOURCES, 'score_source'),
   }
 }
 

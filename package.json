@@ -32,6 +32,7 @@
     "regress:exam-review": "npx -y tsx scripts/regress-exam-review.ts",
     "probe:exam-review": "npx -y tsx scripts/probe-exam-review-schema.ts",
     "regress:sync": "npx -y tsx scripts/regress-sync-idempotent.ts",
+    "regress:scores": "npx -y tsx scripts/regress-task-scores.ts",
     "regress:onboarding": "npx -y tsx scripts/regress-onboarding.ts",
     "probe:sync": "npx -y tsx scripts/probe-sync-idempotent.ts"
   },

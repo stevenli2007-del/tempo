@@ -66,6 +66,8 @@ type ExistingRow = {
   canvas_url: string | null
   points_possible: number | string | null
   submission_score: number | string | null
+  /** P0-3-34：'manual' 的行同步不写也不比那两个分数列（`canvasTaskColumns` 里收口）。 */
+  score_source: string | null
 }
 
 /**
@@ -110,7 +112,7 @@ async function main(): Promise<void> {
   const { data: tasks, error: taskErr } = await supabase
     .from('tasks')
     .select(
-      'id, course_id, source_id, title, due_date, external_updated_at, is_deleted, submission_state, submitted_at, canvas_url, points_possible, submission_score',
+      'id, course_id, source_id, title, due_date, external_updated_at, is_deleted, submission_state, submitted_at, canvas_url, points_possible, submission_score, score_source',
     )
     .eq('source', 'canvas')
     .not('source_id', 'is', null)

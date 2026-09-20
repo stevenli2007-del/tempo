@@ -30,6 +30,7 @@ import { canvasGet } from '@/lib/canvas/client'
 import { roundToScale } from '@/lib/numbers'
 import {
   applyCanvasTasks,
+  canvasTaskColumns,
   hasChanged,
   toCanvasTaskFields,
   type ExistingRow as TaskRow,
@@ -93,7 +94,12 @@ function stubAssignment(score: number | null, points: number | null): CanvasAssi
   }
 }
 
-function stubRow(score: number | string | null, points: number | string | null): TaskRow {
+function stubRow(
+  score: number | string | null,
+  points: number | string | null,
+  /** P0-3-34：null = 从未手工覆盖；'manual' = 用户手记（同步不写那两列）。 */
+  scoreSource: string | null = null,
+): TaskRow {
   return {
     id: 'row',
     source_id: '1',
@@ -106,6 +112,7 @@ function stubRow(score: number | string | null, points: number | string | null):
     canvas_url: null,
     points_possible: points,
     submission_score: score,
+    score_source: scoreSource,
   }
 }
 
@@ -167,6 +174,69 @@ function testHasChanged(): void {
   check(
     '库 12.34 vs Canvas 12.3449 → 判「未变化」',
     hasChanged(row2, same, toCanvasTaskFields(same, now)) === false,
+  )
+}
+
+// ---------- ②b 手工分数：同步不写也不比（P0-3-34） ----------
+
+/**
+ * 守的是卡面那个「最大坑」：老师把分登在 Canvas 之外（Gradescope 等）时，
+ * Canvas 给的权威值是 `null` —— 同步照写就把用户刚记的 9.5/10 抹回空，
+ * 而界面上"什么都没发生"，用户只会以为自己记错了。
+ *
+ * ⚠️ 其中第 ③ 条最要紧：它守的**不是**"别比"，而是**判定与写入不许分叉**。
+ * 若有人把 patch 改回"固定写那几列"，分数照样会被覆盖 ——
+ * 而只测"变没变"的前两条断言依然全绿，抓不住。（P0-3-15 那种形状。）
+ */
+function testManualScore(): void {
+  console.log('\n②b 手工分数（P0-3-34）：不写也不比，且判定与写入同源')
+  const now = new Date('2026-09-18T00:00:00Z')
+
+  // ① 库里是手记的 9.5/10，Canvas 那边压根没登分 → 不能判成"变了"。
+  //    ⚠️ 这一条的 fixture 必须自己先把提交态对齐（下面 `testHasChanged` 里那条教训）：
+  //    Canvas 无提交记录 → 派生态是 null，行里也必须是 null，否则测的是"提交态变了"。
+  const manualRow = { ...stubRow(9.5, 10, 'manual'), submission_state: null, submitted_at: null }
+  const empty = stubAssignment(null, null)
+  check(
+    '手记 9.5/10 vs Canvas 空 → 判「未变化」',
+    hasChanged(manualRow, empty, toCanvasTaskFields(empty, now)) === false,
+  )
+
+  // ② 即便 Canvas 后来真的登了一个不同的分（8/10），手记那条也不被改写 ——
+  //    用户明确说过的值优先，改不改由他在界面上决定（ADR-015 用户主权那一侧）。
+  //    这里的行与作业**提交态完全一致**，所以唯一的差就是那两个分数列。
+  const canvasScore = stubAssignment(8, 10)
+  const canvasScoreFields = toCanvasTaskFields(canvasScore, now)
+  const manualScored = stubRow(9.5, 10, 'manual')
+  check(
+    '手记 9.5/10 vs Canvas 8/10 → 仍判「未变化」',
+    hasChanged(manualScored, canvasScore, canvasScoreFields) === false,
+  )
+
+  // ③ 🔴 其他列真变了（老师改了标题）→ 必须写，但写入的列里**不许**有分数两列。
+  const renamed = { ...canvasScore, title: 'T2' }
+  const renamedFields = toCanvasTaskFields(renamed, now)
+  check('手记行改名 → 判「变了」', hasChanged(manualScored, renamed, renamedFields) === true)
+  const columns = canvasTaskColumns(manualScored, renamed, renamedFields)
+  check('写入的列含 title', columns.title === 'T2')
+  check(
+    '写入的列不含分数两列（判定与写入同源）',
+    !('submission_score' in columns) && !('points_possible' in columns),
+    Object.keys(columns).join(','),
+  )
+
+  // ④ 对照组：Canvas 权威的行照旧 —— 分数真的变了必须写（别因为加了闸就吞掉真变化）。
+  const canvasRow = stubRow(9.92, 10)
+  check('Canvas 行 9.92 vs Canvas 8/10 → 判「变了」', hasChanged(canvasRow, canvasScore, canvasScoreFields) === true)
+  check(
+    'Canvas 行的列含 submission_score',
+    'submission_score' in canvasTaskColumns(canvasRow, canvasScore, canvasScoreFields),
+  )
+
+  // ⑤ 交还给 Canvas：score_source 置回 null（用户在界面上清除手记）→ 分数差异重新会被写。
+  check(
+    'score_source 置回 null → 分数差异重新会被写',
+    canvasTaskColumns(stubRow(9.5, 10, null), canvasScore, canvasScoreFields).submission_score === 8,
   )
 }
 
@@ -251,6 +321,7 @@ async function main(): Promise<void> {
   const live = process.argv.includes('--live')
   testRoundToScale()
   testHasChanged()
+  testManualScore()
   if (live) await testLive()
 
   console.log('\n======================================================================')

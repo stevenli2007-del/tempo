@@ -36,6 +36,7 @@ import {
   type WeightedItem,
 } from "@/lib/course-update/weights"
 import { looksLikeUrl } from "@/lib/ingest/detect"
+import { normalizeScoreInput } from "@/lib/tasks/score"
 
 export type CourseOption = { id: string; courseName: string }
 
@@ -67,13 +68,28 @@ export type ParsedGradeComponent = {
 }
 
 /**
- * 解析结果。**四个数组一个都不能省** —— 与服务端 `COURSE_UPDATE_PARSE_SCHEMA`
+ * P0-3-34：解析出来的「某一次作业 / 测验的得分」。
+ *
+ * ⚠️ 与上面几个**不同**，它没有自己的落点表 —— 它要记到某一条**现有任务**上
+ * （由用户在界面上指定），写入走 `PATCH /api/v1/tasks/:id` 的 `score` 字段组。
+ * 所以 `title` 的唯一用途是**检索**，它不会成为任何一行的标题。
+ */
+export type ParsedScore = {
+  title: string
+  score: number
+  possible: number
+  sourceExcerpt: string
+}
+
+/**
+ * 解析结果。**五个数组一个都不能省** —— 与服务端 `COURSE_UPDATE_PARSE_SCHEMA`
  * 的 `required` 一一对应（schema 由 `lib/llm/schema.ts` 强校验，缺字段整个调用失败）。
  */
 export type ParseResult = {
   tasks: ParsedTask[]
   exams: ParsedExam[]
   gradeComponents: ParsedGradeComponent[]
+  scores: ParsedScore[]
   warnings: string[]
 }
 
@@ -93,6 +109,13 @@ export type Summary = {
   created: number
   updated: number
   skipped: number
+  /** P0-3-34：本次真正写进任务的分数条数。 */
+  scores: number
+  /**
+   * P0-3-34：勾了却没写成的分数条数（没检索到任务 / 用户没指定记到哪一条）。
+   * **必须报出来** —— 用户以为记上了、库里没有，是 R3 里最坏的那种静默失败。
+   */
+  scoresSkipped: number
   /** P0-3-24：考试 / 成绩构成的写入回执（本次没写就是 null）。 */
   apply?: ApplySummary | null
 }
@@ -223,6 +246,18 @@ export function useCourseUpdateFlow(options: { initialCourses?: CourseOption[] }
   /** 现有成绩构成的**精确去重键**（同名 + 同占比）→ "已存在"提示与默认不勾选。 */
   const [existingGradeKeys, setExistingGradeKeys] = useState<string[]>([])
 
+  // ---------------------------------------------------------------
+  // P0-3-34：手记分数（「某次作业考了多少」）
+  // ---------------------------------------------------------------
+  // 与考试 / 构成同形，但多一个「记到哪一条」：分数必须落到一条**现有任务**上，
+  // 所以除了勾选还需要目标 id。没检索到候选的条目**默认不勾选**（写不了就别装作要写）。
+  const [scorePicked, setScorePicked] = useState<Record<number, boolean>>({})
+  const [scoreCandidatesFor, setScoreCandidatesFor] = useState<Record<number, Candidate[]>>({})
+  /** 每条分数记到哪一条任务（null = 还没定 / 没有候选）。 */
+  const [scoreTargets, setScoreTargets] = useState<Record<number, string | null>>({})
+  /** 逐条「同时标记为完成」。**默认勾选**（老师给了分通常就意味着这条结束了）。 */
+  const [scoreMarkDone, setScoreMarkDone] = useState<Record<number, boolean>>({})
+
   // 打开时拉一次课程列表（已拉过就不再拉）。改用「打开」事件触发，避免 effect 内同步 setState（react-hooks/set-state-in-effect）。
   function loadCourses() {
     if (courses.length > 0) return
@@ -247,6 +282,10 @@ export function useCourseUpdateFlow(options: { initialCourses?: CourseOption[] }
     setResolutions({})
     setExamPicked({})
     setGradePicked({})
+    setScorePicked({})
+    setScoreCandidatesFor({})
+    setScoreTargets({})
+    setScoreMarkDone({})
     setExistingGradeKeys([])
     setExamResolutions({})
     setExamDecisions({})
@@ -431,6 +470,52 @@ export function useCourseUpdateFlow(options: { initialCourses?: CourseOption[] }
   }
 
   /**
+   * P0-3-34：为每条分数检索「它说的是哪一条任务」。
+   *
+   * 复用与任务消歧**同一条**检索通道（`/api/v1/tasks/search` → `matchTasks()`，
+   * 确定性、零 LLM），不另写一套匹配 —— 两条路径各判一次就是分叉
+   * （CodingRules §10.1 第 21 条的形状）。
+   *
+   * 默认目标取检索结果的**第一条**（`matchTasks` 已按相似度降序）。这不算"替用户猜"：
+   * 目标标题同时展示出来、radio 随时可改，且**没候选时默认不勾选** ——
+   * 用户看到的就是将要发生的事。
+   */
+  async function loadScoreCandidates(scores: ParsedScore[], cid: string) {
+    const results = await Promise.all(
+      scores.map(async (item, index) => {
+        try {
+          const res = await fetch(
+            `/api/v1/tasks/search?courseId=${encodeURIComponent(cid)}&q=${encodeURIComponent(item.title)}`,
+          )
+          const data = await res.json()
+          return [index, res.ok ? ((data.data ?? []) as Candidate[]) : []] as const
+        } catch {
+          return [index, [] as Candidate[]] as const
+        }
+      }),
+    )
+
+    const nextCandidates: Record<number, Candidate[]> = {}
+    const nextTargets: Record<number, string | null> = {}
+    const nextPicked: Record<number, boolean> = {}
+    for (const [index, list] of results) {
+      nextCandidates[index] = list
+      const first = list[0]
+      if (first) {
+        nextTargets[index] = first.id
+        nextPicked[index] = true
+      } else {
+        // 这门课里没有对得上的任务 → 这条写不了。默认不勾选，界面上明说原因。
+        nextTargets[index] = null
+        nextPicked[index] = false
+      }
+    }
+    setScoreCandidatesFor(nextCandidates)
+    setScoreTargets(nextTargets)
+    setScorePicked(nextPicked)
+  }
+
+  /**
    * 把解析结果收进状态前的**统一整形**（文本档与截图档共用一份）。
    *
    * 为什么要在这里再兜一层：schema 已经把考试拆到 `exams` 字段了，但模型偶尔仍会把
@@ -446,10 +531,32 @@ export function useCourseUpdateFlow(options: { initialCourses?: CourseOption[] }
         `有 ${dropped.length} 条被识别成考试却混在任务里，已跳过 —— 考试请按「考试」区展示（本条不该出现，请反馈）`,
       )
     }
+
+    // P0-3-34：分数条目逐条过**服务端那份**校验器（`normalizeScoreInput`）——
+    // 缺分子 / 缺分母 / 分母 ≤ 0 在这里就挡掉，并**计数上报**：
+    // 静默丢掉会让用户看到"识别到 3 条"却只有 2 条，无从判断是漏了还是本来就没有。
+    const rawScores = Array.isArray(result.scores) ? result.scores : []
+    const safeScores: ParsedScore[] = []
+    for (const raw of rawScores) {
+      if (!raw || typeof raw !== "object" || typeof raw.title !== "string") continue
+      const valid = normalizeScoreInput({ score: raw.score, possible: raw.possible })
+      if (!valid.ok) continue
+      safeScores.push({
+        title: raw.title,
+        score: valid.value.score,
+        possible: valid.value.possible,
+        sourceExcerpt: typeof raw.sourceExcerpt === "string" ? raw.sourceExcerpt : "",
+      })
+    }
+    if (safeScores.length < rawScores.length) {
+      warnings.push(`有 ${rawScores.length - safeScores.length} 条分数信息不完整（缺得分或满分），已跳过`)
+    }
+
     return {
       safeTasks: allTasks.filter((t) => t.taskType !== "exam"),
       exams: Array.isArray(result.exams) ? result.exams : [],
       gradeComponents: Array.isArray(result.gradeComponents) ? result.gradeComponents : [],
+      scores: safeScores,
       warnings,
     }
   }
@@ -516,6 +623,7 @@ export function useCourseUpdateFlow(options: { initialCourses?: CourseOption[] }
       safeTasks: [] as ParsedTask[],
       exams: [] as ParsedExam[],
       gradeComponents: [] as ParsedGradeComponent[],
+      scores: [] as ParsedScore[],
       warnings: [] as string[],
     }
     setParsing(true)
@@ -535,6 +643,7 @@ export function useCourseUpdateFlow(options: { initialCourses?: CourseOption[] }
           tasks: [],
           exams: [],
           gradeComponents: [],
+          scores: [],
           warnings: [],
         }) as ParseResult,
       )
@@ -547,10 +656,19 @@ export function useCourseUpdateFlow(options: { initialCourses?: CourseOption[] }
 
     if (!commitParseResult(accepted, courseId)) return
 
-    if (accepted.safeTasks.length > 0) {
+    // 任务与分数共用同一次「检索中…」的态：两者都是"拿标题去匹配现有任务"，
+    // 分两次闪会让用户以为是两件事。
+    if (accepted.safeTasks.length > 0 || accepted.scores.length > 0) {
       setSearching(true)
       try {
-        await loadCandidates(accepted.safeTasks, courseId)
+        await Promise.all([
+          accepted.safeTasks.length > 0
+            ? loadCandidates(accepted.safeTasks, courseId)
+            : Promise.resolve(),
+          accepted.scores.length > 0
+            ? loadScoreCandidates(accepted.scores, courseId)
+            : Promise.resolve(),
+        ])
       } finally {
         setSearching(false)
       }
@@ -566,22 +684,28 @@ export function useCourseUpdateFlow(options: { initialCourses?: CourseOption[] }
       safeTasks: ParsedTask[]
       exams: ParsedExam[]
       gradeComponents: ParsedGradeComponent[]
+      scores: ParsedScore[]
       warnings: string[]
     },
     cid: string,
   ): Promise<boolean> {
-    const { safeTasks, exams, gradeComponents, warnings } = accepted
+    const { safeTasks, exams, gradeComponents, scores, warnings } = accepted
     if (
       safeTasks.length === 0 &&
       exams.length === 0 &&
       gradeComponents.length === 0 &&
+      scores.length === 0 &&
       warnings.length === 0
     ) {
       setError("没识别出可添加的内容，换个说法试试？")
       return false
     }
 
-    setParsed({ tasks: safeTasks, exams, gradeComponents, warnings })
+    setParsed({ tasks: safeTasks, exams, gradeComponents, scores, warnings })
+
+    // P0-3-34：分数的勾选 / 目标由检索结果决定（`loadScoreCandidates`）——
+    // 这里先把「同时标记为完成」清成默认值（缺省即 true，见 `scoreMarkDone` 的读法）。
+    setScoreMarkDone({})
 
     // 先取现有数据、再定去向：命中已有考试 → **更新那条**（改期），确无命中才新增。
     //
@@ -662,6 +786,7 @@ export function useCourseUpdateFlow(options: { initialCourses?: CourseOption[] }
       safeTasks: [] as ParsedTask[],
       exams: [] as ParsedExam[],
       gradeComponents: [] as ParsedGradeComponent[],
+      scores: [] as ParsedScore[],
       warnings: [] as string[],
     }
     setParsing(true)
@@ -682,6 +807,7 @@ export function useCourseUpdateFlow(options: { initialCourses?: CourseOption[] }
           tasks: [],
           exams: [],
           gradeComponents: [],
+          scores: [],
           warnings: [],
         }) as ParseResult,
       )
@@ -694,10 +820,19 @@ export function useCourseUpdateFlow(options: { initialCourses?: CourseOption[] }
 
     if (!commitParseResult(accepted, courseId)) return
 
-    if (accepted.safeTasks.length > 0) {
+    // 截图档目前不产出分数（它的 schema 只有 tasks / warnings，见 parse-image 路由），
+    // 但这里写成与文本档同形：将来截图识别放开分数时不必再改一遍。
+    if (accepted.safeTasks.length > 0 || accepted.scores.length > 0) {
       setSearching(true)
       try {
-        await loadCandidates(accepted.safeTasks, courseId)
+        await Promise.all([
+          accepted.safeTasks.length > 0
+            ? loadCandidates(accepted.safeTasks, courseId)
+            : Promise.resolve(),
+          accepted.scores.length > 0
+            ? loadScoreCandidates(accepted.scores, courseId)
+            : Promise.resolve(),
+        ])
       } finally {
         setSearching(false)
       }
@@ -711,6 +846,29 @@ export function useCourseUpdateFlow(options: { initialCourses?: CourseOption[] }
 
   function toggleGrade(index: number) {
     setGradePicked((prev) => ({ ...prev, [index]: prev[index] === false }))
+  }
+
+  // ---------- P0-3-34：分数 ----------
+
+  function toggleScore(index: number) {
+    setScorePicked((prev) => ({ ...prev, [index]: prev[index] !== true }))
+  }
+
+  /**
+   * 用户指定这条分数记到**哪一条任务**上。
+   *
+   * 这是人的裁决，不是系统该猜的东西（卡面验收④）—— 检索只给候选，
+   * 排序第一条只是默认值，用户随时能改。
+   */
+  function chooseScoreTarget(index: number, taskId: string) {
+    setScoreTargets((prev) => ({ ...prev, [index]: taskId }))
+    // 选了就要生效：否则界面是"选了但没勾上"，用户会以为选了没用（R3 的形状）。
+    setScorePicked((prev) => ({ ...prev, [index]: true }))
+  }
+
+  /** 逐条「同时标记为完成」（缺省即 true，见 `scoreMarkDone` 的读法）。 */
+  function toggleScoreMarkDone(index: number) {
+    setScoreMarkDone((prev) => ({ ...prev, [index]: prev[index] === false }))
   }
 
   function chooseCreate(index: number) {
@@ -731,7 +889,18 @@ export function useCourseUpdateFlow(options: { initialCourses?: CourseOption[] }
     if (!parsed) return
     const pickedExams = (parsed.exams ?? []).filter((_, i) => examPicked[i] !== false)
     const pickedGrades = (parsed.gradeComponents ?? []).filter((_, i) => gradePicked[i] !== false)
-    if (parsed.tasks.length === 0 && pickedExams.length === 0 && pickedGrades.length === 0) return
+    // 分数：勾了**并且**指定了记到哪一条才算数 —— 没目标的写不了（卡面验收④）。
+    const pickedScores = (parsed.scores ?? []).filter(
+      (_, i) => scorePicked[i] === true && (scoreTargets[i] ?? null) !== null,
+    )
+    if (
+      parsed.tasks.length === 0 &&
+      pickedExams.length === 0 &&
+      pickedGrades.length === 0 &&
+      pickedScores.length === 0
+    ) {
+      return
+    }
     setSaving(true)
     setError(null)
     try {
@@ -895,7 +1064,50 @@ export function useCourseUpdateFlow(options: { initialCourses?: CourseOption[] }
         }
       }
 
-      setSummary({ created, updated: updated + newMarkedDone, skipped, apply })
+      // ---------------------------------------------------------------
+      // P0-3-34：分数（走 PATCH /tasks/:id 的 score 字段组，与「标记完成」同一条路）
+      // ---------------------------------------------------------------
+      // 为什么不复用 `POST /course-updates`：分数**没有自己的表** —— 它落到一条
+      // **现有任务**上，所以走任务端点。服务端在那里打 `score_source='manual'`，
+      // 同步侧据此跳过那两个分数列（否则下一轮同步就把它抹回 null —— 卡面「最大坑」）。
+      //
+      // ⚠️ 逐条串行、失败即返回（与上面几段同一取舍）：已经写进去的会留着，
+      //    但响应是明确的失败，用户不会看到"好像成功了"。
+      let scoresWritten = 0
+      let scoresSkipped = 0
+      for (const [index, item] of (parsed.scores ?? []).entries()) {
+        if (scorePicked[index] !== true) continue
+        const targetId = scoreTargets[index] ?? null
+        if (targetId === null) {
+          // 勾了却没有目标 → 写不成。**必须计数**：回执要如实说有几条没写（R3）。
+          scoresSkipped += 1
+          continue
+        }
+        const res = await fetch(`/api/v1/tasks/${targetId}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            score: { score: item.score, possible: item.possible },
+            // 默认同时标完成（老师给了分通常意味着这条结束了），用户可取消。
+            ...(scoreMarkDone[index] !== false ? { status: "done" } : {}),
+          }),
+        })
+        const data = await res.json()
+        if (!res.ok) {
+          setError(data?.error?.message ?? "分数写入失败，请重试")
+          return
+        }
+        scoresWritten += 1
+      }
+
+      setSummary({
+        created,
+        updated: updated + newMarkedDone,
+        skipped,
+        scores: scoresWritten,
+        scoresSkipped,
+        apply,
+      })
       resetInput()
       router.refresh()
       onSuccess?.()
@@ -917,6 +1129,12 @@ export function useCourseUpdateFlow(options: { initialCourses?: CourseOption[] }
     : 0
   const pickedGradeCount = parsed
     ? (parsed.gradeComponents ?? []).filter((_, i) => gradePicked[i] !== false).length
+    : 0
+  /** 本次将要写入的分数条数（**勾了且指定了目标**才算数 —— 没目标的写不了）。 */
+  const pickedScoreCount = parsed
+    ? (parsed.scores ?? []).filter(
+        (_, i) => scorePicked[i] === true && (scoreTargets[i] ?? null) !== null,
+      ).length
     : 0
 
   /**
@@ -966,6 +1184,12 @@ export function useCourseUpdateFlow(options: { initialCourses?: CourseOption[] }
     examDecisions,
     existingGradeKeys,
     weightPreviewUnavailable,
+    // P0-3-34
+    scorePicked,
+    scoreCandidatesFor,
+    scoreTargets,
+    scoreMarkDone,
+    pickedScoreCount,
     // 动作
     setCourseId,
     setText,
@@ -982,6 +1206,9 @@ export function useCourseUpdateFlow(options: { initialCourses?: CourseOption[] }
     toggleExam,
     toggleGrade,
     chooseExamDecision,
+    toggleScore,
+    chooseScoreTarget,
+    toggleScoreMarkDone,
     handleConfirm,
   }
 }

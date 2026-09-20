@@ -44,6 +44,19 @@ export type TaskSource = 'canvas' | 'syllabus' | 'manual'
 export type TaskType = 'assignment' | 'exam' | 'reading' | 'other'
 
 /**
+ * 分数的来源（P0-3-34，`tasks.score_source`）。
+ *
+ * 与 ADR-015 的分列同理：**Canvas 真相**与**用户提供的事实**必须分得开，否则
+ * 同步侧不知道该不该覆盖它。
+ *
+ * - `null`      从未被手工覆盖（旧数据、以及本来没分数的行）；
+ * - `'canvas'`  这两列的权威值是 Canvas 给的 → 同步照写；
+ * - `'manual'`  用户在 Tempo 里手记的（老师把分登在 Gradescope 等校外平台）
+ *               → 同步**不写也不比**这两列，不会被抹回 null。
+ */
+export type TaskScoreSource = 'canvas' | 'manual'
+
+/**
  * 任务对外的完整形状（GET /api/v1/tasks 的响应项、PATCH 的响应体）。
  *
  * `courseName` 是冗余字段：任务列表按课程分组展示时，前端不必再为拿课程名
@@ -86,6 +99,13 @@ export type Task = {
    * 与 `pointsPossible` 一起画分数条。
    */
   submissionScore: number | null
+  /**
+   * 这两列分数的来源（`tasks.score_source`，P0-3-34）。null = 从未被手工覆盖。
+   *
+   * `'manual'` 时详情页的分数条旁会标「手记」—— 用户有权知道这条分是他自己记的，
+   * 而且 Canvas 同步不会把它抹掉。
+   */
+  scoreSource: TaskScoreSource | null
 }
 
 /**

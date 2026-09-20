@@ -24,6 +24,12 @@ import type { getCurrentUser } from '@/lib/api/response'
  *    新增三个字段（P0-3-17）全部来自**已有的那一个** `include[]=submission` 请求，
  *    不增加任何 Canvas 调用 —— 三级熔断不受影响。
  *
+ *    ⚠️ **`score_source = 'manual'` 的行例外（P0-3-34）**：
+ *    用户手记的分数不能被同步抹掉 —— 老师没在 Canvas 上登分时 Canvas 的权威值是 `null`，
+ *    同步照写就等于把用户刚填的 9.5/10 覆盖回空，界面上「什么都没发生」。
+ *    所以这两列（`points_possible` / `submission_score`）在**比较与写入两处**都跳过，
+ *    判定收口在 `canvasTaskColumns()` 一个函数里（见下）。
+ *
  * 2. **没有变化就不写库**（Database.md 4.2 的原话：不刷 `updated_at`）。
  *    `updated_at` 应该表示"这条数据什么时候真的变过"，而不是"什么时候被同步扫到过"。
  *    代价与取舍见下面「`last_seen_at` 的语义偏差」。
@@ -70,6 +76,14 @@ const NO_COMPLETION_TYPES = new Set(['none', 'not_graded', 'on_paper'])
  * - 负信号但**还没到期** → 保留 `unsubmitted`（"还没做"这时是可信的，提醒不能被吞掉）。
  */
 const EXTERNAL_TOOL_TYPE = 'external_tool'
+
+/**
+ * `tasks.score_source` 的「用户手记」取值（P0-3-34，见迁移 `20260927000000`）。
+ *
+ * 这一行的两个分数列是**用户提供的事实**，同步不但不写，连"变没变"都不比 ——
+ * 比了就会报出一次假变化，把 `updated_at` 白白刷新（违反铁律 2）。
+ */
+const MANUAL_SCORE_SOURCE = 'manual'
 
 /**
  * 把一条 Canvas 作业映射成 Tempo 的提交态（P0-3-10 的"五个分支"全在此收口）。
@@ -170,11 +184,16 @@ export type ExistingRow = {
   /** `numeric` 列在 JSON 里可能退化成字符串 → 用 `number | string | null`，比较走 `sameNumber()`。 */
   points_possible: number | string | null
   submission_score: number | string | null
+  /**
+   * 分数来源（P0-3-34）。`'manual'` = 用户手记 → 上面两个分数列同步不写也不比。
+   * null 与 `'canvas'` 在同步侧行为完全一样（都可写）。
+   */
+  score_source: string | null
 }
 
 /** 同步读取这三列时用的 select（与 `TASK_COLUMNS` 分开：这里只需要"用来比对"的列）。 */
 const EXISTING_COLUMNS =
-  'id, source_id, title, due_date, external_updated_at, is_deleted, submission_state, submitted_at, canvas_url, points_possible, submission_score'
+  'id, source_id, title, due_date, external_updated_at, is_deleted, submission_state, submitted_at, canvas_url, points_possible, submission_score, score_source'
 
 /** 本次同步对一条作业算出的「Canvas 侧字段」集合。 */
 export type CanvasTaskFields = {
@@ -210,65 +229,86 @@ export function toCanvasTaskFields(assignment: CanvasAssignment, now: Date): Can
 export type CanvasTaskDiff = { field: string; stored: unknown; incoming: unknown }
 
 /**
+ * 这条已存在的行，本次同步到底要写哪些列 → 值。**写入与比较的唯一出处。**
+ *
+ * ### 为什么必须是"列 → 值"，而不是一份差异列表 + 一份手写 patch
+ * 在 P0-3-34 之前，判定（`canvasTaskDiffs`）与写入（`applyCanvasTasks` 里那段固定
+ * 10 列的 patch）是**两份**代码：判定说"变了"就把那 10 列照写一遍。
+ * 一旦某列需要"按行决定写不写"，两份必然分叉 —— 判定那边跳过了、patch 那边照写，
+ * 于是那列还是被覆盖，而且**没有任何测试会红**。
+ * 所以把结论收成一个函数：diff 列表与写入 patch 都由它派生。
+ *
+ * ### 手工分数（P0-3-34）
+ * `score_source = 'manual'` 时**不比也不写** `points_possible` / `submission_score`。
+ * 老师没在 Canvas 登分时这两列的权威值是 null，同步照写就等于把用户刚记的分抹掉，
+ * 而界面上"什么都没发生"。这两列的用户主权属于用户（ADR-015 的同款心态）。
+ *
+ * ### 其余列的语义（与文件头铁律 1、2 一致）
+ * - `is_deleted` 也算变化条件：之前被软删除的行这次又出现了（老师恢复了作业），
+ *   必须写一次把它恢复 —— 否则用户会看到"作业回来了但列表里没有"；
+ * - **没变的列不进结果** —— 判定与写入天然共用同一份结论，不会出现
+ *   "判定了变化却重写一遍没变的列"。
+ */
+export function canvasTaskColumns(
+  existing: ExistingRow,
+  incoming: CanvasAssignment,
+  next: CanvasTaskFields,
+): Record<string, unknown> {
+  const columns: Record<string, unknown> = {}
+  if (existing.is_deleted) {
+    columns.is_deleted = false
+  }
+  if (existing.title !== incoming.title) {
+    columns.title = incoming.title
+  }
+  if (!sameInstant(existing.due_date, incoming.dueAt)) {
+    columns.due_date = incoming.dueAt
+  }
+  if (!sameInstant(existing.external_updated_at, incoming.externalUpdatedAt)) {
+    columns.external_updated_at = incoming.externalUpdatedAt
+  }
+  if (existing.submission_state !== next.submissionState) {
+    columns.submission_state = next.submissionState
+  }
+  if (!sameInstant(existing.submitted_at, next.submittedAt)) {
+    columns.submitted_at = next.submittedAt
+  }
+  // P0-3-17 的三个字段：老师改了满分、或成绩出来了 → 必须写一次。
+  if (existing.canvas_url !== incoming.htmlUrl) {
+    columns.canvas_url = incoming.htmlUrl
+  }
+  // 🔴 手工分数行：这两列归用户 —— 跳过（连比都不比，免得刷出一次假变化）。
+  if (existing.score_source !== MANUAL_SCORE_SOURCE) {
+    if (!sameNumber(existing.points_possible, next.pointsPossible)) {
+      columns.points_possible = next.pointsPossible
+    }
+    if (!sameNumber(existing.submission_score, next.submissionScore)) {
+      columns.submission_score = next.submissionScore
+    }
+  }
+  return columns
+}
+
+/**
  * 逐字段列出「哪些列真的变了」。
  *
- * `hasChanged()` 与在线探针（`scripts/probe-sync-idempotent.ts`）共用这一份判定 ——
- * 探针里再抄一遍判定逻辑，就等于"用另一份代码验证这份代码"，验不出真东西。
- *
- * `is_deleted` 也算变化条件：之前被软删除的行这次又出现了（老师恢复了作业），
- * 必须写一次把它恢复 —— 否则用户会看到"作业回来了但列表里没有"。
+ * 内容由 `canvasTaskColumns()` 派生，`hasChanged()` 与在线探针
+ * （`scripts/probe-sync-idempotent.ts`）都走这一份 —— 探针里再抄一遍判定，
+ * 等于"用另一份代码验证这份代码"，验不出真东西。
  */
 export function canvasTaskDiffs(
   existing: ExistingRow,
   incoming: CanvasAssignment,
   next: CanvasTaskFields,
 ): CanvasTaskDiff[] {
-  const diffs: CanvasTaskDiff[] = []
-  if (existing.is_deleted) {
-    diffs.push({ field: 'is_deleted', stored: true, incoming: false })
-  }
-  if (existing.title !== incoming.title) {
-    diffs.push({ field: 'title', stored: existing.title, incoming: incoming.title })
-  }
-  if (!sameInstant(existing.due_date, incoming.dueAt)) {
-    diffs.push({ field: 'due_date', stored: existing.due_date, incoming: incoming.dueAt })
-  }
-  if (!sameInstant(existing.external_updated_at, incoming.externalUpdatedAt)) {
-    diffs.push({
-      field: 'external_updated_at',
-      stored: existing.external_updated_at,
-      incoming: incoming.externalUpdatedAt,
-    })
-  }
-  if (existing.submission_state !== next.submissionState) {
-    diffs.push({
-      field: 'submission_state',
-      stored: existing.submission_state,
-      incoming: next.submissionState,
-    })
-  }
-  if (!sameInstant(existing.submitted_at, next.submittedAt)) {
-    diffs.push({ field: 'submitted_at', stored: existing.submitted_at, incoming: next.submittedAt })
-  }
-  // P0-3-17 的三个新字段：老师改了满分、或成绩出来了 → 必须写一次。
-  if (existing.canvas_url !== incoming.htmlUrl) {
-    diffs.push({ field: 'canvas_url', stored: existing.canvas_url, incoming: incoming.htmlUrl })
-  }
-  if (!sameNumber(existing.points_possible, next.pointsPossible)) {
-    diffs.push({
-      field: 'points_possible',
-      stored: existing.points_possible,
-      incoming: next.pointsPossible,
-    })
-  }
-  if (!sameNumber(existing.submission_score, next.submissionScore)) {
-    diffs.push({
-      field: 'submission_score',
-      stored: existing.submission_score,
-      incoming: next.submissionScore,
-    })
-  }
-  return diffs
+  const columns = canvasTaskColumns(existing, incoming, next)
+  const stored = existing as unknown as Record<string, unknown>
+  return Object.entries(columns).map(([field, value]) => ({
+    field,
+    // `is_deleted` 的库里值就是 `true`（差异是"它被软删过"），照实取。
+    stored: stored[field] ?? null,
+    incoming: value,
+  }))
 }
 
 /** 判断一条已存在的任务是否需要写入。 */
@@ -277,7 +317,7 @@ export function hasChanged(
   incoming: CanvasAssignment,
   next: CanvasTaskFields,
 ): boolean {
-  return canvasTaskDiffs(existing, incoming, next).length > 0
+  return Object.keys(canvasTaskColumns(existing, incoming, next)).length > 0
 }
 
 /**
@@ -356,24 +396,13 @@ export async function applyCanvasTasks({
       continue
     }
 
-    if (hasChanged(existing, assignment, fields)) {
+    // 写入与比较共用同一份结论（`canvasTaskColumns`）：patch 里只会出现**真的变了**的列，
+    // 且手工分数行不含那两个分数列 —— 两边在构造上不可能分叉（P0-3-34）。
+    const columns = canvasTaskColumns(existing, assignment, fields)
+    if (Object.keys(columns).length > 0) {
       // ⚠️ 这里刻意没有 status：用户的"已完成"不被同步覆盖（文件头铁律 1）。
       // submission_state / submitted_at / submission_score 是 Canvas 真相，同步可写（ADR-015）。
-      updates.push({
-        id: existing.id,
-        patch: {
-          title: assignment.title,
-          due_date: assignment.dueAt,
-          external_updated_at: assignment.externalUpdatedAt,
-          last_seen_at: now,
-          is_deleted: false,
-          submission_state: fields.submissionState,
-          submitted_at: fields.submittedAt,
-          canvas_url: assignment.htmlUrl,
-          points_possible: fields.pointsPossible,
-          submission_score: fields.submissionScore,
-        },
-      })
+      updates.push({ id: existing.id, patch: { ...columns, last_seen_at: now } })
     }
   }
 
