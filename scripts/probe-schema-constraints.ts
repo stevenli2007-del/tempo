@@ -316,6 +316,69 @@ const CASES: Case[] = [
     why: 'P0-3-31 上传额外文件的元数据行。**这是该卡的验收闸**：仍被拒 = 迁移没生效',
     deleteBy: `course_id=eq.${BOGUS_UUID}`,
   },
+
+  // ---------- P0-3-34 新列：tasks.score_source ----------
+  // ⚠️ 这一列的「存在性」探针**顺带也验了**：列不存在时 PostgREST 报 42703（不是 23503/23514）
+  // → verdict 落到 `unexpected`，报告里会显示"列不存在"而不是伪装成放行。
+  // ⚠️ tasks 的 NOT NULL 列是 `course_id / title / task_type / source`（其余都有默认值），
+  // 所以这四个必须给齐 —— 少一个会先报 23502，把"列存不存在"这件事盖掉。
+  {
+    label: "tasks.score_source = 'manual'（用户手记）",
+    table: 'tasks',
+    row: {
+      course_id: BOGUS_UUID,
+      title: 'probe',
+      task_type: 'assignment',
+      source: 'manual',
+      score_source: 'manual',
+    },
+    expect: 'accepted',
+    why:
+      'P0-3-34 用户手记分数时打的标记，同步侧见它跳过 points_possible / submission_score。' +
+      '**这是该卡的验收闸**：仍被拒 = 迁移没生效，且线上 tasks 查询会全线 500（TASK_COLUMNS 已 select 这列）',
+    deleteBy: `course_id=eq.${BOGUS_UUID}`,
+  },
+  {
+    label: "tasks.score_source = 'canvas'（权威态，**代码从不主动写**）",
+    table: 'tasks',
+    row: {
+      course_id: BOGUS_UUID,
+      title: 'probe',
+      task_type: 'assignment',
+      source: 'manual',
+      score_source: 'canvas',
+    },
+    expect: 'accepted',
+    why:
+      'CHECK 白名单里的另一半。⚠️ 迁移**刻意不 backfill**（null 与 canvas 对同步行为完全相同），' +
+      '所以库里这一列现在应当全是 null；' +
+      '哪天要按来源统计分数，这条证明值本身是合法的，只需补一次 backfill。',
+    deleteBy: `course_id=eq.${BOGUS_UUID}`,
+  },
+  {
+    label: "tasks 不传 score_source（历史行形态，默认 null）",
+    table: 'tasks',
+    row: { course_id: BOGUS_UUID, title: 'probe', task_type: 'assignment', source: 'manual' },
+    expect: 'accepted',
+    why:
+      '迁移前就存在的行、以及 PATCH 只改 status 时都不会碰这列。' +
+      '这里证明「不写这列也能正常插任务」—— 加列没有破坏任何既有写入路径。',
+    deleteBy: `course_id=eq.${BOGUS_UUID}`,
+  },
+  {
+    label: "tasks.score_source = '__bogus__'（对照组）",
+    table: 'tasks',
+    row: {
+      course_id: BOGUS_UUID,
+      title: 'probe',
+      task_type: 'assignment',
+      source: 'manual',
+      score_source: '__bogus__',
+    },
+    expect: 'rejected',
+    why: '证明 score_source 的 CHECK **确实在拦** —— 没有对照组，"放行"可能只是约束被整个删了',
+    deleteBy: `course_id=eq.${BOGUS_UUID}`,
+  },
 ]
 
 type Verdict = 'accepted' | 'rejected' | 'unexpected'
@@ -437,6 +500,7 @@ async function main(): Promise<void> {
     practice_test_explanations: `practice_test_id=eq.${BOGUS_UUID}`,
     exam_review_summaries: `course_id=eq.${BOGUS_UUID}`,
     exam_review_files: `course_id=eq.${BOGUS_UUID}`,
+    tasks: `course_id=eq.${BOGUS_UUID}`,
   }
   console.log('\n零残留自检（每个哨兵条件都应 0 行）：')
   for (const [table, qs] of Object.entries(RESIDUE)) {
@@ -592,6 +656,39 @@ async function main(): Promise<void> {
         '请人工确认是不是有意改的。',
     )
   }
+  const scoreManual = results.find(
+    (r) => r.c.label === "tasks.score_source = 'manual'（用户手记）",
+  )
+  const scoreDefault = results.find((r) =>
+    r.c.label.startsWith('tasks 不传 score_source'),
+  )
+  const scoreControl = results.find(
+    (r) => r.c.label === "tasks.score_source = '__bogus__'（对照组）",
+  )
+  if (scoreManual?.verdict === 'accepted' && scoreControl?.verdict === 'rejected') {
+    console.log(
+      '  ✅ P0-3-34 迁移生效：tasks.score_source 已建，CHECK 接受 manual/canvas，仍在拦非法值。',
+    )
+  } else if (scoreControl?.verdict === 'unexpected') {
+    console.log(
+      '  ❌ P0-3-34 迁移**未生效**：tasks.score_source 这列还不存在 —— ' +
+        '🔴 先跑 `20260927000000_tasks_score_source.sql` 再部署，否则线上任务查询全线 500。',
+    )
+  } else if (scoreManual?.verdict !== 'accepted') {
+    console.log(
+      '  ❌ P0-3-34 迁移**只跑了一半**：列在、但 CHECK 没放行 \'manual\' —— 回到 SQL Editor 重跑那份迁移。',
+    )
+  } else {
+    console.log(
+      '  ❌ 对照组异常：tasks.score_source 的 CHECK 没有拦下非法值 —— 约束可能被整体删掉了，人工核对。',
+    )
+  }
+  if (scoreDefault && scoreDefault.verdict !== 'accepted') {
+    console.log(
+      '  ⚠️  tasks 不传 score_source 竟然插不进去 —— 加列破坏了既有写入路径，别部署，先查原因。',
+    )
+  }
+
   console.log(
     '  ℹ️  桶与 storage 策略**不在 SQL 里**（Dashboard UI 手建）—— 用 `npm run probe:exam-review` 验。',
   )
