@@ -51,6 +51,21 @@ export function isExamTask(task: Pick<Task, 'taskType'>): boolean {
 // ---------------------------------------------------------------- 完成判定
 
 /**
+ * Canvas 判定「已完成」的三个提交态（ADR-015 的外部真相轴）。
+ *
+ * 🔴 **与 `isCanvasDone()` 同源** —— 这是本卡（P0-3-35）刻意加的：
+ * 总览取数要在 SQL 侧排除「已完成的历史」，就得拼
+ * `submission_state.not.in.(submitted,pending_review,graded)`；
+ * 若那一处另抄一遍三个字符串，就是 P0-3-15 那类「两处都绿、肉眼才看得出」的分叉
+ * （将来加一个态 → SQL 与界面口径悄悄打架）。所以常量在这里，两边都读它。
+ */
+export const CANVAS_DONE_STATES: readonly TaskSubmissionState[] = [
+  'submitted',
+  'pending_review',
+  'graded',
+]
+
+/**
  * Canvas 是否**已判定完成**这条任务（外部真相轴，ADR-015）。
  *
  * 三个值都算完成：`submitted`（交了）、`pending_review`（交了、待查重）、
@@ -69,7 +84,8 @@ export function isExamTask(task: Pick<Task, 'taskType'>): boolean {
  * - `unsubmitted` / `missing` —— Canvas 明确说没收到，正是要催的那一类。
  */
 export function isCanvasDone(state: TaskSubmissionState | null): boolean {
-  return state === 'submitted' || state === 'pending_review' || state === 'graded'
+  if (state === null) return false
+  return CANVAS_DONE_STATES.includes(state)
 }
 
 /**

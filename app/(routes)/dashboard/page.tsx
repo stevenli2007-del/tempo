@@ -36,6 +36,7 @@ import {
   summarizeSyncStatus,
   toCourseSyncView,
 } from '@/lib/sync/status'
+import { addDays, dayKeyToUtcDate, schoolDayKey } from '@/lib/time'
 import type { Task } from '@/types/task'
 
 export const metadata = {
@@ -48,9 +49,33 @@ const OVERVIEW_RANGE_DAYS = 7
  * 总览页任务查询的 DB 安全上限 —— 只是"最多取回多少条"，**不是展示条数**。
  * 展示层收敛（最近 10 条待办 + 溢出收进 BOX）在 `TaskList` 里做（P0-3-6 的 `OVERVIEW_VISIBLE`），
  * 这里必须取回足够数据，BOX 展开后才能看到全部，不会静默消失。
- * Phase 0 任务量在几十条以内，50 是宽裕上限；真超过时列表仍只显示 10 + 一个溢出盒。
+ *
+ * 🔴 P0-3-35：从 50 提到 200。50 当初的假设是"任务量几十条，50 宽裕"，
+ * 但那是**没排除已完成历史**时的判断 —— 一学期的已交作业就能把 50 吃光
+ * （实测 50 条里 35 条是历史，未来任务**一条都没取回**）。
+ * 排掉历史后窗口里只剩「逾期未完成 + 最近 7 天已完成 + 未来 7 天」，
+ * 但重度周（一门课一周七八个作业 × 五六门课）仍可能过百，
+ * 而真正兜底的是 `OVERVIEW_HISTORY_DAYS`（排除历史），**不该让上限再当第二道铡刀**。
+ * 200 对一次 SELECT 无压力，换来的是"未来任务被切掉"这类静默 bug 不再复发。
  */
-const OVERVIEW_LIMIT = 50
+const OVERVIEW_LIMIT = 200
+
+/**
+ * 已完成任务的**历史下界**（天）—— 只用来给已完成的历史"让位"，不影响未完成。
+ *
+ * ### 为什么必须有这个数（P0-3-35 修的就是它被漏掉）
+ * 任务查询的时间过滤原先**只有上界**（due ≤ 今天 + 7 天），排序又是 due 升序 ——
+ * 于是"最早的排最前"。一学期积下来的几十条**已交作业**整队占满前 50 位，
+ * 把真正要看的未来任务挤出结果集：2026-09-21 实测，Steven 的 49 条已交作业吃光名额，
+ * 9/23~9/29 到期的作业排在 51 位之后根本没取回 → 周历与待办清单全空（同步其实是好的）。
+ *
+ * 7 天与前视窗口对称，且满足 Steven 最初的诉求「隐藏会让用户找不到我昨天勾掉了什么」——
+ * 近期完成的仍在下方折叠盒里。更早的属于**课程页**，不该占总览页有限的行数。
+ *
+ * 🔴 **逾期未完成的任务不受这个下界约束**（`loadTasks` 里只对已完成的行设下界）：
+ * 给它们设下界等于帮用户逃避，与 Tempo「不隐藏问题」冲突。
+ */
+const OVERVIEW_HISTORY_DAYS = 7
 
 /**
  * 「最近的考试」从数据库最多取回几条**候选**（不是展示条数，展示只取 3 条）。
@@ -228,6 +253,9 @@ export default async function DashboardPage({
     loadTasks(supabase, {
       courseIds,
       until: new Date(now.getTime() + OVERVIEW_RANGE_DAYS * 86_400_000).toISOString(),
+      // 按**学校日历日**回退（不是 24h×7 的毫秒减法）：与 `buildWeekCalendar` 同一套
+      // 日键口径，夏令时切换时不会差一天。
+      historySince: dayKeyToUtcDate(addDays(schoolDayKey(now), -OVERVIEW_HISTORY_DAYS)).toISOString(),
       limit: OVERVIEW_LIMIT,
       offset: 0,
     }),
@@ -334,8 +362,12 @@ export default async function DashboardPage({
               </p>
             ) : null}
             {overview.total > overview.tasks.length ? (
+              // P0-3-35：文案改成如实描述 —— 原话是「其余在下方清单里」，但超出上限的行
+              // 既不在日历里、也不在清单里（清单用的就是同一批取回的数据），
+              // 那句话会让用户以为没丢。窗口内共多少条、用了多少条，两个数都给出来。
               <p className="text-xs text-ink-faint">
-                任务较多，日历只排了取回的 {overview.tasks.length} 条；其余在下方清单里。
+                窗口内共 {overview.total} 条，页面用的是取回的前 {overview.tasks.length} 条
+                （已排除更早的已完成项）。
               </p>
             ) : null}
           </section>
@@ -346,7 +378,8 @@ export default async function DashboardPage({
             <div className="flex items-baseline justify-between gap-4">
               <h2 className="text-lg font-semibold">待办清单</h2>
               <p className="text-xs text-muted-foreground">
-                {OVERVIEW_RANGE_DAYS} 天内到期 · 已逾期的也在里面 · 勾完成在这里
+                {OVERVIEW_RANGE_DAYS} 天内到期 · 已逾期的都在里面 · 已完成只留最近{' '}
+                {OVERVIEW_HISTORY_DAYS} 天 · 勾完成在这里
               </p>
             </div>
             <TaskList items={toListItems(overview.tasks, now)} />

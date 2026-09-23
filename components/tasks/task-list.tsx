@@ -338,7 +338,10 @@ export function TaskList({ items }: TaskListProps) {
             className="flex w-full items-center gap-2 px-4 py-2.5 text-left text-sm text-muted-foreground"
           >
             <span className="text-xs">{isDoneExpanded ? '▾' : '▸'}</span>
-            已完成 {done.length} 项
+            {/* P0-3-35：取数只带回**最近**已完成的行（历史让位给待办，否则几十条已交作业
+                会把未来任务挤出结果集）。数字的含义随之从"学期累计"变成"近期" ——
+                标签必须写明，否则用户只会看到数字从 49 掉到 12 而不知道为什么。 */}
+            最近已完成 {done.length} 项
           </button>
           {isDoneExpanded ? (
             <ul className="space-y-2 px-4 pb-3">

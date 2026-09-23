@@ -1,4 +1,5 @@
 import { toNumberOrNull } from '@/lib/numbers'
+import { CANVAS_DONE_STATES } from '@/lib/tasks/progress'
 import { createClient } from '@/lib/supabase/server'
 import type {
   Task,
@@ -149,13 +150,73 @@ async function loadCourseNames(
 // ---------- 总览任务列表 ----------
 
 /**
- * `GET /api/v1/tasks` 的读逻辑。
+ * 「已完成的历史不该吃窗口名额」的两条 `or` filter（P0-3-35）。
+ *
+ * ### 它解决什么
+ * `loadTasks` 的时间过滤**只有上界**（`due_date <= until` 或 null），排序又是
+ * `due_date` **升序** —— 于是"最早的在最前"。一学期积下来的已完成作业（几十条）
+ * 会**整队排在窗口最前面**，把 `limit`（总览页 50）吃光：
+ * 2026-09-21 实测，Steven 的 49 条已交作业占满第 1~49 位，今天的考试勉强挤在第 50 位，
+ * 而 9/23~9/29 到期的作业排在 51 位之后 → **根本没被取回** → 周历与待办清单全空。
+ * 同步是好的，是取数把未来挤没了。
+ *
+ * ### 口径：只设"已完成历史"的下界，不动未完成
+ * 排除的是 **「已完成 且 截止日早于 `since`」** 的行。未完成的任务（含逾期未交）
+ * **一律保留**，不受下界约束 —— 逾期未完成是总览页最该被看见的信号
+ * （文件头那条产品判断），加了下界就等于帮用户逃避。
+ *
+ * ### 🔴 为什么是**两条** filter 而不是一条
+ * 要排除的条件是 `(status = 'done' OR 提交态 ∈ 已完成三态) AND 截止日 < since`。
+ * PostgREST 的 `or()` 只接受**扁平**的 `列.操作符.值` 列表，嵌套与否全看服务端解析，
+ * 所以按德摩根拆成两条、由 supabase-js 依次 `or()`（多次调用是 AND 关系）：
+ *   ① 排除 `status='done' 且 旧`  → `NOT(status=done AND 旧)` = `status≠done OR 不旧`
+ *   ② 排除 `Canvas 已完成 且 旧`  → `NOT(态∈D AND 旧)`        = `态∉D OR 不旧`
+ * 两条的交集恰好等于"排除 (status=done OR 态∈D) AND 旧"，且每条都是扁平列表。
+ *
+ * ### 🔴 `submission_state.is.null` 必须在 ② 的最前面（NULL 陷阱）
+ * SQL 里 `x NOT IN (...)` 遇到 `x IS NULL` 求值为 **NULL**（不成立）→ 整行被排除。
+ * 少了这一支，所有 `submission_state` 为 null 的行（**考试派生 + 手动任务**，它们
+ * 的 null 表示"与 Canvas 无关"，不是"Canvas 判定未完成"）会被**整批静默删掉**。
+ * 同理 ② 里"不旧"用了 `due_date.gte` 与 `due_date.is.null` 两支：
+ * 截止日为 null 的 TBD 任务不叫"旧"，不能排。
+ *
+ * ### 🔴 ② 里"态 ∉ 已完成三态"必须用**正向 `eq` 枚举补集**，不能写成三个 `neq`
+ * `NOT(S=a OR S=b OR S=c)` 展开是 `S≠a AND S≠b AND S≠c`（**合取**），
+ * 而 `or()` 的扁平串里各项是**析取** —— 写成 `neq.a,neq.b,neq.c` 后，
+ * 一条 `S='submitted'` 的行会因为满足 `neq.pending_review` 而被**保留**，
+ * 整条 filter 退化成恒真（2026-09-23 探针实测：加完它仍有 16 条历史没被排掉）。
+ * 所以改成枚举**补集**（未完成态 + null）：`S IS NULL OR S = x OR S = y OR …`，
+ * 全是析取，与 `or()` 的语义天然对齐。
+ *
+ * 补集**从全量枚举里减出来**（`TASK_SUBMISSION_STATES` − `CANVAS_DONE_STATES`），
+ * 不是手抄一份 —— 将来加一个提交态，这里自动跟着变，不会出现
+ * "界面认 6 个态、SQL 只认 5 个"的分叉（P0-3-15 那类教训）。
+ */
+export function doneHistoryFilters(since: string): string[] {
+  const notCanvasDone = [...TASK_SUBMISSION_STATES]
+    .filter((state) => !CANVAS_DONE_STATES.includes(state as TaskSubmissionState))
+    .map((state) => `submission_state.eq.${state}`)
+  return [
+    // ① status 轴：用户手勾完成 且 截止日早于下界 → 排除
+    `status.neq.done,due_date.gte."${since}",due_date.is.null`,
+    // ② 提交态轴：Canvas 已判定完成 且 截止日早于下界 → 排除
+    [`submission_state.is.null`, ...notCanvasDone, `due_date.gte."${since}"`, `due_date.is.null`].join(
+      ',',
+    ),
+  ]
+}
+
+/**
+ * `GET /api/v1/tasks` 的读逻辑（总览页也直接调它）。
  *
  * ### 时间范围只设上界，不设下界（这是个产品判断）
  * `range=7d` 的含义是「7 天内到期的 + **所有逾期未完成的**」。
  * 逾期未完成任务是总览页最重要的信号，按字面理解成"未来 7 天"会把它们藏起来，
  * 等于帮用户逃避 —— 与 Tempo「不隐藏问题」的原则冲突。
  * `until = null`（range=all）时不加任何时间过滤。
+ *
+ * 🔴 唯一的例外是**已完成**的行：它们可以另设下界（`historySince`，见下），
+ * 因为"做完的事"不属于"接下来要做什么"，却会挤掉真正该看的行（P0-3-35）。
  *
  * ### `dueDate` 为 null 的行必须保留
  * 光写 `.lte('due_date', until)` 在 SQL 里对 NULL 求值结果是 NULL（不成立），
@@ -169,9 +230,19 @@ export async function loadTasks(
     until: string | null
     limit: number
     offset: number
+    /**
+     * **已完成**任务的时间下界（ISO 串）；`null` = 不设下界（旧行为）。
+     *
+     * 设了下界后，"已完成 且 截止日早于下界"的行不再进结果集 —— 它们属于课程页，
+     * 不该占总览页有限的行数（理由见 `doneHistoryFilters()`）。**未完成的行不受影响。**
+     *
+     * 总览页（`dashboard`）传它；`GET /api/v1/tasks` **不传** —— 那是带 `offset`
+     * 翻页的数据接口（契约 §5），翻页能取到全部历史，设下界反而是丢数据。
+     */
+    historySince?: string | null
   },
 ): Promise<{ tasks: Task[]; total: number; error: string | null }> {
-  const { courseIds, until, limit, offset } = options
+  const { courseIds, until, limit, offset, historySince = null } = options
   if (courseIds.length === 0) {
     return { tasks: [], total: 0, error: null }
   }
@@ -190,6 +261,13 @@ export async function loadTasks(
   if (until !== null) {
     // 值含 `:` 与 `+`，用双引号包住，避免被 PostgREST 的 or 语法吃掉。
     query = query.or(`due_date.lte."${until}",due_date.is.null`)
+  }
+
+  // P0-3-35：已完成的历史让位给"接下来要做什么"。多次 `or()` 之间是 AND。
+  if (historySince !== null) {
+    for (const filter of doneHistoryFilters(historySince)) {
+      query = query.or(filter)
+    }
   }
 
   // 排序（契约 §5）：dueDate 升序、**null 排最后**；二级用 created_at 稳定同日顺序，

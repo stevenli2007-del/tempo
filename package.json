@@ -34,7 +34,9 @@
     "regress:sync": "npx -y tsx scripts/regress-sync-idempotent.ts",
     "regress:scores": "npx -y tsx scripts/regress-task-scores.ts",
     "regress:onboarding": "npx -y tsx scripts/regress-onboarding.ts",
-    "probe:sync": "npx -y tsx scripts/probe-sync-idempotent.ts"
+    "probe:sync": "npx -y tsx scripts/probe-sync-idempotent.ts",
+    "probe:task-window": "npx -y tsx scripts/probe-task-window.ts",
+    "probe:exam-duplicates": "npx -y tsx scripts/probe-exam-duplicates.ts"
   },
   "dependencies": {
     "@base-ui/react": "^1.7.0",
