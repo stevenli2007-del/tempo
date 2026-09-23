@@ -4,6 +4,7 @@ import { finalizeConfirmation, loadMessage, updateMessageStatus } from '@/lib/me
 import { applyMessage, isApplierReady } from '@/lib/messages/apply'
 import { undoMessage } from '@/lib/messages/undo'
 import { planDecision } from '@/lib/messages/decide'
+import { applyExamChoices, readExamChoices } from '@/lib/messages/exam-proposals/choose'
 
 /** 撤销窗口（毫秒）：确认后 24h 内可撤销。 */
 const UNDO_WINDOW_MS = 24 * 60 * 60 * 1000
@@ -56,6 +57,7 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
     if (nextStatus !== 'accepted' && nextStatus !== 'dismissed') {
       return jsonError(request, 400, 'validation_failed', 'status 只接受 accepted 或 dismissed')
     }
+    const choiceInput = (body as Record<string, unknown>).examChoices
 
     const { message, error } = await loadMessage(supabase, id)
     if (error) {
@@ -65,6 +67,17 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
     if (!message) {
       return jsonError(request, 404, 'not_found', '提案不存在或无权访问')
     }
+
+    // ---------- P0-3-36：用户在消息栏挑的「覆盖哪一条 / 新增一条」 ----------
+    //
+    // 选择**合并进 payload 再**交给写入器：写入器只认 `kind` + `targetId`，
+    // 于是「界面上挑的那条」与「真正写进库的那行」是同一份数据（所见即所写）。
+    // 校验失败直接 400 —— 静默忽略会让用户以为选了、结果一个字都没写（R3）。
+    const choiceResult = applyExamChoices(message.payload, readExamChoices(choiceInput))
+    if (choiceResult.error !== null) {
+      return jsonError(request, 400, 'validation_failed', choiceResult.error)
+    }
+    const payloadForApply = choiceResult.payload
 
     const plan = planDecision({
       currentStatus: message.status,
@@ -93,7 +106,8 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
 
     const outcome = await applyMessage({
       type: updated.type,
-      payload: updated.payload,
+      // 带上用户挑的那一条（没挑时与 `updated.payload` 全等）。
+      payload: payloadForApply,
       supabase,
       // 会话里的用户 id，不是 payload 里的任何字段（见 `ApplyContext` 的注释）。
       userId: user.id,
@@ -110,7 +124,7 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
     // 确认成功：把回执 / 写入行 id / 确认时刻落库（刷新后仍在，撤销按 id 精准回滚）。
     const decidedAt = new Date().toISOString()
     const mergedPayload = {
-      ...updated.payload,
+      ...payloadForApply,
       ...(outcome.applied ? { applied: outcome.applied } : {}),
       receipt: outcome.summary,
     }

@@ -18,7 +18,7 @@ import { loadCredentialMeta } from '@/lib/canvas/credentials'
 import type { CanvasCredentialMeta } from '@/types/canvas'
 import { COURSE_COLUMNS, toCourse } from '@/lib/courses'
 import type { CourseRow } from '@/lib/courses'
-import { loadTasks, loadUpcomingExams } from '@/lib/tasks'
+import { dropCanvasExamPlaceholders, loadTasks, loadUpcomingExams } from '@/lib/tasks'
 import { formatDue } from '@/lib/tasks/format'
 import { buildTodayTasks } from '@/lib/tasks/today'
 import {
@@ -264,8 +264,13 @@ export default async function DashboardPage({
   const tasksError = overview.error
 
   // 口径与可视化模型都在纯函数层算（`lib/tasks/*`），这里只做接线。
-  const today = buildTodayTasks(overview.tasks, now, OVERVIEW_RANGE_DAYS)
-  const calendar = buildWeekCalendar(overview.tasks, now)
+  //
+  // 🔴 `dropCanvasExamPlaceholders` 必须在**三处消费之前**过一遍（今日 / 周历 / 清单）：
+  // 老师常在 Canvas 里建「Unit 1 Exam」这种**不填截止日的空壳作业**，
+  // 不过滤的话同一场考试在页面上是两条（P0-3-36）。
+  const visibleTasks = dropCanvasExamPlaceholders(overview.tasks)
+  const today = buildTodayTasks(visibleTasks, now, OVERVIEW_RANGE_DAYS)
+  const calendar = buildWeekCalendar(visibleTasks, now)
   const exams = buildUpcomingExams(examPool.tasks, now)
 
   // 同步状态视图：只算**已关联 Canvas** 的课（未关联的课没有"同步"这回事）。
@@ -382,7 +387,7 @@ export default async function DashboardPage({
                 {OVERVIEW_HISTORY_DAYS} 天 · 勾完成在这里
               </p>
             </div>
-            <TaskList items={toListItems(overview.tasks, now)} />
+            <TaskList items={toListItems(visibleTasks, now)} />
           </section>
         ) : null}
 

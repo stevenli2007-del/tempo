@@ -57,7 +57,7 @@ export type ExamRowRef = {
  * | `create` | 这门课没有同名考试 | insert |
  * | `update` | 唯一命中 → **改期** | update 那一行 + 留旧值快照 |
  * | `duplicate` | 命中且值完全一样（或本批已有一条落到它） | 不写，回执点名 |
- * | `ambiguous` | 同名多行 | 不写，列出来让人挑 |
+ * | `ambiguous` | 同名多行，**或** 同一天已有考试可能是同一场 | 不写，列出来让人挑 |
  * | `unidentifiable` | 名字不可辨识（只写了「考试」这类通称）且该课已有考试 | 不写，让人指定 |
  * | `missing` | 指定了目标行但它不在（已删 / 不属于这门课） | 不写，回执点名 |
  */
@@ -264,6 +264,29 @@ export function resolveExamTargets(
         target: null,
         candidates: existing,
         reason: '没说清是哪一场（只写了「考试」这类通称），疑似与已有考试重复 —— 请指定一场',
+      })
+      continue
+    }
+
+    // ---------- P0-3-36：0 命中、但**同一天**这门课已有考试 → 不许静默新增 ----------
+    //
+    // 名字对不上不代表不是同一场：老师的座位公告写「明天晚上的 Chem 1A exam」，
+    // 库里那条叫 `Unit 1 Exam` —— 归一后对不上，按老规则就判 create，
+    // 于是同一场考试变成两行（复习页显示 5 场，实际 4 场）。
+    // 🔴 这里**仍然不猜**：同日命中 1 条也不自动 update ——
+    // 「同一天考两场不同的考试」是可能的（上午 quiz + 晚上 exam），
+    // 自动覆盖的代价（把 A 场的日期/地点写到 B 场上）远大于让人点一下。
+    const sameDay =
+      exam.examDate === null
+        ? []
+        : existing.filter((row) => row.examDate === exam.examDate && !claimed.has(row.id))
+    if (sameDay.length > 0) {
+      results.push({
+        exam,
+        kind: 'ambiguous',
+        target: null,
+        candidates: sameDay,
+        reason: `这门课 ${exam.examDate} 已有一场考试（${sameDay[0]!.examName}），可能是同一场 —— Tempo 不替你猜，请指定要改哪一条，或新增一条`,
       })
       continue
     }

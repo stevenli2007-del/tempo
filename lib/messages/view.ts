@@ -248,6 +248,13 @@ export type MessageView = {
    * 三种终态都不再请求 —— 与要点那边的 `failed` 同一条"别再问了"纪律（ADR-024）。
    */
   needsExamProposals: boolean
+  /**
+   * 待用户裁决的考试提案（P0-3-36）：每一项给一组候选，让用户挑
+   * 「覆盖哪一条」或「新增一条」。空数组 = 没有要挑的。
+   *
+   * 🔴 渲染层**只画**不判：候选来自服务端那份 `resolveExamTargets()` 的结果。
+   */
+  examChoiceGroups: ExamChoiceGroup[]
 }
 
 export function toMessageView(
@@ -364,6 +371,14 @@ export function toMessageView(
     typeof message.payload.courseId === 'string' &&
     typeof message.payload.announcementId === 'string'
 
+  /**
+   * P0-3-36：需要用户挑「覆盖哪一条 / 新增一条」的考试提案。
+   *
+   * 只有**待处理**的消息才挑（已确认的只剩回执，选了也没处写）；
+   * 空数组 = 这条没有要挑的东西 —— 渲染层据此决定要不要画那个选择器。
+   */
+  const examChoiceGroups = isPending ? readExamChoiceGroups(message.payload) : []
+
   return {
     id: message.id,
     type: message.type,
@@ -411,7 +426,59 @@ export function toMessageView(
     summaryBusyLabel: summaryPendingLabel(locale),
     needsDrift,
     needsExamProposals,
+    examChoiceGroups,
   }
+}
+
+/** 需要用户裁决的一项（P0-3-36）：`index` 是 `payload.examProposals` 里的下标。 */
+export type ExamChoiceGroup = {
+  index: number
+  examName: string
+  /** 新值的人话（"Chem 1A exam · 2026-09-22"）—— 与回执同一份文案。 */
+  afterLabel: string
+  candidates: { id: string; label: string }[]
+  /** 为什么要挑（人话）。 */
+  reason: string | null
+}
+
+/**
+ * 从 payload 里读出"待用户指定"的考试提案。
+ *
+ * 🔴 判据与服务端**同一套 kind**：只有 `ambiguous` / `unidentifiable` 且**带候选**的
+ * 才需要挑（`create` / `update` 已经定了，再让人挑一次是骚扰）。
+ * 客户端这一份只是读形状，**不重新判定** —— 判定只在 `resolveExamTargets()` 里。
+ */
+function readExamChoiceGroups(payload: MessagePayload): ExamChoiceGroup[] {
+  const raw = payload.examProposals
+  if (!Array.isArray(raw)) return []
+  const out: ExamChoiceGroup[] = []
+  raw.forEach((entry, index) => {
+    if (typeof entry !== 'object' || entry === null) return
+    const record = entry as Record<string, unknown>
+    const kind = record.kind
+    if (kind !== 'ambiguous' && kind !== 'unidentifiable') return
+    const examName = typeof record.examName === 'string' ? record.examName : ''
+    if (examName === '') return
+    const afterLabel = typeof record.afterLabel === 'string' ? record.afterLabel : examName
+    const candidates = Array.isArray(record.candidates)
+      ? record.candidates.flatMap((item) => {
+          if (typeof item !== 'object' || item === null) return []
+          const c = item as Record<string, unknown>
+          const id = typeof c.id === 'string' ? c.id : ''
+          const label = typeof c.label === 'string' ? c.label : ''
+          return id !== '' && label !== '' ? [{ id, label }] : []
+        })
+      : []
+    if (candidates.length === 0) return
+    out.push({
+      index,
+      examName,
+      afterLabel,
+      candidates,
+      reason: typeof record.reason === 'string' ? record.reason : null,
+    })
+  })
+  return out
 }
 
 /** 载荷是 `jsonb`，读的时候**每个字段都要当"可能不存在"**（3-19/3-20/3-23 各自产出）。 */

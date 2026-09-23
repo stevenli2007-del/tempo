@@ -39,6 +39,9 @@ const RECEIPT_INDENT = "pl-[38px]"
 /** 撤销窗口（毫秒）：与路由端一致。前端只管 UX，真正的闸在 API。 */
 const UNDO_WINDOW_MS = 24 * 60 * 60 * 1000
 
+/** 没有挑过任何一条时的空选择表（避免每次渲染新建对象、也让 `undone` 气泡有个稳定值）。 */
+const EMPTY_CHOICES: Record<number, string | null> = {}
+
 /**
  * 要点请求最多跑几轮。
  *
@@ -119,6 +122,16 @@ export function MessagesView({
   const [busyId, setBusyId] = useState<string | null>(null)
   const [busyUndoId, setBusyUndoId] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+  /**
+   * 用户在气泡里挑的「覆盖哪一条 / 新增」（P0-3-36）。
+   *
+   * 形状：`消息 id → 提案下标 → 目标 id`；值 `null` = 明确选了"新增一条"。
+   * 只存在于前端 —— 确认时随 PATCH 一起送上去，服务端把它合并进 payload 再写，
+   * 所以"选了什么"与"写了什么"是同一份数据，不需要在这里另存一份。
+   */
+  const [examChoices, setExamChoices] = useState<
+    Record<string, Record<number, string | null>>
+  >({})
   const flow = useCourseUpdateFlow({ initialCourses })
   const streamRef = useRef<HTMLDivElement | null>(null)
   /**
@@ -313,10 +326,19 @@ export function MessagesView({
     setBusyId(id)
     setError(null)
     try {
+      // 挑选结果随确认一起送（P0-3-36）：服务端合并进 payload 后**才**执行写入器，
+      // 于是"界面上挑的那条"就是"真正被改的那行"。
+      const picked = examChoices[id] ?? {}
+      const choiceList = Object.entries(picked).map(([index, targetId]) => ({
+        index: Number(index),
+        targetId,
+      }))
       const res = await fetch(`/api/v1/messages/${id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ status }),
+        body: JSON.stringify(
+          choiceList.length > 0 ? { status, examChoices: choiceList } : { status },
+        ),
       })
       const data = await res.json()
       if (!res.ok) {
@@ -390,6 +412,13 @@ export function MessagesView({
                   view={view}
                   busy={busyId === view.id}
                   summaryBusy={summaryBusyIds.includes(view.id)}
+                  choices={examChoices[view.id] ?? EMPTY_CHOICES}
+                  onChoose={(index, targetId) =>
+                    setExamChoices((prev) => ({
+                      ...prev,
+                      [view.id]: { ...(prev[view.id] ?? {}), [index]: targetId },
+                    }))
+                  }
                   onAccept={() => void decide(view.id, "accepted")}
                   onDismiss={() => void decide(view.id, "dismissed")}
                 />
@@ -399,6 +428,8 @@ export function MessagesView({
                   view={view}
                   busy={busyId === view.id}
                   summaryBusy={summaryBusyIds.includes(view.id)}
+                  choices={EMPTY_CHOICES}
+                  onChoose={() => undefined}
                   undone
                 />
               ) : (
@@ -461,6 +492,8 @@ function ProposalBubble({
   busy,
   summaryBusy,
   undone = false,
+  choices,
+  onChoose,
   onAccept,
   onDismiss,
 }: {
@@ -470,9 +503,22 @@ function ProposalBubble({
   summaryBusy: boolean
   /** 已撤销（P0-3-26）：只读、不显示操作按钮，改为说明已回滚。 */
   undone?: boolean
+  /** 这条里已经挑过的选择（提案下标 → 目标 id；`null` = 新增一条）。 */
+  choices: Record<number, string | null>
+  onChoose?: (index: number, targetId: string | null) => void
   onAccept?: () => void
   onDismiss?: () => void
 }) {
+  /**
+   * 还有没挑的项 → **确认按钮禁用**并说清要先挑。
+   *
+   * 不禁用会怎样：服务端走「知道了」那条路（候选项不可写），用户以为自己改了考试，
+   * 其实一个字没写 —— 这正是 R3 不许的静默失败。
+   */
+  const pendingChoice = view.examChoiceGroups.find((group) => !(group.index in choices))
+  const needChoiceHint =
+    !undone && pendingChoice ? `先选一下「${pendingChoice.examName}」要落到哪一条` : null
+
   return (
     <div className="flex items-start gap-2.5">
       {/* 品牌色头像：与侧栏 logo 同一treatment（bg-lime + text-on-lime）。 */}
@@ -622,6 +668,56 @@ function ProposalBubble({
           </details>
         )}
 
+        {/*
+          「落到哪一条」选择器（P0-3-36）。
+
+          只有解析出来"可能是同一场、但 Tempo 不敢替你猜"时才出现：
+          候选是服务端按**同课同日**（或同名多行）算出来的，这里只画、不重新判定。
+          「新增一条」永远给 —— 用户看过了仍然要新增是他的权利，
+          没有这一项就成了"系统逼你二选一"。
+        */}
+        {!undone &&
+          view.examChoiceGroups.map((group) => (
+            <fieldset
+              key={group.index}
+              className="mt-3 rounded-card border border-line bg-surface2/40 px-3 py-2"
+            >
+              <legend className="px-1 text-xs font-medium text-ink">
+                「{group.examName}」要落到哪一条？
+              </legend>
+              {group.reason && (
+                <p className="mt-0.5 text-[11px] leading-relaxed text-ink-faint">{group.reason}</p>
+              )}
+              <div className="mt-1.5 space-y-1.5">
+                {group.candidates.map((candidate) => (
+                  <label
+                    key={candidate.id}
+                    className="flex cursor-pointer items-start gap-2 text-xs text-ink-muted"
+                  >
+                    <input
+                      type="radio"
+                      name={`exam-choice-${view.id}-${group.index}`}
+                      className="mt-0.5"
+                      checked={choices[group.index] === candidate.id}
+                      onChange={() => onChoose?.(group.index, candidate.id)}
+                    />
+                    <span className="min-w-0 flex-1">覆盖：{candidate.label}</span>
+                  </label>
+                ))}
+                <label className="flex cursor-pointer items-start gap-2 text-xs text-ink-muted">
+                  <input
+                    type="radio"
+                    name={`exam-choice-${view.id}-${group.index}`}
+                    className="mt-0.5"
+                    checked={choices[group.index] === null}
+                    onChange={() => onChoose?.(group.index, null)}
+                  />
+                  <span className="min-w-0 flex-1">新增一条：{group.afterLabel}</span>
+                </label>
+              </div>
+            </fieldset>
+          ))}
+
         <p className="mt-2 text-xs text-ink-faint">
           {view.timeLabel}
           {view.sourceUrl && (
@@ -658,11 +754,18 @@ function ProposalBubble({
                   {view.blockReason}
                 </span>
               )}
+              {needChoiceHint && (
+                <span className="mr-auto max-w-[60%] text-xs text-ink-muted">{needChoiceHint}</span>
+              )}
               <Button variant="outline" size="sm" disabled={busy} onClick={onDismiss}>
                 忽略
               </Button>
               {/* 文案来自 `toMessageView`：无落点的公告是「知道了」—— 它确实什么都不会写。 */}
-              <Button size="sm" disabled={busy || !view.canAccept} onClick={onAccept}>
+              <Button
+                size="sm"
+                disabled={busy || !view.canAccept || needChoiceHint !== null}
+                onClick={onAccept}
+              >
                 {view.confirmLabel}
               </Button>
             </>

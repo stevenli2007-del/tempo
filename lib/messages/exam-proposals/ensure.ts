@@ -369,8 +369,19 @@ async function computeOne(input: {
   }))
 
   const writable = proposals.filter((item) => item.kind === 'create' || item.kind === 'update')
+  /**
+   * P0-3-36：带候选、等用户挑一条的提案（`ambiguous` / `unidentifiable`）。
+   *
+   * 它们本身不可写，但**算 ready** —— 否则 applier 会走「知道了」那条路，
+   * 用户在界面上挑了半天点确认，结果一个字都没写（R3 的静默失败）。
+   * 真正的写入判据在 applier 里：挑过之后 `kind` 会变成 `update` / `create` 才可写。
+   */
+  const needsChoice = proposals.some(
+    (item) =>
+      (item.kind === 'ambiguous' || item.kind === 'unidentifiable') && item.candidates.length > 0,
+  )
   const status: 'ready' | 'clean' =
-    writable.length > 0 || components.length > 0 ? 'ready' : 'clean'
+    writable.length > 0 || components.length > 0 || needsChoice ? 'ready' : 'clean'
 
   const lines: string[] = []
   for (const item of proposals) {
@@ -378,6 +389,9 @@ async function computeOne(input: {
       lines.push(`考试改期：${item.examName} ${item.beforeLabel ?? ''} → ${item.afterLabel}`)
     } else if (item.kind === 'create') {
       lines.push(`新增考试：${item.afterLabel}`)
+    } else if (item.candidates.length > 0) {
+      // 待指定：先把"要你做什么"说在前面，原因跟在后面。
+      lines.push(`待你指定：${item.examName}（${item.reason ?? '请指定要改哪一条，或新增一条'}）`)
     } else {
       lines.push(`${item.examName}：${item.reason ?? '未写入'}`)
     }

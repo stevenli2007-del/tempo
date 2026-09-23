@@ -1,6 +1,7 @@
 import { toNumberOrNull } from '@/lib/numbers'
-import { CANVAS_DONE_STATES } from '@/lib/tasks/progress'
+import { CANVAS_DONE_STATES, isExamTask } from '@/lib/tasks/progress'
 import { createClient } from '@/lib/supabase/server'
+import { normalizeExamName } from '@/lib/course-update/exam-match'
 import type {
   Task,
   TaskCandidate,
@@ -204,6 +205,43 @@ export function doneHistoryFilters(since: string): string[] {
       ',',
     ),
   ]
+}
+
+/**
+ * 去掉 Canvas 的「考试占位壳」（P0-3-36）—— 纯函数，唯一的判据放这里。
+ *
+ * ### 现象
+ * 老师常在 bCourses 里给考试建一条**同名作业**、但**不填截止日**（壳）。
+ * 同步如实抓进来后，任务列表里同一场考试出现两遍：
+ * 一条 `Unit 1 Exam · 9/22`（syllabus 派生，有日期）、一条 `Unit 1 Exam · 日期待定`（Canvas 壳）。
+ *
+ * ### 判据（三条同时成立才隐藏）
+ * ① 来源是 Canvas；② **没有截止日**（壳）；③ 标题归一后命中同课某条**考试**任务的标题。
+ *
+ * 🔴 为什么必须带上「没有截止日」这一条：Canvas 一旦给那一行填上日期，
+ * 它就是**真的**截止日（Canvas 对 canvas 来源的行是权威），那时再隐藏就是丢数据。
+ * 带上这条判据后，老师填了日期 → 条件不再成立 → 这一行自己回来（自愈）。
+ *
+ * 🔴 为什么不用「考试名」以外的匹配：`normalizeExamName()` 是全站唯一的考试名判据
+ * （`lib/course-update/exam-match.ts`，`resolveExamTargets()` 用的同一份），这里不再另写一套。
+ */
+export function dropCanvasExamPlaceholders(tasks: Task[]): Task[] {
+  const examKeys = new Set<string>()
+  for (const task of tasks) {
+    if (!isExamTask(task)) continue
+    const key = normalizeExamName(task.title)
+    if (key === '') continue
+    examKeys.add(`${task.courseId}::${key}`)
+  }
+  if (examKeys.size === 0) return tasks
+
+  return tasks.filter((task) => {
+    // 只可能隐藏 Canvas 的、非考试类型的、没有截止日的行；其余一律保留。
+    if (task.source !== 'canvas' || isExamTask(task) || task.dueDate !== null) return true
+    const key = normalizeExamName(task.title)
+    if (key === '') return true
+    return !examKeys.has(`${task.courseId}::${key}`)
+  })
 }
 
 /**

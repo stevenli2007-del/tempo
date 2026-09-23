@@ -22,6 +22,7 @@ import {
   isEffectivelyDone,
   needsManualConfirmation,
 } from '@/lib/tasks/progress'
+import { dropCanvasExamPlaceholders } from '@/lib/tasks'
 import { buildTodayTasks, TODAY_HORIZON_DAYS } from '@/lib/tasks/today'
 import { isRemindable } from '@/lib/reminders/build'
 import { SUBMISSION_BADGE_CLASS, submissionBadge } from '@/lib/tasks/submission'
@@ -375,6 +376,56 @@ check(
     todayModel.dueToday[0]?.canvasUrl === null,
   `${linkModel.upcoming[0]?.canvasUrl} / ${todayModel.dueToday[0]?.canvasUrl}`,
 )
+
+// ---------------------------------------------------------------- 考试空壳去重（P0-3-36）
+
+{
+  // 真案子：Canvas 上老师建了 4 条同名、无截止日的壳作业；syllabus 派生出真考试行。
+  const rows = [
+    mk({ title: 'Unit 1 Exam', taskType: 'exam', source: 'syllabus', dueDate: '2026-09-22T23:59:00-07:00' }),
+    mk({ title: 'Unit 1 Exam', source: 'canvas', dueDate: null }),
+    mk({ title: 'Unit 2 Exam', taskType: 'exam', source: 'syllabus', dueDate: '2026-10-20T23:59:00-07:00' }),
+    mk({ title: 'Unit 2 Exam', source: 'canvas', dueDate: null }),
+    mk({ title: 'Homework 9', source: 'canvas', dueDate: '2026-09-25T06:59:00-07:00' }),
+  ]
+  const kept = dropCanvasExamPlaceholders(rows)
+  check('空壳：两条无日期的重复行被去掉', kept.length === 3, `kept=${kept.length}`)
+  check('空壳：保留的是有日期的考试行 + 正常作业', kept.every((t) => t.taskType === 'exam' || t.title === 'Homework 9'))
+  check('空壳：一条真考试都没丢', kept.filter((t) => t.taskType === 'exam').length === 2)
+}
+
+{
+  // 🔴 自愈：老师一旦给那行填上截止日，它就不再是壳 → 必须回来（Canvas 对它有权威）。
+  const rows = [
+    mk({ title: 'Unit 1 Exam', taskType: 'exam', source: 'syllabus', dueDate: '2026-09-22T23:59:00-07:00' }),
+    mk({ title: 'Unit 1 Exam', source: 'canvas', dueDate: '2026-09-23T23:59:00-07:00' }),
+  ]
+  check('填了截止日的 canvas 行不再被隐藏', dropCanvasExamPlaceholders(rows).length === 2)
+}
+
+{
+  // 名字对不上就不是壳（"Week 5 Discussion Quiz" ≠ 任何考试名）。
+  const rows = [
+    mk({ title: 'Unit 1 Exam', taskType: 'exam', source: 'syllabus', dueDate: '2026-09-22T23:59:00-07:00' }),
+    mk({ title: 'Week 5 Discussion Quiz', source: 'canvas', dueDate: null }),
+  ]
+  check('名字不同 → 保留（不误伤无日期的正常作业）', dropCanvasExamPlaceholders(rows).length === 2)
+}
+
+{
+  // 这门课根本没有考试行时，无日期的作业一律保留（不存在"重复"这回事）。
+  const rows = [mk({ title: 'Unit 1 Exam', source: 'canvas', dueDate: null })]
+  check('没有考试行 → 一条都不隐藏', dropCanvasExamPlaceholders(rows).length === 1)
+}
+
+{
+  // 归一：'unit 1 exam' ≡ 'Unit 1 Exam'（与匹配层同一份判据）。
+  const rows = [
+    mk({ title: 'Unit 1 Exam', taskType: 'exam', source: 'syllabus', dueDate: '2026-09-22T23:59:00-07:00' }),
+    mk({ title: 'unit-1 exam', source: 'canvas', dueDate: null }),
+  ]
+  check('空壳去重按考试名归一', dropCanvasExamPlaceholders(rows).length === 1)
+}
 
 // ---------------------------------------------------------------- 汇总
 

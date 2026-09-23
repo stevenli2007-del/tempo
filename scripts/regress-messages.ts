@@ -11,6 +11,7 @@
 
 import { isApplierReady } from "@/lib/messages/apply"
 import { planDecision } from "@/lib/messages/decide"
+import { applyExamChoices } from "@/lib/messages/exam-proposals/choose"
 import { MESSAGE_STATUSES, MESSAGE_TYPES } from "@/lib/messages/registry"
 import {
   COURSE_TONES,
@@ -543,6 +544,97 @@ console.log("撤销回执视图（P0-3-26）")
   )
   check("receipt 非字符串 → null", messy.receiptText === null)
   check("applied 非对象 → 0", messy.appliedCount === 0, `count=${messy.appliedCount}`)
+}
+
+console.log("")
+console.log("考试提案的「落到哪一条」选择（P0-3-36）")
+{
+  const ambiguousPayload: MessagePayload = {
+    title: "Chem 1A Exam 1 Locations",
+    landing: true,
+    courseId: "c1",
+    examProposalsStatus: "ready",
+    examProposals: [
+      {
+        examName: "Chem 1A exam",
+        examDate: "2026-09-22",
+        examTime: null,
+        location: null,
+        sourceExcerpt: "tomorrow night's Chem 1A exam (Sep 22)",
+        kind: "ambiguous",
+        targetId: null,
+        beforeLabel: null,
+        afterLabel: "Chem 1A exam · 2026-09-22",
+        candidates: [{ id: "e1", label: "Unit 1 Exam · 2026-09-22" }],
+        reason: "这门课 2026-09-22 已有一场考试（Unit 1 Exam），可能是同一场",
+      },
+    ],
+  }
+
+  // ① 挑了已有的一条 → 变成可写的 update，且带上旧值标签（回执要能说清改了哪条）。
+  {
+    const { payload, error } = applyExamChoices(ambiguousPayload, [{ index: 0, targetId: "e1" }])
+    check("选择已有考试 → 无错", error === null, String(error))
+    const item = payload.examProposals?.[0] as Record<string, unknown>
+    check("选择已有考试 → update", item.kind === "update" && item.targetId === "e1", JSON.stringify(item))
+    check("选择后补上旧值标签", item.beforeLabel === "Unit 1 Exam · 2026-09-22")
+  }
+
+  // ② 明确新增 → kind 变 create（同日有考试也压过去，不许反过来卡住用户）。
+  {
+    const { payload, error } = applyExamChoices(ambiguousPayload, [{ index: 0, targetId: null }])
+    check("选择新增 → 无错", error === null, String(error))
+    const item = payload.examProposals?.[0] as Record<string, unknown>
+    check("选择新增 → create", item.kind === "create" && item.targetId === null, JSON.stringify(item))
+  }
+
+  // ③ 服务端只认候选里的 id —— 客户端指名改别的行一律拒绝（否则等于绕过课程过滤）。
+  {
+    const { error } = applyExamChoices(ambiguousPayload, [{ index: 0, targetId: "e999" }])
+    check("候选外的 id → 报错", error !== null && error.includes("不在候选里"), String(error))
+  }
+  {
+    const { error } = applyExamChoices(ambiguousPayload, [{ index: 3, targetId: "e1" }])
+    check("下标越界 → 报错", error !== null && error.includes("不存在"), String(error))
+  }
+  {
+    // 已经是 create 的提案没有候选：不该被"选择"改写（那是解析结论，不是待裁决项）。
+    const decided: MessagePayload = {
+      title: "x",
+      examProposals: [
+        {
+          examName: "Quiz 3",
+          examDate: "2026-10-01",
+          examTime: null,
+          location: null,
+          sourceExcerpt: "",
+          kind: "create",
+          targetId: null,
+          beforeLabel: null,
+          afterLabel: "Quiz 3 · 2026-10-01",
+          candidates: [],
+          reason: null,
+        },
+      ],
+    }
+    const { error } = applyExamChoices(decided, [{ index: 0, targetId: "e1" }])
+    check("无可候选的提案不接受选择", error !== null && error.includes("没有可选择"), String(error))
+  }
+
+  // ④ 空选择 = 不改任何东西（老链路的样子）。
+  {
+    const { payload, error } = applyExamChoices(ambiguousPayload, [])
+    check("没挑 → payload 原样", error === null && payload === ambiguousPayload)
+  }
+
+  // ⑤ 展示层：待裁决的提案要给 UI 一组候选，且只在**待处理**时给。
+  {
+    const pending = toMessageView(makeMessage("announcement", "pending", ambiguousPayload))
+    check("待处理 → 给出待裁决组", pending.examChoiceGroups.length === 1)
+    check("待裁决组带候选与原因", pending.examChoiceGroups[0]?.candidates.length === 1)
+    const accepted = toMessageView(makeMessage("announcement", "accepted", ambiguousPayload))
+    check("已确认 → 不再给待裁决组", accepted.examChoiceGroups.length === 0)
+  }
 }
 
 console.log("")

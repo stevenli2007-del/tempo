@@ -346,6 +346,64 @@ console.log("考试匹配（P0-3-29：改期 = 更新提案，不是新增行）
     check("目标行不在 → missing（不退化成新增）", r.kind === "missing", JSON.stringify(r))
   }
 
+  // ⑨' P0-3-36：0 命中但**同一天**已有考试 → 不许静默新增，列出来让人挑。
+  //
+  // 真案子：Chem 1A 座位公告写「明天晚上的 Chem 1A exam (Sep 22)」，
+  // 库里那条叫 `Unit 1 Exam`（同一天）→ 老规则判 create，于是 4 场考试变 5 场。
+  {
+    const existing = [row("e1", "Unit 1 Exam", "2026-09-22"), row("e2", "Unit 2 Exam", "2026-10-20")]
+    const input = { examName: "Chem 1A exam", examDate: "2026-09-22", examTime: null, location: null }
+    const [r] = resolveExamTargets([input], existing)
+    check(
+      "名字对不上但同日有考试 → ambiguous（不静默新增）",
+      r.kind === "ambiguous" && r.target === null,
+      JSON.stringify(r.kind),
+    )
+    check("同日候选只列当天的那一条", r.candidates.length === 1 && r.candidates[0].id === "e1")
+    check("候选不带别的日期的行", r.candidates.every((item) => item.examDate === "2026-09-22"))
+    check("原因说清是哪一天、哪一场", r.reason?.includes("2026-09-22") === true, String(r.reason))
+  }
+  {
+    // 不同日期 → 与老规则一致，仍然新增（否则「上午 quiz + 晚上 exam」会被误合）。
+    const existing = [row("e1", "Unit 1 Exam", "2026-09-22")]
+    const input = { examName: "Chem 1A exam", examDate: "2026-10-20", examTime: null, location: null }
+    const [r] = resolveExamTargets([input], existing)
+    check("同课不同日 → 照旧 create", r.kind === "create", JSON.stringify(r.kind))
+  }
+  {
+    // 用户明确挑了「新增」→ 强制 create，即便同日有考试（不能反过来卡住用户）。
+    const existing = [row("e1", "Unit 1 Exam", "2026-09-22")]
+    const forced = {
+      examName: "Chem 1A exam",
+      examDate: "2026-09-22",
+      examTime: null,
+      location: null,
+      targetExamId: null,
+    }
+    const [r] = resolveExamTargets([forced], existing)
+    check("显式「新增」压过同日候选", r.kind === "create")
+  }
+  {
+    // 用户挑了「覆盖这一条」→ 照办。
+    const existing = [row("e1", "Unit 1 Exam", "2026-09-22")]
+    const picked = {
+      examName: "Chem 1A exam",
+      examDate: "2026-09-22",
+      examTime: null,
+      location: null,
+      targetExamId: "e1",
+    }
+    const [r] = resolveExamTargets([picked], existing)
+    check("挑选目标 → update 那一条", r.kind === "update" && r.target?.id === "e1")
+  }
+  {
+    // 日期待定（null）无从按日比对 → 保持老行为（新增），不制造假候选。
+    const existing = [row("e1", "Unit 1 Exam", null)]
+    const tbd = { examName: "Chem 1A exam", examDate: null, examTime: null, location: null }
+    const [r] = resolveExamTargets([tbd], existing)
+    check("日期待定 → 不按同日捏候选", r.kind === "create", JSON.stringify(r.kind))
+  }
+
   // ⑨ 归一与通称判定的边界：不许把 Exam 1 与 Midterm 1 当成一场。
   check("normalizeExamName 去标点空格", normalizeExamName("Midterm-1 (Exam)") === "midterm1exam")
   check("Midterm 1 与 Exam 1 键不同", normalizeExamName("Midterm 1") !== normalizeExamName("Exam 1"))

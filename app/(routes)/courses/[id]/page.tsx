@@ -15,7 +15,7 @@ import { loadCredentialMeta } from '@/lib/canvas/credentials'
 import { loadCourseDetail } from '@/lib/course-detail'
 import { loadCourseFiles } from '@/lib/course-files/load'
 import { createClient } from '@/lib/supabase/server'
-import { loadTasks } from '@/lib/tasks'
+import { dropCanvasExamPlaceholders, loadTasks } from '@/lib/tasks'
 
 /**
  * 课程详情页（P0-1-8 建，P0-3-17 重排）。
@@ -129,8 +129,12 @@ export default async function CourseDetailPage({ params }: PageProps) {
 
   const meta = [detail.courseCode, detail.instructorName].filter(Boolean).join(' · ')
 
+  // Canvas 的「考试空壳作业」（同名、无截止日）在这页同样不该占一行 ——
+  // 判据与总览页同一份（`dropCanvasExamPlaceholders`，P0-3-36）。
+  const courseTaskList = dropCanvasExamPlaceholders(courseTasks.tasks)
+
   // 作业概况：只数**已知为真**的（不给未知状态编一个数字）。
-  const scoredCount = courseTasks.tasks.filter(
+  const scoredCount = courseTaskList.filter(
     (task) => task.submissionScore !== null && task.pointsPossible !== null,
   ).length
 
@@ -178,8 +182,8 @@ export default async function CourseDetailPage({ params }: PageProps) {
               {courseTasks.error
                 ? '加载失败'
                 : scoredCount > 0
-                  ? `${scoredCount} 项已出分 · 共 ${courseTasks.tasks.length} 项`
-                  : `共 ${courseTasks.tasks.length} 项 · 暂无分数`}
+                  ? `${scoredCount} 项已出分 · 共 ${courseTaskList.length} 项`
+                  : `共 ${courseTaskList.length} 项 · 暂无分数`}
             </span>
           </summary>
           <div className="px-5 pb-5">
@@ -189,7 +193,7 @@ export default async function CourseDetailPage({ params }: PageProps) {
                 作业列表加载失败：{courseTasks.error}
               </p>
             ) : (
-              <AssignmentDetail tasks={courseTasks.tasks} now={now} />
+              <AssignmentDetail tasks={courseTaskList} now={now} />
             )}
           </div>
         </details>
