@@ -379,6 +379,32 @@ const CASES: Case[] = [
     why: '证明 score_source 的 CHECK **确实在拦** —— 没有对照组，"放行"可能只是约束被整个删了',
     deleteBy: `course_id=eq.${BOGUS_UUID}`,
   },
+
+  // ---------- P0-5-3 新表：course_links + messages.type 加 'link_change' ----------
+  // 迁移 `20260925000000_course_links.sql`（Dashboard 手跑）。表有 id 列，但按 course_id 兜底删。
+  {
+    label: 'course_links（表存在 + 必填列齐全 ⇒ 只被外键拦）',
+    table: 'course_links',
+    row: { course_id: BOGUS_UUID, url: 'https://example.com/probe', last_status: 'pending' },
+    expect: 'accepted',
+    why: 'P0-5-3 链接监控的元数据行。**这是该卡的验收闸**：仍被拒（42P01）= 迁移没生效',
+    deleteBy: `course_id=eq.${BOGUS_UUID}`,
+  },
+  {
+    label: "course_links.last_status = '__bogus__'（对照组）",
+    table: 'course_links',
+    row: { course_id: BOGUS_UUID, url: 'https://example.com/probe', last_status: '__bogus__' },
+    expect: 'rejected',
+    why: '证明 last_status 的 CHECK **确实在拦** —— 没有对照组，"放行"可能只是约束被整个删了',
+    deleteBy: `course_id=eq.${BOGUS_UUID}`,
+  },
+  {
+    label: "messages.type = 'link_change'",
+    table: 'messages',
+    row: { user_id: BOGUS_UUID, type: 'link_change', payload: {} },
+    expect: 'accepted',
+    why: 'P0-5-3 链接变更进消息栏要用。**这是该卡的验收闸**：仍被拒 = 枚举重建没带上新值',
+  },
 ]
 
 type Verdict = 'accepted' | 'rejected' | 'unexpected'
@@ -500,6 +526,7 @@ async function main(): Promise<void> {
     practice_test_explanations: `practice_test_id=eq.${BOGUS_UUID}`,
     exam_review_summaries: `course_id=eq.${BOGUS_UUID}`,
     exam_review_files: `course_id=eq.${BOGUS_UUID}`,
+    course_links: `course_id=eq.${BOGUS_UUID}`,
     tasks: `course_id=eq.${BOGUS_UUID}`,
   }
   console.log('\n零残留自检（每个哨兵条件都应 0 行）：')
@@ -686,6 +713,32 @@ async function main(): Promise<void> {
   if (scoreDefault && scoreDefault.verdict !== 'accepted') {
     console.log(
       '  ⚠️  tasks 不传 score_source 竟然插不进去 —— 加列破坏了既有写入路径，别部署，先查原因。',
+    )
+  }
+
+  const linkChangeCase = results.find((r) => r.c.label === "messages.type = 'link_change'")
+  const courseLinkCase = results.find(
+    (r) => r.c.table === 'course_links' && r.c.expect === 'accepted',
+  )
+  const courseLinkControl = results.find(
+    (r) => r.c.table === 'course_links' && r.c.expect === 'rejected',
+  )
+  if (courseLinkCase?.verdict === 'accepted' && courseLinkControl?.verdict === 'rejected') {
+    console.log(
+      '  ✅ P0-5-3 迁移生效：course_links 已建（last_status CHECK 在拦），messages.type 已接受 link_change。',
+    )
+  } else if (courseLinkCase?.verdict === 'unexpected') {
+    console.log(
+      '  ❌ P0-5-3 迁移**未生效**：course_links 表还不存在 —— ' +
+        '🔴 先跑 `20260925000000_course_links.sql` 再部署，否则链接写入 42P01、link_change 消息 23514。',
+    )
+  } else if (linkChangeCase?.verdict !== 'accepted') {
+    console.log(
+      "  ❌ P0-5-3 迁移**只跑了一半**：course_links 在、但 messages.type 没放行 'link_change' —— 回到 SQL Editor 重跑那份迁移。",
+    )
+  } else {
+    console.log(
+      '  ❌ 对照组异常：course_links.last_status 的 CHECK 没有拦下非法值 —— 约束可能被整体删掉了，人工核对。',
     )
   }
 
