@@ -198,6 +198,82 @@ export function onboardingCookieValue(userId: string): string {
 }
 
 /**
+ * 英文版四张卡（P0-5-1）。**结构与 id、外链、媒体路径必须与 `ONBOARDING_STEPS` 完全一致**
+ * —— 只有 title / lead / points / label / caption 换语言（媒体是同一批录屏）。
+ * 放在本模块而不是 messages.ts：步骤内容是结构化数据（points 是数组），
+ * 且本文件必须保持零运行时 import。
+ */
+export const ONBOARDING_STEPS_EN: readonly OnboardingStep[] = [
+  {
+    id: 'why',
+    title: 'Spend a minute connecting Canvas',
+    lead: 'Tempo does not guess your assignments — it reads them directly from bCourses. Connect once, and assignments, exams, and deadlines appear on this page automatically.',
+    points: [
+      'All you need is an Access Token — never your password.',
+      'Not ready to connect? Below you can first see how a real syllabus gets broken open.',
+    ],
+    external: null,
+    internal: null,
+    media: null,
+  },
+  {
+    id: 'open-canvas',
+    title: '① Open bCourses',
+    lead: 'Sign in with your Berkeley account, then click the avatar at the very top of the left sidebar.',
+    points: [
+      'The avatar sits right below the Cal seal, labeled "Account".',
+      'In the menu that opens, "Settings" is the page with Access Tokens.',
+    ],
+    external: { label: 'Go to bCourses', url: CANVAS_HOME_URL },
+    internal: null,
+    media: {
+      src: '/onboarding/open-canvas.mp4',
+      poster: '/onboarding/open-canvas-poster.webp',
+      caption: 'Animated: click the avatar (Account) at the top of the left sidebar → "Settings" in the menu.',
+    },
+  },
+  {
+    id: 'new-token',
+    title: '② Generate an Access Token',
+    lead: 'Scroll down on the Settings page, find "+ New Access Token" and open it.',
+    points: [
+      'Fill Purpose with anything (e.g. tempo) — it is just a note to yourself.',
+      'Expiration date and Expiration time are required, at most 90 days.',
+      'After clicking "Generate Token", copy it immediately: once the dialog closes, the token is gone forever.',
+      'Changed your mind? Revoke anytime from the "Access Tokens" list on the same page.',
+    ],
+    external: { label: 'Open Settings directly', url: CANVAS_SETTINGS_URL },
+    internal: null,
+    media: {
+      src: '/onboarding/new-token.mp4',
+      poster: '/onboarding/new-token-poster.webp',
+      caption: 'Animated: find "+ New Access Token" on the Settings page, fill in Purpose and the expiration date.',
+    },
+  },
+  {
+    id: 'connect',
+    title: '③ Paste it back into Tempo',
+    lead: 'Back in Tempo, open a course → "Canvas link" → paste the token and pick the matching Canvas course.',
+    points: [
+      'The token is encrypted on the server and only reads assignments and deadlines — never sent to the browser, never logged.',
+      'Once connected, Tempo syncs automatically on open; disconnect anytime with one click.',
+    ],
+    external: null,
+    internal: 'connect',
+    media: {
+      src: '/onboarding/connect.mp4',
+      poster: '/onboarding/connect-poster.webp',
+      caption: 'Animated: back in Tempo, open a course → "Canvas link" → paste the token and pick the expiry.',
+    },
+  },
+]
+
+/** 按语言取步骤列表（P0-5-1）。默认 zh —— 回归脚本等老调用方行为不变。 */
+export function getOnboardingSteps(lang: 'zh' | 'en' = 'zh'): readonly OnboardingStep[] {
+  return lang === 'en' ? ONBOARDING_STEPS_EN : ONBOARDING_STEPS
+}
+
+/**
  * 「这个浏览器上的这个用户看过引导了吗」。
  *
  * ⚠️ **判据是"相等"而不是"存在"**：空值、别人的 id、被截断的值一律算没看过。

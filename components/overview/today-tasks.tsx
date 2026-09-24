@@ -2,6 +2,8 @@ import Link from 'next/link'
 
 import { EXAM_SURFACE_CLASS, ExamMark } from '@/components/tasks/exam-mark'
 import { courseColorClasses, courseColorKey } from '@/lib/courses/course-color'
+import type { Lang } from '@/lib/i18n/types'
+import { t } from '@/lib/i18n/translate'
 import type { TodayItem, TodayModel } from '@/lib/tasks/today'
 
 /**
@@ -34,7 +36,7 @@ import type { TodayItem, TodayModel } from '@/lib/tasks/today'
  * HTML 不允许 `<a>` 嵌套 `<a>`（React 会按 hydration 报错/浏览器会拆开标签）。
  * 所以外层是普通 `li`，两个链接各自承担一个动作。
  */
-function Row({ item, trailing }: { item: TodayItem; trailing: string }) {
+function Row({ item, trailing, lang }: { item: TodayItem; trailing: string; lang: Lang }) {
   const courseHref = `/courses/${item.courseId}`
   const titleClass = 'truncate text-ink underline-offset-4 hover:underline'
   const color = courseColorClasses(courseColorKey(item.courseId))
@@ -54,7 +56,7 @@ function Row({ item, trailing }: { item: TodayItem; trailing: string }) {
     >
       <Link
         href={courseHref}
-        title={`查看「${item.courseName}」课程详情`}
+        title={t(lang, 'common.viewCourseDetail', { course: item.courseName })}
         className={`w-24 shrink-0 truncate rounded-badge px-1.5 py-0.5 text-center text-[11px] underline-offset-4 hover:underline ${color.chip}`}
       >
         {item.courseName}
@@ -63,13 +65,13 @@ function Row({ item, trailing }: { item: TodayItem; trailing: string }) {
           与作业行几乎无从分辨。三件套 = 底色（整行）+ 边框 + 图标 + 「考」。
           放在标题链接**外面**：标题带 `truncate`（overflow:hidden），
           塞进去的长标题会把标记切掉一半。 */}
-      {item.isExam ? <ExamMark bare /> : null}
+      {item.isExam ? <ExamMark bare lang={lang} /> : null}
       {item.canvasUrl ? (
         <a
           href={item.canvasUrl}
           target="_blank"
           rel="noreferrer"
-          title={`在 Canvas 打开「${item.title}」`}
+          title={t(lang, 'common.openInCanvas', { title: item.title })}
           className={`min-w-0 flex-1 ${titleClass}`}
         >
           {item.title}
@@ -96,7 +98,7 @@ function formatLoad(load: number): string {
   return Number.isInteger(load) ? String(load) : load.toFixed(1)
 }
 
-export function TodayTasks({ model }: { model: TodayModel }) {
+export function TodayTasks({ model, lang }: { model: TodayModel; lang: Lang }) {
   const { overdue, dueToday, upcoming, load, horizonDays } = model
   const isEmpty = overdue.length === 0 && dueToday.length === 0 && upcoming.length === 0
 
@@ -109,32 +111,39 @@ export function TodayTasks({ model }: { model: TodayModel }) {
       data-today-upcoming={upcoming.length}
     >
       <div className="flex items-baseline justify-between gap-3">
-        <h3 className="text-sm font-semibold">今日任务</h3>
+        <h3 className="text-sm font-semibold">{t(lang, 'today.heading')}</h3>
         {isEmpty ? null : (
           <span className="text-sm font-semibold tabular-nums text-ink">
-            今日工作量 ≈ {formatLoad(load)} 件
+            {t(lang, 'today.load', { n: formatLoad(load) })}
           </span>
         )}
       </div>
       <p className="mt-0.5 text-xs text-muted-foreground">
-        今天到期按整件算；未来 {horizonDays} 天的按「1 / 剩余天数」折算，越远越轻
+        {t(lang, 'today.subtitle', { days: horizonDays })}
       </p>
 
       {isEmpty ? (
         <p className="mt-3 text-sm text-muted-foreground">
-          今天没有到期的任务，接下来 {horizonDays} 天也很空。
+          {t(lang, 'today.empty', { days: horizonDays })}
         </p>
       ) : (
         <div className="mt-3 space-y-3">
           {overdue.length > 0 ? (
             <div className="rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2.5">
               <p className="text-xs font-medium text-destructive">
-                逾期未完成 {overdue.length}
-                <span className="ml-1.5 font-normal text-muted-foreground">Canvas 确认未交的</span>
+                {t(lang, 'today.overdue', { n: overdue.length })}
+                <span className="ml-1.5 font-normal text-muted-foreground">
+                  {t(lang, 'today.overdueNote')}
+                </span>
               </p>
               <ul className="mt-1">
                 {overdue.map((item) => (
-                  <Row key={item.id} item={item} trailing={`逾期 ${-item.daysUntil} 天`} />
+                  <Row
+                    key={item.id}
+                    item={item}
+                    lang={lang}
+                    trailing={t(lang, 'today.overdueDays', { n: -item.daysUntil })}
+                  />
                 ))}
               </ul>
             </div>
@@ -142,10 +151,12 @@ export function TodayTasks({ model }: { model: TodayModel }) {
 
           {dueToday.length > 0 ? (
             <div>
-              <p className="text-xs font-medium text-ink-muted">今天到期 {dueToday.length}</p>
+              <p className="text-xs font-medium text-ink-muted">
+                {t(lang, 'today.dueToday', { n: dueToday.length })}
+              </p>
               <ul className="mt-1">
                 {dueToday.map((item) => (
-                  <Row key={item.id} item={item} trailing={`${item.weightPct}%`} />
+                  <Row key={item.id} item={item} lang={lang} trailing={`${item.weightPct}%`} />
                 ))}
               </ul>
             </div>
@@ -154,11 +165,11 @@ export function TodayTasks({ model }: { model: TodayModel }) {
           {upcoming.length > 0 ? (
             <div>
               <p className="text-xs font-medium text-ink-muted">
-                未来 {horizonDays} 天 {upcoming.length}
+                {t(lang, 'today.upcoming', { days: horizonDays, n: upcoming.length })}
               </p>
               <ul className="mt-1">
                 {upcoming.map((item) => (
-                  <Row key={item.id} item={item} trailing={`${item.weightPct}%`} />
+                  <Row key={item.id} item={item} lang={lang} trailing={`${item.weightPct}%`} />
                 ))}
               </ul>
             </div>
@@ -166,10 +177,7 @@ export function TodayTasks({ model }: { model: TodayModel }) {
         </div>
       )}
 
-      <p className="mt-4 text-xs text-ink-faint">
-        考试与手动任务没有外部真相，不标「逾期」；点<strong className="font-medium">课名</strong>
-        进课程页，点<strong className="font-medium">任务名</strong>去 Canvas。
-      </p>
+      <p className="mt-4 text-xs text-ink-faint">{t(lang, 'today.footer')}</p>
     </div>
   )
 }

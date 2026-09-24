@@ -1,3 +1,4 @@
+import { LanguageToggle } from "@/components/i18n/language-toggle"
 import { ThemeToggle } from "./theme-toggle"
 
 export function Topbar({ title }: { title?: string }) {
@@ -7,6 +8,7 @@ export function Topbar({ title }: { title?: string }) {
         {title ?? "Tempo"}
       </h1>
       <div className="flex items-center gap-3">
+        <LanguageToggle />
         <ThemeToggle />
       </div>
     </header>

@@ -14,6 +14,7 @@ import {
   SubmissionPoliciesView,
 } from '@/components/sections/section-view'
 import { SubmissionPoliciesForm } from '@/components/sections/submission-policies-form'
+import { useT } from '@/lib/i18n/use-i18n'
 import type { StoredSections } from '@/types/sections'
 
 /**
@@ -28,12 +29,13 @@ import type { StoredSections } from '@/types/sections'
  * 只给外部消费用 —— 页面本身不 fetch 自己的 API。
  */
 
+/** label 改存 i18n key，渲染时按当前 lang 取（P0-5-1）。 */
 const TABS = [
-  { key: 'grade', label: '成绩构成' },
-  { key: 'outline', label: '大纲' },
-  { key: 'exams', label: '考试日期' },
-  { key: 'officeHours', label: 'Office Hour' },
-  { key: 'policies', label: '提交政策' },
+  { key: 'grade', labelKey: 'detail.sectionGrade' },
+  { key: 'outline', labelKey: 'detail.sectionOutline' },
+  { key: 'exams', labelKey: 'detail.sectionExams' },
+  { key: 'officeHours', labelKey: 'detail.sectionOffice' },
+  { key: 'policies', labelKey: 'detail.sectionPolicies' },
 ] as const
 
 type TabKey = (typeof TABS)[number]['key']
@@ -58,6 +60,7 @@ export function SectionEditor({
    */
   uploadSlot?: React.ReactNode
 }) {
+  const t = useT()
   const [open, setOpen] = useState(defaultOpen)
   const [mode, setMode] = useState<Mode>('view')
   const [tab, setTab] = useState<TabKey>('grade')
@@ -85,8 +88,8 @@ export function SectionEditor({
           onClick={() => setOpen((v) => !v)}
           className="flex items-center gap-2 text-left"
         >
-          <span className="text-sm font-medium text-foreground">五个板块</span>
-          <span className="text-xs text-muted-foreground">{open ? '收起 ▴' : '展开 ▾'}</span>
+          <span className="text-sm font-medium text-foreground">{t('detail.sectionFive')}</span>
+          <span className="text-xs text-muted-foreground">{open ? t('detail.sectionCollapse') : t('detail.sectionExpand')}</span>
         </button>
         {open ? (
           <button
@@ -94,27 +97,27 @@ export function SectionEditor({
             onClick={() => setMode((m) => (m === 'view' ? 'edit' : 'view'))}
             className="h-7 rounded-md border border-border bg-background px-2.5 text-xs text-foreground"
           >
-            {mode === 'view' ? '编辑' : '完成'}
+            {mode === 'view' ? t('detail.sectionEdit') : t('detail.sectionDone')}
           </button>
         ) : null}
       </div>
 
       {open && uploadSlot ? (
         <div className="mt-3">
-          <p className="mb-2 text-xs font-medium text-foreground">上传 syllabus 自动填充（可选）</p>
+          <p className="mb-2 text-xs font-medium text-foreground">{t('detail.sectionUploadTitle')}</p>
           {uploadSlot}
         </div>
       ) : null}
 
       {open && parseStatus === 'none' ? (
         <p className="mt-3 text-sm text-muted-foreground">
-          还没有解析过的数据。可以先上传并解析 syllabus，也可以点「编辑」手动补条目。
+          {t('detail.sectionNone')}
         </p>
       ) : null}
 
       {open && parseStatus === 'failed' ? (
         <p className="mt-3 text-sm text-muted-foreground">
-          上次解析失败了（换模型或改 prompt 后可重新解析）。你也可以点「编辑」手动补条目。
+          {t('detail.sectionFailed')}
         </p>
       ) : null}
 
@@ -132,7 +135,7 @@ export function SectionEditor({
                     : 'text-muted-foreground hover:text-foreground'
                 }`}
               >
-                {entry.label}
+                {t(entry.labelKey)}
                 {counts[entry.key] > 0 ? (
                   <span className="ml-1 text-muted-foreground">{counts[entry.key]}</span>
                 ) : null}

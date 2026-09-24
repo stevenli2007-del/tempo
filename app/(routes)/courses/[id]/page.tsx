@@ -16,6 +16,8 @@ import { loadCourseDetail } from '@/lib/course-detail'
 import { loadCourseFiles } from '@/lib/course-files/load'
 import { createClient } from '@/lib/supabase/server'
 import { dropCanvasExamPlaceholders, loadTasks } from '@/lib/tasks'
+import { getLang } from '@/lib/i18n/server'
+import { t } from '@/lib/i18n/translate'
 
 /**
  * 课程详情页（P0-1-8 建，P0-3-17 重排）。
@@ -43,12 +45,12 @@ import { dropCanvasExamPlaceholders, loadTasks } from '@/lib/tasks'
  * 约定：**列表页在 `/dashboard`**（不新增 `/courses` 列表路由），详情页挂在 `/courses/[id]`。
  */
 
-export const metadata = {
-  title: '课程详情 · Tempo',
-}
-
-// 依赖用户 session，绝不能被静态预渲染。
 export const dynamic = 'force-dynamic'
+
+export async function generateMetadata() {
+  const lang = await getLang()
+  return { title: `${t(lang, 'detail.title')} · Tempo` }
+}
 
 /**
  * 详情页一次最多取回多少条作业。
@@ -79,6 +81,8 @@ export default async function CourseDetailPage({ params }: PageProps) {
     notFound()
   }
 
+  const lang = await getLang()
+
   // 三路查询互不依赖，并行发（详情 + 该课全部任务 + 资料索引）。
   // `now` 服务端算一次注入纯函数，避免与客户端各算一遍导致 hydration mismatch。
   const now = new Date()
@@ -91,14 +95,14 @@ export default async function CourseDetailPage({ params }: PageProps) {
   // 查询失败必须让用户看见，不能降级成「课程不存在」（CodingRules 7）。
   if (error) {
     return (
-      <AppShell title="课程详情">
+      <AppShell title={t(lang, 'detail.title')}>
         <div className="mx-auto max-w-3xl px-6 py-10">
           <div role="alert" className="rounded-lg border border-destructive/40 bg-card p-4">
-            <p className="text-sm font-medium text-destructive">课程详情加载失败</p>
+            <p className="text-sm font-medium text-destructive">{t(lang, 'detail.loadFailed')}</p>
             <p className="mt-1 text-sm text-muted-foreground">{error}</p>
           </div>
           <Link href="/courses" className="mt-4 inline-block text-sm text-muted-foreground">
-            ← 返回我的课程
+            {t(lang, 'detail.back')}
           </Link>
         </div>
       </AppShell>
@@ -139,74 +143,76 @@ export default async function CourseDetailPage({ params }: PageProps) {
   ).length
 
   return (
-    <AppShell title="课程详情">
+    <AppShell title={t(lang, 'detail.title')}>
       <div className="mx-auto max-w-[1100px] space-y-6">
         <Link href="/courses" className="inline-block text-sm text-ink-muted hover:text-ink">
-          ← 返回我的课程
+          {t(lang, 'detail.back')}
         </Link>
 
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">{detail.courseName}</h1>
           <p className="mt-1 text-sm text-ink-muted">
-            {[detail.semester, meta].filter(Boolean).join(' · ') || '未填写学期与编码'}
+            {[detail.semester, meta].filter(Boolean).join(' · ') || t(lang, 'detail.noSemester')}
           </p>
         </div>
 
-        <CourseActions course={detail} />
+        <CourseActions course={detail} lang={lang} />
 
         {/* ---------- 概览：宽屏三栏，一屏看完"这门课现在什么样" ---------- */}
         <div className="grid gap-4 lg:grid-cols-3" data-course-overview>
           <section className="rounded-xl border border-border bg-card p-5 shadow-sm">
-            <h2 className="mb-3 text-sm font-medium text-foreground">Canvas 关联</h2>
+            <h2 className="mb-3 text-sm font-medium text-foreground">{t(lang, 'detail.canvasLink')}</h2>
             <CanvasLink
               courseId={detail.id}
+              lang={lang}
               canvasCourseId={detail.canvasCourseId}
               hasCredential={hasCredential}
             />
           </section>
 
           <section className="rounded-xl border border-border bg-card p-5 shadow-sm lg:col-span-2">
-            <h2 className="mb-3 text-sm font-medium text-foreground">成绩构成</h2>
-            <GradePie components={detail.gradeComponents} />
+            <h2 className="mb-3 text-sm font-medium text-foreground">{t(lang, 'detail.gradeComposition')}</h2>
+            <GradePie components={detail.gradeComponents} lang={lang} />
           </section>
         </div>
 
         {/* ---------- 作业详情（折叠）：默认收起，标题上带条数 ---------- */}
         <details className="rounded-xl border border-border bg-card shadow-sm" data-assignments-detail>
           <summary className="cursor-pointer list-none p-5 text-sm font-medium text-foreground">
-            作业详情
+            {t(lang, 'detail.assignments')}
             <span className="ml-2 font-normal text-ink-muted">
               {/* 🔴 说的必须和展开后看到的是同一件事（P0-3-17 验收修正，2026-09-17）：
                   区里只列「已出分」的行，所以这里也报已出分的条数；总数另说一句，
                   好让用户知道被过滤掉多少，不至于以为作业少了。 */}
               {courseTasks.error
-                ? '加载失败'
+                ? t(lang, 'detail.loadFailedShort')
                 : scoredCount > 0
-                  ? `${scoredCount} 项已出分 · 共 ${courseTaskList.length} 项`
-                  : `共 ${courseTaskList.length} 项 · 暂无分数`}
+                  ? t(lang, 'detail.scoredLine', { scored: scoredCount }) +
+                    t(lang, 'detail.scoredUnscored', { unscored: courseTaskList.length - scoredCount })
+                  : t(lang, 'detail.totalNoScore', { n: courseTaskList.length })}
             </span>
           </summary>
           <div className="px-5 pb-5">
             {/* 查询失败必须明说 —— 一个静默空列表会被读成"这门课没有作业"（CodingRules 7）。 */}
             {courseTasks.error ? (
               <p role="alert" className="text-sm text-destructive">
-                作业列表加载失败：{courseTasks.error}
+                {t(lang, 'detail.assignmentsFailed', { error: courseTasks.error })}
               </p>
             ) : (
-              <AssignmentDetail tasks={courseTaskList} now={now} />
+              <AssignmentDetail tasks={courseTaskList} now={now} lang={lang} />
             )}
           </div>
         </details>
 
         {/* ---------- 资料（P0-3-19）：按 Canvas 文件夹结构分组，点开回 Canvas ---------- */}
-        <CourseFiles courseId={detail.id} files={courseFiles.files} error={courseFiles.error} />
+        <CourseFiles courseId={detail.id} lang={lang} files={courseFiles.files} error={courseFiles.error} />
 
         {/* ---------- 考试复习（P0-3-31）：数据源是 exam_dates（只会有考试）→ 非考试任务天然无入口 ---------- */}
-        <ExamReviewSection courseId={detail.id} exams={detail.examDates} />
+        <ExamReviewSection courseId={detail.id} lang={lang} exams={detail.examDates} />
 
         {/* ---------- 课程板块（原「五个板块」，含 syllabus 上传） ---------- */}
         <section className="rounded-xl border border-border bg-card p-5 shadow-sm">
-          <h2 className="mb-3 text-sm font-medium text-foreground">课程板块</h2>
+          <h2 className="mb-3 text-sm font-medium text-foreground">{t(lang, 'detail.sections')}</h2>
           <SectionEditor
             courseId={detail.id}
             sections={{
@@ -218,7 +224,7 @@ export default async function CourseDetailPage({ params }: PageProps) {
             }}
             parseStatus={detail.syllabus ? detail.syllabus.parseStatus : 'none'}
             uploadSlot={
-              <SyllabusUpload courseId={detail.id} syllabus={detail.syllabus} />
+              <SyllabusUpload courseId={detail.id} lang={lang} syllabus={detail.syllabus} />
             }
           />
         </section>

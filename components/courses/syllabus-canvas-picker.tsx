@@ -5,6 +5,8 @@ import { useRouter } from 'next/navigation'
 import { useState } from 'react'
 
 import { readApiErrorMessage } from '@/lib/api/client-error'
+import { t } from '@/lib/i18n/translate'
+import type { Lang } from '@/lib/i18n/types'
 import { readInternalPath } from '@/lib/internal-path'
 import { Button } from '@/components/ui/button'
 import type { SyllabusImportCandidate } from '@/lib/syllabus-import/candidates'
@@ -27,6 +29,7 @@ import type { SyllabusImportCandidate } from '@/lib/syllabus-import/candidates'
 
 type PickerProps = {
   courseId: string
+  lang: Lang
   /** 这门课当前有没有 syllabus（有 → 导入前必须确认）。 */
   hasSyllabus: boolean
 }
@@ -37,7 +40,7 @@ type State =
   | { kind: 'error'; message: string }
   | { kind: 'list'; candidates: SyllabusImportCandidate[] }
 
-export function SyllabusCanvasPicker({ courseId, hasSyllabus }: PickerProps) {
+export function SyllabusCanvasPicker({ courseId, lang, hasSyllabus }: PickerProps) {
   const router = useRouter()
   const [open, setOpen] = useState(false)
   const [state, setState] = useState<State>({ kind: 'closed' })
@@ -59,13 +62,13 @@ export function SyllabusCanvasPicker({ courseId, hasSyllabus }: PickerProps) {
         `/api/v1/courses/${encodeURIComponent(courseId)}/syllabus/candidates`,
       )
       if (!response.ok) {
-        setState({ kind: 'error', message: await readApiErrorMessage(response, '读取资料清单') })
+        setState({ kind: 'error', message: await readApiErrorMessage(response, t(lang, 'action.listFiles'), lang) })
         return
       }
       const payload = (await response.json()) as { candidates?: SyllabusImportCandidate[] }
       setState({ kind: 'list', candidates: Array.isArray(payload.candidates) ? payload.candidates : [] })
     } catch {
-      setState({ kind: 'error', message: '网络错误，请稍后重试' })
+      setState({ kind: 'error', message: t(lang, 'common.networkError') })
     }
   }
 
@@ -90,7 +93,7 @@ export function SyllabusCanvasPicker({ courseId, hasSyllabus }: PickerProps) {
       )
 
       if (!response.ok) {
-        const message = await readApiErrorMessage(response, '导入')
+        const message = await readApiErrorMessage(response, t(lang, 'action.import'), lang)
         // 409 = 服务端的第二道防线：已有 syllabus 且没说要替换（前端不拦也不会写坏）。
         if (response.status === 409) {
           setPending(candidate)
@@ -111,15 +114,15 @@ export function SyllabusCanvasPicker({ courseId, hasSyllabus }: PickerProps) {
       setPending(null)
       setNotice(
         result.cached
-          ? `这份文件已经导过（${counts.exams} 条考试 · ${counts.gradeComponents} 项构成），没有重复导入。`
-          : `已导入「${candidate.displayName}」：考试 ${counts.exams} 条 · 成绩构成 ${counts.gradeComponents} 项` +
-              (failed.length > 0 ? `。${failed.length} 个板块没解析出来，可手动补。` : ''),
+          ? t(lang, 'picker.cached', { exams: counts.exams, gc: counts.gradeComponents })
+          : t(lang, 'picker.imported', { name: candidate.displayName, exams: counts.exams, gc: counts.gradeComponents }) +
+              (failed.length > 0 ? ' ' + t(lang, 'picker.failedSections', { n: failed.length }) : ''),
       )
       setState({ kind: 'closed' })
       setOpen(false)
       router.refresh()
     } catch {
-      setError('网络错误，请稍后重试')
+      setError(t(lang, 'common.networkError'))
     } finally {
       setBusyId(null)
     }
@@ -139,19 +142,19 @@ export function SyllabusCanvasPicker({ courseId, hasSyllabus }: PickerProps) {
     <div className="mt-3">
       {!open ? (
         <Button variant="outline" size="sm" onClick={() => void openPanel()}>
-          从 Canvas 资料选一份
+          {t(lang, 'picker.cta')}
         </Button>
       ) : (
         <div className="rounded-lg border border-border bg-background p-3">
           <div className="flex items-center justify-between gap-2">
-            <p className="text-xs font-medium text-foreground">选择一份文件作为 syllabus</p>
+            <p className="text-xs font-medium text-foreground">{t(lang, 'picker.pickTitle')}</p>
             <Button variant="ghost" size="sm" onClick={closePanel} disabled={busyId !== null}>
-              收起
+              {t(lang, 'canvas.collapse')}
             </Button>
           </div>
 
           {state.kind === 'loading' ? (
-            <p className="mt-2 text-xs text-muted-foreground">正在读取资料清单…</p>
+            <p className="mt-2 text-xs text-muted-foreground">{t(lang, 'picker.loading')}</p>
           ) : null}
 
           {state.kind === 'error' ? (
@@ -162,7 +165,7 @@ export function SyllabusCanvasPicker({ courseId, hasSyllabus }: PickerProps) {
 
           {state.kind === 'list' && state.candidates.length === 0 ? (
             <p className="mt-2 text-xs text-muted-foreground">
-              这门课在 Canvas 上还没有抓到资料（同步一次再来看看）
+              {t(lang, 'picker.empty')}
             </p>
           ) : null}
 
@@ -186,12 +189,12 @@ export function SyllabusCanvasPicker({ courseId, hasSyllabus }: PickerProps) {
                       <span className="min-w-0 flex-1 truncate">{candidate.displayName}</span>
                       {candidate.looksLikeSyllabus ? (
                         <span className="shrink-0 rounded bg-muted px-1 text-[10px] text-muted-foreground">
-                          大纲
+                          {t(lang, 'picker.syllabusChip')}
                         </span>
                       ) : null}
                       {busyId === candidate.id ? (
                         <span className="shrink-0 text-[10px] text-muted-foreground">
-                          下载并解析中…
+                          {t(lang, 'picker.parsingFile')}
                         </span>
                       ) : null}
                     </button>
@@ -210,8 +213,7 @@ export function SyllabusCanvasPicker({ courseId, hasSyllabus }: PickerProps) {
           {pending ? (
             <div className="mt-3 rounded border border-border bg-muted/40 p-2">
               <p className="text-xs text-foreground">
-                这门课已有一份 syllabus。导入会用「{pending.displayName}」替换 syllabus
-                来源的条目（你手动添加的保留）。确定吗？
+                {t(lang, 'picker.replaceConfirm', { name: pending.displayName })}
               </p>
               <div className="mt-2 flex items-center gap-2">
                 <Button
@@ -220,10 +222,10 @@ export function SyllabusCanvasPicker({ courseId, hasSyllabus }: PickerProps) {
                   onClick={() => void runImport(pending, true)}
                   disabled={busyId !== null}
                 >
-                  确认导入
+                  {t(lang, 'picker.confirmImport')}
                 </Button>
                 <Button variant="ghost" size="sm" onClick={() => setPending(null)}>
-                  取消
+                  {t(lang, 'common.cancel')}
                 </Button>
               </div>
             </div>
@@ -253,12 +255,12 @@ export function SyllabusCanvasPicker({ courseId, hasSyllabus }: PickerProps) {
  * 本卡导入的行存的是**站内路径** `/courses/{cid}/files/{fid}` ——
  * 那里没有 Storage 对象，走下载端点必然失败，所以直接链到资料页。
  */
-export function SyllabusFileLink({ filePath }: { filePath: string }): React.ReactElement | null {
+export function SyllabusFileLink({ filePath, lang }: { filePath: string; lang: Lang }): React.ReactElement | null {
   const internal = readInternalPath(filePath)
   if (!internal) return null
   return (
     <Link href={internal} className="text-xs text-muted-foreground underline">
-      在资料区打开
+      {t(lang, 'picker.openInFiles')}
     </Link>
   )
 }

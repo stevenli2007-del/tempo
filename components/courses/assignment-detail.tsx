@@ -1,4 +1,6 @@
 import { ExamMark } from '@/components/tasks/exam-mark'
+import { t } from '@/lib/i18n/translate'
+import type { Lang } from '@/lib/i18n/types'
 import { formatDue } from '@/lib/tasks/format'
 import { canBeOverdue, isEffectivelyDone, isExamTask } from '@/lib/tasks/progress'
 import { SUBMISSION_BADGE_CLASS, submissionBadge } from '@/lib/tasks/submission'
@@ -59,7 +61,7 @@ function scoreTone(ratio: number): string {
   return 'var(--chart-5)' // < 70% → 琥珀
 }
 
-function ScoreBar({ score, possible }: { score: number; possible: number }) {
+function ScoreBar({ score, possible, lang }: { score: number; possible: number; lang: Lang }) {
   // 分母 <= 0 画不出有意义的比例（Canvas 个别作业是 0 分制/加分项）→ 只显示数字。
   const ratio = possible > 0 ? Math.min(1, Math.max(0, score / possible)) : null
 
@@ -77,7 +79,7 @@ function ScoreBar({ score, possible }: { score: number; possible: number }) {
         <div
           className="mt-1 h-1.5 w-full overflow-hidden rounded-full bg-surface2"
           role="img"
-          aria-label={`得分 ${formatScore(score)} 分，满分 ${formatScore(possible)} 分`}
+          aria-label={t(lang, 'detail.scoreAria', { score: formatScore(score), possible: formatScore(possible) })}
         >
           <div
             className="h-full rounded-full"
@@ -93,10 +95,10 @@ function ScoreBar({ score, possible }: { score: number; possible: number }) {
  * 一行=一条**有分数**的作业。传进来的行都过了 `hasScore`（见 `AssignmentDetail`），
  * 但这里仍然各自判一次 —— 组件不该假设调用方永远记得过滤。
  */
-function TaskRow({ task, now }: { task: Task; now: Date }) {
-  const { label, isOverdue } = formatDue(task.dueDate, now)
+function TaskRow({ task, now, lang }: { task: Task; now: Date; lang: Lang }) {
+  const { label, isOverdue } = formatDue(task.dueDate, now, lang)
   const done = isEffectivelyDone(task)
-  const badge = submissionBadge(task)
+  const badge = submissionBadge(task, lang)
   const hasScore = task.submissionScore !== null && task.pointsPossible !== null
 
   /**
@@ -121,7 +123,7 @@ function TaskRow({ task, now }: { task: Task; now: Date }) {
               target="_blank"
               rel="noreferrer"
               className={`truncate text-sm font-medium hover:underline ${titleClass}`}
-              title={`在 Canvas 打开「${task.title}」`}
+              title={t(lang, 'common.openInCanvas', { title: task.title })}
             >
               {task.title}
             </a>
@@ -141,11 +143,11 @@ function TaskRow({ task, now }: { task: Task; now: Date }) {
           {/* 考试标记（P0-3-33）：原先是一段 12px 灰字「考试」，与提交态徽标混在一起；
               现在换成带边框底色的徽标，与周历 pill / 今日任务行 / 待办清单**同一套视觉**。
               判据是 `isExamTask(task)` 一处，不在这里重写 `taskType === 'exam'`。 */}
-          {isExamTask(task) ? <ExamMark /> : null}
+          {isExamTask(task) ? <ExamMark lang={lang} /> : null}
         </div>
         <p className={`mt-0.5 text-xs ${showOverdue ? 'text-destructive' : 'text-muted-foreground'}`}>
-          {label ?? '日期待定'}
-          {showOverdue ? '（已逾期）' : ''}
+          {label ?? t(lang, 'detail.dueTbd')}
+          {showOverdue ? t(lang, 'detail.overdue') : ''}
         </p>
       </div>
 
@@ -154,11 +156,11 @@ function TaskRow({ task, now }: { task: Task; now: Date }) {
           现随本区改成「只列有分数的」一并移除 —— 那种行不再进入这一区（2026-09-17 Steven 定）。 */}
       {hasScore ? (
         <div className="w-full shrink-0 sm:w-40">
-          <ScoreBar score={task.submissionScore as number} possible={task.pointsPossible as number} />
+          <ScoreBar score={task.submissionScore as number} possible={task.pointsPossible as number} lang={lang} />
           {/* P0-3-34：手记的分数要标出来 —— 用户有权知道这条不是 Canvas 给的，
               因此也不会被下一轮同步抹掉（同步侧见 `score_source='manual'` 就跳过这两列）。 */}
           {task.scoreSource === 'manual' ? (
-            <p className="mt-0.5 text-[10px] text-ink-faint">手记 · 同步不会覆盖</p>
+            <p className="mt-0.5 text-[10px] text-ink-faint">{t(lang, 'detail.manualScore')}</p>
           ) : null}
         </div>
       ) : null}
@@ -166,13 +168,9 @@ function TaskRow({ task, now }: { task: Task; now: Date }) {
   )
 }
 
-export function AssignmentDetail({ tasks, now }: { tasks: Task[]; now: Date }) {
+export function AssignmentDetail({ tasks, now, lang }: { tasks: Task[]; now: Date; lang: Lang }) {
   if (tasks.length === 0) {
-    return (
-      <p className="text-sm text-muted-foreground">
-        这门课还没有作业。连上 Canvas 并同步后，作业与分数会出现在这里。
-      </p>
-    )
+    return <p className="text-sm text-muted-foreground">{t(lang, 'detail.assignmentEmpty')}</p>
   }
 
   const sorted = [...tasks].sort((a, b) => {
@@ -193,11 +191,7 @@ export function AssignmentDetail({ tasks, now }: { tasks: Task[]; now: Date }) {
   // 仍完整地留在待办清单、周历、课程页其它区，所以这是"这一区不回答那个问题"。
   // ⚠️ 判据必须是 `hasScore` 的两项同时成立：只有满分没有得分时画不出条（见文件头铁律）。
   if (scored.length === 0) {
-    return (
-      <p className="text-sm text-muted-foreground">
-        这门课还没有出分的作业。Canvas 评分后会出现在这里。
-      </p>
-    )
+    return <p className="text-sm text-muted-foreground">{t(lang, 'detail.assignmentNoScore')}</p>
   }
 
   // 只报"另有 N 项暂无分数"，不把它们列出来 —— 说清被过滤掉的数量，
@@ -207,13 +201,13 @@ export function AssignmentDetail({ tasks, now }: { tasks: Task[]; now: Date }) {
   return (
     <div className="space-y-1">
       <p className="text-xs text-ink-faint">
-        {scored.length} 项已出分
-        {unscored > 0 ? ` · 另有 ${unscored} 项暂无分数` : ''}
-        {scored.some((task) => task.canvasUrl !== null) ? ' · 点标题去 Canvas' : ''}
+        {t(lang, 'detail.scoredLine', { scored: scored.length })}
+        {unscored > 0 ? t(lang, 'detail.scoredUnscored', { unscored }) : ''}
+        {scored.some((task) => task.canvasUrl !== null) ? t(lang, 'detail.scoredCanvas') : ''}
       </p>
       <ul>
         {scored.map((task) => (
-          <TaskRow key={task.id} task={task} now={now} />
+          <TaskRow key={task.id} task={task} now={now} lang={lang} />
         ))}
       </ul>
     </div>

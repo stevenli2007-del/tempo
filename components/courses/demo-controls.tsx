@@ -3,6 +3,8 @@
 import { useRouter } from 'next/navigation'
 import { useState } from 'react'
 
+import { useT } from '@/lib/i18n/use-i18n'
+
 /**
  * Demo Workspace 的入口 / 清空控件（P0-1-10）。
  *
@@ -23,6 +25,7 @@ export function DemoControls({
   variant: 'cta' | 'inline'
 }) {
   const router = useRouter()
+  const t = useT()
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -42,12 +45,12 @@ export function DemoControls({
           typeof body === 'object' && body !== null && 'error' in body
             ? (body as { error?: { message?: unknown } }).error?.message
             : undefined
-        setError(typeof message === 'string' ? message : `生成失败（HTTP ${res.status}）`)
+        setError(typeof message === 'string' ? message : t('demo.generateFailed', { status: res.status }))
         return
       }
       router.refresh()
     } catch {
-      setError('网络错误，请稍后重试')
+      setError(t('common.networkError'))
     } finally {
       setLoading(false)
     }
@@ -64,12 +67,12 @@ export function DemoControls({
           typeof body === 'object' && body !== null && 'error' in body
             ? (body as { error?: { message?: unknown } }).error?.message
             : undefined
-        setError(typeof message === 'string' ? message : `清空失败（HTTP ${res.status}）`)
+        setError(typeof message === 'string' ? message : t('demo.clearFailed', { status: res.status }))
         return
       }
       router.refresh()
     } catch {
-      setError('网络错误，请稍后重试')
+      setError(t('common.networkError'))
     } finally {
       setLoading(false)
     }
@@ -79,16 +82,14 @@ export function DemoControls({
     if (variant !== 'cta') return null
     return (
       <div className="rounded-xl border border-dashed border-border bg-muted/30 p-8 text-center">
-        <p className="text-sm text-muted-foreground">
-          第一次用？先看一个真实 syllabus 被 Tempo 拆开的样子。
-        </p>
+        <p className="text-sm text-muted-foreground">{t('demo.cta')}</p>
         <button
           type="button"
           onClick={() => void handleSeed()}
           disabled={loading}
           className="mt-4 inline-flex h-10 items-center justify-center rounded-md bg-primary px-5 text-sm font-medium text-primary-foreground disabled:opacity-50"
         >
-          {loading ? '生成中…' : '✨ 先看看效果'}
+          {loading ? t('demo.seeding') : t('demo.seed')}
         </button>
         {error ? (
           <p role="alert" className="mt-3 text-sm text-destructive">
@@ -108,7 +109,7 @@ export function DemoControls({
         disabled={loading}
         className="text-xs text-muted-foreground hover:text-destructive disabled:opacity-50"
       >
-        {loading ? '清空中…' : '清空示例数据'}
+        {loading ? t('demo.clearing') : t('demo.clear')}
       </button>
       {error ? (
         <p role="alert" className="text-xs text-destructive">

@@ -1,5 +1,7 @@
 import Link from 'next/link'
 
+import { t } from '@/lib/i18n/translate'
+import type { Lang } from '@/lib/i18n/types'
 import { detectExtractableExtension, unsupportedReason } from '@/lib/course-files/extractable'
 import { buildFileTree, formatFileSize } from '@/lib/course-files/grouping'
 import { isKeyLikeName, isKeyLikePath, isExamLike } from '@/lib/practice-test/pairing'
@@ -52,19 +54,21 @@ const COLLAPSE_THRESHOLD = 20
 
 export function CourseFiles({
   courseId,
+  lang,
   files,
   error,
 }: {
   courseId: string
+  lang: Lang
   files: CourseFileView[]
   error: string | null
 }) {
   if (error) {
     return (
       <section className="rounded-xl border border-border bg-card p-5 shadow-sm" data-course-files>
-        <h2 className="text-sm font-medium text-foreground">资料</h2>
+        <h2 className="text-sm font-medium text-foreground">{t(lang, 'files.title')}</h2>
         <p role="alert" className="mt-2 text-sm text-destructive">
-          资料加载失败：{error}
+          {t(lang, 'files.loadFailed', { error })}
         </p>
       </section>
     )
@@ -76,37 +80,34 @@ export function CourseFiles({
   return (
     <section className="rounded-xl border border-border bg-card p-5 shadow-sm" data-course-files>
       <div className="flex flex-wrap items-baseline justify-between gap-2">
-        <h2 className="text-sm font-medium text-foreground">资料</h2>
+        <h2 className="text-sm font-medium text-foreground">{t(lang, 'files.title')}</h2>
         <p className="text-xs text-ink-faint">
           {files.length === 0
-            ? '只存文件名与外链'
-            : `${files.length} 个文件 · ${folderCount} 个文件夹 · 按 Canvas 的文件夹结构`}
+            ? t(lang, 'files.onlyNames')
+            : t(lang, 'files.count', { n: files.length, m: folderCount })}
         </p>
       </div>
 
       {files.length === 0 ? (
         <p className="mt-3 text-sm text-ink-muted">
-          还没有资料。关联 Canvas 并同步一次后，老师放在 Files 里的课件、复习卷、答案会按文件夹结构列在这里。
+          {t(lang, 'files.empty')}
           <span className="mt-1 block text-xs text-ink-faint">
-            有些课没有开放 Files 区（实测 14 门里 8 门如此）—— 那种课这里会一直是空的。
+            {t(lang, 'files.emptyNote')}
           </span>
         </p>
       ) : (
         <>
           <div className="mt-4" data-course-file-tree>
             {tree.files.length > 0 && (
-              <FileList courseId={courseId} files={tree.files} />
+              <FileList courseId={courseId} lang={lang} files={tree.files} />
             )}
             {tree.children.map((child) => (
-              <Folder key={child.path} courseId={courseId} node={child} />
+              <Folder key={child.path} courseId={courseId} lang={lang} node={child} />
             ))}
           </div>
 
           <p className="mt-4 border-t border-border pt-3 text-xs text-ink-faint">
-            只有文件名与外链存在 Tempo。要读内容就点回 Canvas；点「一键总结」时，
-            Tempo 才会临时读那一份文件来生成要点（不留副本、不进库里）。
-            试卷那一行的「自测卷」同理：读**试卷本身**与自动配到的答案文件，
-            把题目切出来、答案收起来（两份原文同样不留副本）。
+            {t(lang, 'files.explain')}
           </p>
         </>
       )}
@@ -115,22 +116,22 @@ export function CourseFiles({
 }
 
 /** 一个文件夹（可展开）。子文件夹递归画在它里面，靠缩进表达层级。 */
-function Folder({ courseId, node }: { courseId: string; node: CourseFileNode }) {
+function Folder({ courseId, lang, node }: { courseId: string; lang: Lang; node: CourseFileNode }) {
   return (
     <details className="border-b border-border last:border-b-0">
       <summary className="flex cursor-pointer flex-wrap items-baseline gap-x-2 gap-y-0.5 px-1 py-2.5 text-sm text-foreground hover:text-ink">
         <span className="font-medium">{node.name}</span>
-        <span className="text-xs text-ink-faint">共 {node.totalCount} 个</span>
+        <span className="text-xs text-ink-faint">{t(lang, 'files.folderCount', { n: node.totalCount })}</span>
         {node.children.length > 0 && (
           <span className="text-xs text-ink-faint">
-            含 {node.children.length} 个子文件夹
+            {t(lang, 'files.subfolders', { n: node.children.length })}
           </span>
         )}
       </summary>
       <div className="pb-2 pl-4">
-        {node.files.length > 0 && <FileList courseId={courseId} files={node.files} />}
+        {node.files.length > 0 && <FileList courseId={courseId} lang={lang} files={node.files} />}
         {node.children.map((child) => (
-          <Folder key={child.path} courseId={courseId} node={child} />
+          <Folder key={child.path} courseId={courseId} lang={lang} node={child} />
         ))}
       </div>
     </details>
@@ -143,7 +144,7 @@ function Folder({ courseId, node }: { courseId: string; node: CourseFileNode }) 
  * 折的是**同一层里太多文件**，不是层级 —— 所以它只出现在"老师把几十个文件堆在同一个
  * 文件夹"的情况（R4A 根目录 101 个）。正常分好类的课看不到这一层。
  */
-function FileList({ courseId, files }: { courseId: string; files: CourseFileView[] }) {
+function FileList({ courseId, lang, files }: { courseId: string; lang: Lang; files: CourseFileView[] }) {
   if (files.length === 0) return null
 
   const overflow = files.length > COLLAPSE_THRESHOLD
@@ -152,14 +153,14 @@ function FileList({ courseId, files }: { courseId: string; files: CourseFileView
 
   return (
     <div className="mt-1">
-      <FileTable courseId={courseId} files={head} />
+      <FileTable courseId={courseId} lang={lang} files={head} />
       {rest.length > 0 && (
         <details className="mt-1">
           <summary className="cursor-pointer rounded-lg px-3 py-1.5 text-xs text-ink-faint hover:text-foreground">
-            还有 {rest.length} 个（点开）
+            {t(lang, 'files.more', { n: rest.length })}
           </summary>
           <div className="mt-1">
-            <FileTable courseId={courseId} files={rest} />
+            <FileTable courseId={courseId} lang={lang} files={rest} />
           </div>
         </details>
       )}
@@ -167,17 +168,17 @@ function FileList({ courseId, files }: { courseId: string; files: CourseFileView
   )
 }
 
-function FileTable({ courseId, files }: { courseId: string; files: CourseFileView[] }) {
+function FileTable({ courseId, lang, files }: { courseId: string; lang: Lang; files: CourseFileView[] }) {
   return (
     <ul className="divide-y divide-border rounded-lg border border-border">
       {files.map((file) => (
-        <FileRow key={file.id} courseId={courseId} file={file} />
+        <FileRow key={file.id} courseId={courseId} lang={lang} file={file} />
       ))}
     </ul>
   )
 }
 
-function FileRow({ courseId, file }: { courseId: string; file: CourseFileView }) {
+function FileRow({ courseId, lang, file }: { courseId: string; lang: Lang; file: CourseFileView }) {
   const canSummarize = detectExtractableExtension(file.displayName, file.contentType) !== null
   /**
    * 「自测卷」只出现在**像试卷**的文件上（P0-3-23）。
@@ -218,11 +219,11 @@ function FileRow({ courseId, file }: { courseId: string; file: CourseFileView })
           prefetch={false}
           className="shrink-0 rounded-md border border-border px-2 py-1 text-xs text-ink-muted transition-colors hover:bg-muted/50 hover:text-foreground"
         >
-          自测卷
+          {t(lang, 'files.practiceTest')}
         </Link>
       ) : isAnswerFile && canSummarize ? (
         // 答案文件：明说为什么没有「自测卷」按钮，而不是留一个空白让人以为没做这个功能。
-        <span className="shrink-0 px-2 py-1 text-xs text-ink-faint" title="这是答案文件 —— 自测卷要选试卷本身">
+        <span className="shrink-0 px-2 py-1 text-xs text-ink-faint" title={t(lang, 'files.answerNote')}>
           —
         </span>
       ) : null}
@@ -241,7 +242,7 @@ function FileRow({ courseId, file }: { courseId: string; file: CourseFileView })
           prefetch={false}
           className="shrink-0 rounded-md border border-border px-2 py-1 text-xs text-ink-muted transition-colors hover:bg-muted/50 hover:text-foreground"
         >
-          一键总结
+          {t(lang, 'files.summarize')}
         </Link>
       ) : (
         <span

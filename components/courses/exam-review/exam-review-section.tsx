@@ -2,6 +2,8 @@ import Link from 'next/link'
 
 import { ExamMark } from '@/components/tasks/exam-mark'
 import { examScheduleLabel } from '@/lib/course-update/exam-match'
+import { t } from '@/lib/i18n/translate'
+import type { Lang } from '@/lib/i18n/types'
 import type { StoredExamDate } from '@/types/sections'
 
 /**
@@ -22,9 +24,11 @@ import type { StoredExamDate } from '@/types/sections'
  */
 export function ExamReviewSection({
   courseId,
+  lang,
   exams,
 }: {
   courseId: string
+  lang: Lang
   exams: StoredExamDate[]
 }) {
   if (exams.length === 0) return null
@@ -34,10 +38,8 @@ export function ExamReviewSection({
       className="rounded-xl border border-border bg-card p-5 shadow-sm"
       data-exam-review-section
     >
-      <h2 className="mb-1 text-sm font-medium text-foreground">考试复习</h2>
-      <p className="text-xs text-ink-faint">
-        点某场考试进复习模式：挑资料 + 上传补充材料 → 生成这场考试的总结；挑中 past exam 还能出一份自测卷。
-      </p>
+      <h2 className="mb-1 text-sm font-medium text-foreground">{t(lang, 'detail.examReview')}</h2>
+      <p className="text-xs text-ink-faint">{t(lang, 'detail.examReviewHint')}</p>
 
       <ul className="mt-3 space-y-2">
         {exams.map((exam) => (
@@ -51,11 +53,11 @@ export function ExamReviewSection({
                 {/* 考试标记（P0-3-33）：与周历 pill / 今日任务行 / 待办清单是**同一套视觉**
                     （`components/tasks/exam-mark.tsx`）—— 同一场考试在哪个页面都该长得一样。
                     这里数据源是 `exam_dates`，每一行必然是考试，标记的作用是"跨页面认得出是它"。 */}
-                <ExamMark />
+                <ExamMark lang={lang} />
                 {exam.examName}
                 {exam.status === 'tbd' ? (
                   <span className="rounded-full border border-border px-1.5 py-0.5 text-[10px] font-normal text-ink-faint">
-                    日期待定
+                    {t(lang, 'detail.examTbd')}
                   </span>
                 ) : null}
               </p>
@@ -64,6 +66,7 @@ export function ExamReviewSection({
                   examDate: exam.examDate,
                   examTime: exam.examTime,
                   location: exam.location,
+                  lang,
                 })}
               </p>
             </div>
@@ -71,7 +74,7 @@ export function ExamReviewSection({
               href={`/courses/${courseId}/exams/${exam.id}/review`}
               className="shrink-0 rounded-md border border-border px-3 py-1.5 text-sm text-foreground transition-colors hover:bg-muted/50"
             >
-              复习模式 →
+              {t(lang, 'detail.reviewMode')}
             </Link>
           </li>
         ))}

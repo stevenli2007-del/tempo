@@ -1,5 +1,8 @@
 import { GraduationCap } from 'lucide-react'
 
+import { t } from '@/lib/i18n/translate'
+import type { Lang } from '@/lib/i18n/types'
+
 /**
  * 考试的视觉标记（P0-3-33）。
  *
@@ -45,13 +48,15 @@ export const EXAM_SURFACE_CLASS = 'border border-lime-dark/30 bg-lime/10'
  *   给"容器本身已经铺了考试底色"的场合用（周历 pill / 今日任务行 / 复习区整行），
  *   否则会出现"块里套块"的双层边框。
  * - 默认（徽标）：自带边框底色的独立小徽标，给光秃秃的文字行用。
+ *
+ * P0-5-1：`lang` 决定「考」/「EX」与读屏文案。默认 zh —— 老调用方一行不改。
  */
-export function ExamMark({ bare = false }: { bare?: boolean }) {
+export function ExamMark({ bare = false, lang = 'zh' }: { bare?: boolean; lang?: Lang }) {
   const content = (
     <>
       <GraduationCap className="h-3 w-3 shrink-0" aria-hidden />
-      <span className="sr-only">考试</span>
-      <span aria-hidden>考</span>
+      <span className="sr-only">{t(lang, 'exam.markSr')}</span>
+      <span aria-hidden>{t(lang, 'exam.markShort')}</span>
     </>
   )
 
@@ -59,7 +64,7 @@ export function ExamMark({ bare = false }: { bare?: boolean }) {
     return (
       <span
         className="inline-flex shrink-0 items-center gap-0.5 font-semibold text-lime-dark"
-        title="考试"
+        title={t(lang, 'exam.markSr')}
       >
         {content}
       </span>
@@ -69,7 +74,7 @@ export function ExamMark({ bare = false }: { bare?: boolean }) {
   return (
     <span
       className={`inline-flex shrink-0 items-center gap-0.5 rounded-badge px-1.5 py-0.5 text-[10px] font-medium text-lime-dark ${EXAM_CHIP_CLASS}`}
-      title="考试"
+      title={t(lang, 'exam.markSr')}
     >
       {content}
     </span>

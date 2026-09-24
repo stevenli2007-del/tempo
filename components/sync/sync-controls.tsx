@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 
 import { Button } from '@/components/ui/button'
+import { useI18n } from '@/lib/i18n/use-i18n'
 import { callSyncNow, summarize } from '@/lib/sync/browser'
 
 /**
@@ -36,6 +37,7 @@ type Feedback = { kind: 'ok'; line: string } | { kind: 'error'; message: string 
 
 export function SyncControls({ hasCanvasLink }: { hasCanvasLink: boolean }) {
   const router = useRouter()
+  const { lang, t } = useI18n()
   const [syncing, setSyncing] = useState(false)
   const [feedback, setFeedback] = useState<Feedback | null>(null)
   /** 防重入：自动同步与手动按钮共用一次进行中的同步。 */
@@ -51,11 +53,11 @@ export function SyncControls({ hasCanvasLink }: { hasCanvasLink: boolean }) {
       syncingRef.current = true
       setSyncing(true)
       try {
-        const result = await callSyncNow(trigger)
+        const result = await callSyncNow(trigger, lang)
         if (result.ok) {
           // 手动点击给完整反馈；自动同步成功保持安静，数据由 refresh 换新。
           if (trigger === 'manual') {
-            setFeedback({ kind: 'ok', line: summarize(result.summary) })
+            setFeedback({ kind: 'ok', line: summarize(result.summary, lang) })
           }
           router.refresh()
           return
@@ -70,7 +72,7 @@ export function SyncControls({ hasCanvasLink }: { hasCanvasLink: boolean }) {
         setSyncing(false)
       }
     },
-    [router],
+    [router, lang],
   )
 
   // T1：挂载即同步（= 打开应用），页面重新可见时再同步（均受 60s 闸门约束）。
@@ -115,7 +117,7 @@ export function SyncControls({ hasCanvasLink }: { hasCanvasLink: boolean }) {
         onClick={() => void runSync('manual')}
         disabled={syncing}
       >
-        {syncing ? '同步中…' : '同步 Canvas'}
+        {syncing ? t('sync.syncing') : t('sync.button')}
       </Button>
       {feedback ? (
         feedback.kind === 'ok' ? (

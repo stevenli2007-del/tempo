@@ -2,6 +2,7 @@ import {
   ManualBadge,
   TbdBadge,
 } from '@/components/sections/shared'
+import { useT } from '@/lib/i18n/use-i18n'
 import type {
   StoredCourseOutlineItem,
   StoredExamDate,
@@ -23,11 +24,19 @@ import type {
 const ROW_CLASS = 'rounded-md border border-border bg-card/60 px-3 py-2'
 
 function EmptySection({ hint }: { hint: string }) {
+  const t = useT()
   return (
     <p className="text-sm text-muted-foreground">
-      这个板块还没有内容<span className="ml-1 text-muted-foreground/70">（{hint}）</span>
+      {t('sections.empty')}
+      <span className="ml-1 text-muted-foreground/70">（{hint}）</span>
     </p>
   )
+}
+
+/** 五板块共用的空态（提示文案同源，避免五处各写一遍）。 */
+function EmptySectionHint() {
+  const t = useT()
+  return <EmptySection hint={t('sections.emptyHint')} />
 }
 
 /** 原文摘录：抗幻觉的核对依据，展示层要给得出来（CodingRules 7）。 */
@@ -41,8 +50,9 @@ function Excerpt({ text }: { text: string | null }) {
 }
 
 export function GradeComponentsView({ items }: { items: StoredGradeComponent[] }) {
+  const t = useT()
   if (items.length === 0) {
-    return <EmptySection hint="解析后自动填入，或点「编辑」手动补" />
+    return <EmptySectionHint />
   }
 
   const total = items.reduce((sum, item) => sum + (item.weightPercent ?? 0), 0)
@@ -72,8 +82,8 @@ export function GradeComponentsView({ items }: { items: StoredGradeComponent[] }
       {/* 权重加起来不是 100% 是常见的数据问题，明确说出来比让用户自己算好。 */}
       {knownCount > 0 ? (
         <p className="text-xs text-muted-foreground">
-          已知权重合计 {total}%
-          {total !== 100 ? '（不是 100%，可能有缺失或 syllabus 本身没写全）' : ''}
+          {t('sections.totalWeight', { n: total })}
+          {total !== 100 ? t('sections.totalWeightOff') : ''}
         </p>
       ) : null}
     </div>
@@ -82,7 +92,7 @@ export function GradeComponentsView({ items }: { items: StoredGradeComponent[] }
 
 export function OutlineItemsView({ items }: { items: StoredCourseOutlineItem[] }) {
   if (items.length === 0) {
-    return <EmptySection hint="解析后自动填入，或点「编辑」手动补" />
+    return <EmptySectionHint />
   }
   return (
     <div className="space-y-2">
@@ -102,7 +112,7 @@ export function OutlineItemsView({ items }: { items: StoredCourseOutlineItem[] }
 
 export function ExamDatesView({ items }: { items: StoredExamDate[] }) {
   if (items.length === 0) {
-    return <EmptySection hint="解析后自动填入，或点「编辑」手动补" />
+    return <EmptySectionHint />
   }
   return (
     <div className="space-y-2">
@@ -132,7 +142,7 @@ export function ExamDatesView({ items }: { items: StoredExamDate[] }) {
 
 export function OfficeHoursView({ items }: { items: StoredOfficeHour[] }) {
   if (items.length === 0) {
-    return <EmptySection hint="解析后自动填入，或点「编辑」手动补" />
+    return <EmptySectionHint />
   }
   return (
     <div className="space-y-2">
@@ -164,7 +174,7 @@ export function OfficeHoursView({ items }: { items: StoredOfficeHour[] }) {
 
 export function SubmissionPoliciesView({ items }: { items: StoredSubmissionPolicy[] }) {
   if (items.length === 0) {
-    return <EmptySection hint="解析后自动填入，或点「编辑」手动补" />
+    return <EmptySectionHint />
   }
   return (
     <div className="space-y-2">

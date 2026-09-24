@@ -2,6 +2,8 @@
 
 import type { SaveSubmissionPolicyItem, StoredSubmissionPolicy } from '@/types/sections'
 
+import { useI18n, useT } from '@/lib/i18n/use-i18n'
+
 import {
   INPUT_CLASS,
   ManualBadge,
@@ -24,6 +26,8 @@ export function SubmissionPoliciesForm({
   courseId: string
   items: StoredSubmissionPolicy[]
 }) {
+  const t = useT()
+  const { lang } = useI18n()
   const form = useSectionForm<StoredSubmissionPolicy, PolicyDraft>({
     endpoint: `/api/v1/courses/${courseId}/submission-policies`,
     initial: items,
@@ -47,25 +51,25 @@ export function SubmissionPoliciesForm({
               type="button"
               onClick={() => form.removeRow(index)}
               disabled={form.saving}
-              title="删除这条"
+              title={t('sections.deleteRow')}
               className="ml-auto shrink-0 text-xs text-muted-foreground hover:text-destructive"
             >
-              删除
+              {t('sections.delete')}
             </button>
           </div>
           <textarea
             value={row.description}
             onChange={(e) => form.updateRow(index, { description: e.target.value })}
-            placeholder="政策描述，如 Homework submitted via Gradescope, no late days"
+            placeholder={t('policies.descPh')}
             maxLength={500}
             rows={3}
-            title={excerptTitle(row._sourceExcerpt)}
+            title={excerptTitle(row._sourceExcerpt, lang)}
             className="w-full rounded-md border border-input bg-background px-2.5 py-1.5 text-sm text-foreground outline-none placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 disabled:opacity-50"
           />
           <input
             value={row.platformName ?? ''}
             onChange={(e) => form.updateRow(index, { platformName: e.target.value || null })}
-            placeholder="平台（可空），如 Gradescope"
+            placeholder={t('policies.platformPh')}
             maxLength={100}
             className={`${INPUT_CLASS} mt-2`}
           />
@@ -74,7 +78,7 @@ export function SubmissionPoliciesForm({
 
       <SectionFooter
         count={form.rows.length}
-        addLabel="添加一条"
+        addLabel={t('policies.add')}
         onAdd={form.addRow}
         dirty={form.dirty}
         saving={form.saving}

@@ -2,6 +2,8 @@ import Link from 'next/link'
 
 import { EXAM_CHIP_CLASS, ExamMark } from '@/components/tasks/exam-mark'
 import { courseColorClasses, courseColorKey } from '@/lib/courses/course-color'
+import type { Lang } from '@/lib/i18n/types'
+import { t } from '@/lib/i18n/translate'
 import type { CalendarPill, UpcomingExam, WeekCalendarModel } from '@/lib/tasks/progress'
 
 /**
@@ -27,8 +29,8 @@ import type { CalendarPill, UpcomingExam, WeekCalendarModel } from '@/lib/tasks/
  *    （`TaskList`，PATCH 只允许改 status，ADR-004）。
  */
 
-function Pill({ pill }: { pill: CalendarPill }) {
-  const title = `${pill.courseName} · ${pill.title}${pill.isExam ? '（考试）' : ''}`
+function Pill({ pill, lang }: { pill: CalendarPill; lang: Lang }) {
+  const title = `${pill.courseName} · ${pill.title}${pill.isExam ? t(lang, 'calendar.examTag') : ''}`
   // 课程色三件套（P0-3-33）：类名是静态字面量（`lib/courses/course-color.ts`），
   // 不是 `border-l-${color}` 这种运行时拼接 —— 拼接出来的类 Tailwind 扫不到、不生成。
   const color = courseColorClasses(courseColorKey(pill.courseId))
@@ -40,7 +42,7 @@ function Pill({ pill }: { pill: CalendarPill }) {
         title={title}
         className={`flex items-center gap-1 rounded-badge border-l-2 px-1.5 py-1 text-[11px] font-medium leading-tight text-lime-dark ${color.edge} ${EXAM_CHIP_CLASS}`}
       >
-        <ExamMark bare />
+        <ExamMark bare lang={lang} />
         <span className="truncate">{pill.title}</span>
       </Link>
     )
@@ -59,12 +61,12 @@ function Pill({ pill }: { pill: CalendarPill }) {
   )
 }
 
-function PillList({ pills }: { pills: CalendarPill[] }) {
+function PillList({ pills, lang }: { pills: CalendarPill[]; lang: Lang }) {
   return (
     <ul className="flex flex-wrap gap-1.5">
       {pills.map((pill) => (
         <li key={pill.id} className="max-w-full">
-          <Pill pill={pill} />
+          <Pill pill={pill} lang={lang} />
         </li>
       ))}
     </ul>
@@ -79,14 +81,14 @@ function PillList({ pills }: { pills: CalendarPill[] }) {
  * 考试是最稀疏、最高风险的一类事项 —— 漏看一次期中的代价远大于漏做一个作业，
  * 所以它值得单独一条、且看得比 7 天更远。
  */
-function UpcomingExams({ exams }: { exams: UpcomingExam[] }) {
+function UpcomingExams({ exams, lang }: { exams: UpcomingExam[]; lang: Lang }) {
   if (exams.length === 0) return null
 
   return (
     <div className="mt-4 border-t border-line pt-3">
       <p className="text-xs text-muted-foreground">
-        最近的考试
-        <span className="ml-1.5">（超出 7 天的也列在这里）</span>
+        {t(lang, 'calendar.upcomingExams')}
+        <span className="ml-1.5">{t(lang, 'calendar.upcomingExamsNote')}</span>
       </p>
       <ul className="mt-1.5 flex flex-wrap gap-1.5">
         {exams.map((exam) => (
@@ -99,7 +101,9 @@ function UpcomingExams({ exams }: { exams: UpcomingExam[] }) {
               }`}
             >
               <span className="shrink-0 font-semibold text-lime-dark">
-                {exam.daysUntil === 0 ? '今天' : `还有 ${exam.daysUntil} 天`}
+                {exam.daysUntil === 0
+                  ? t(lang, 'calendar.today')
+                  : t(lang, 'calendar.daysLeft', { n: exam.daysUntil })}
               </span>
               <span className="truncate text-ink">{exam.title}</span>
               <span className="shrink-0 text-ink-faint">{exam.dateLabel}</span>
@@ -114,9 +118,11 @@ function UpcomingExams({ exams }: { exams: UpcomingExam[] }) {
 export function WeekCalendar({
   model,
   exams,
+  lang,
 }: {
   model: WeekCalendarModel
   exams: UpcomingExam[]
+  lang: Lang
 }) {
   const { days, overdue, undated } = model
   const isEmpty =
@@ -128,19 +134,19 @@ export function WeekCalendar({
   return (
     <div className="rounded-xl border border-border bg-card p-5 shadow-sm">
       {isEmpty ? (
-        <p className="text-sm text-muted-foreground">
-          接下来 7 天没有要做的事。上传 syllabus 或连上 Canvas 后，这里会自动排出来。
-        </p>
+        <p className="text-sm text-muted-foreground">{t(lang, 'calendar.empty')}</p>
       ) : null}
 
       {overdue.length > 0 ? (
         <div className="mb-4 rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2.5">
           <p className="text-xs font-medium text-destructive">
-            已逾期 {overdue.length} 项
-            <span className="ml-1.5 font-normal text-muted-foreground">按最近的排在前</span>
+            {t(lang, 'calendar.overdue', { n: overdue.length })}
+            <span className="ml-1.5 font-normal text-muted-foreground">
+              {t(lang, 'calendar.overdueNote')}
+            </span>
           </p>
           <div className="mt-1.5">
-            <PillList pills={overdue} />
+            <PillList pills={overdue} lang={lang} />
           </div>
         </div>
       ) : null}
@@ -166,7 +172,7 @@ export function WeekCalendar({
                 <ul className="flex min-h-[56px] flex-col gap-1">
                   {day.pills.map((pill) => (
                     <li key={pill.id} className="min-w-0">
-                      <Pill pill={pill} />
+                      <Pill pill={pill} lang={lang} />
                     </li>
                   ))}
                 </ul>
@@ -176,16 +182,16 @@ export function WeekCalendar({
         </div>
       )}
 
-      <UpcomingExams exams={exams} />
+      <UpcomingExams exams={exams} lang={lang} />
 
       {undated.length > 0 ? (
         <div className="mt-4 border-t border-line pt-3">
           <p className="text-xs text-muted-foreground">
-            日期待定
-            <span className="ml-1.5">（syllabus 里只写了「某周」、没给具体日子的，不编日期）</span>
+            {t(lang, 'calendar.undated')}
+            <span className="ml-1.5">{t(lang, 'calendar.undatedNote')}</span>
           </p>
           <div className="mt-1.5">
-            <PillList pills={undated} />
+            <PillList pills={undated} lang={lang} />
           </div>
         </div>
       ) : null}

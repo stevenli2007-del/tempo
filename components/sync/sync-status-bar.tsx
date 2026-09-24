@@ -1,6 +1,8 @@
 import Link from 'next/link'
 
 import { SyncRetryButton } from '@/components/sync/sync-retry-button'
+import type { Lang } from '@/lib/i18n/types'
+import { t } from '@/lib/i18n/translate'
 import {
   formatFailedCourseNames,
   formatSyncTime,
@@ -26,7 +28,15 @@ import {
  * （`canvas-link.tsx`：点「更改」→ Canvas 拒 token → 内嵌连接表单）。
  * 所以这里链到第一门失败课程的详情页，文案写明「去重新连接 Canvas」。
  */
-export function SyncStatusBar({ overview, now }: { overview: SyncOverview; now: Date }) {
+export function SyncStatusBar({
+  overview,
+  now,
+  lang,
+}: {
+  overview: SyncOverview
+  now: Date
+  lang: Lang
+}) {
   if (overview.level === 'not_linked') {
     return null
   }
@@ -35,16 +45,28 @@ export function SyncStatusBar({ overview, now }: { overview: SyncOverview; now: 
   if (overview.level === 'ok') {
     return (
       <p className="text-xs text-muted-foreground">
-        Canvas 已于 {overview.lastSuccessAt ? formatSyncTime(overview.lastSuccessAt, now) : '—'}同步
-        {overview.total > 1 ? ` · ${overview.syncedCount} 门课` : null}
+        {t(
+          lang,
+          'syncStatusBar.ok',
+          {
+            when: overview.lastSuccessAt
+              ? formatSyncTime(overview.lastSuccessAt, now, lang)
+              : '—',
+          },
+        )}
+        {overview.total > 1
+          ? t(lang, 'syncStatusBar.okCourses', { n: overview.syncedCount })
+          : null}
       </p>
     )
   }
 
   const lastSuccessLine =
     overview.lastSuccessAt === null
-      ? '这些课还没有成功同步过，下面的任务列表可能不完整。'
-      : `下面的数据停留在 ${formatSyncTime(overview.lastSuccessAt, now)}，可能已经不是最新的。`
+      ? t(lang, 'syncStatusBar.neverSyncedLine')
+      : t(lang, 'syncStatusBar.staleLine', {
+          when: formatSyncTime(overview.lastSuccessAt, now, lang),
+        })
 
   // ---------- 失败 ----------
   if (overview.level === 'failed') {
@@ -60,12 +82,17 @@ export function SyncStatusBar({ overview, now }: { overview: SyncOverview; now: 
       >
         <p className="text-sm font-medium text-destructive">
           {isFixable
-            ? 'Canvas 连接已失效'
-            : `${overview.failedCount} 门课同步失败（共 ${overview.total} 门）`}
+            ? t(lang, 'syncStatusBar.fixableTitle')
+            : t(lang, 'syncStatusBar.failedTitle', {
+                n: overview.failedCount,
+                m: overview.total,
+              })}
         </p>
         <p className="mt-1 text-sm text-muted-foreground">
-          {formatFailedCourseNames(overview.failedCourses)}
-          {overview.syncedCount > 0 ? `；其余 ${overview.syncedCount} 门课已同步` : null}
+          {formatFailedCourseNames(overview.failedCourses, 3, lang)}
+          {overview.syncedCount > 0
+            ? t(lang, 'syncStatusBar.othersSynced', { n: overview.syncedCount })
+            : null}
         </p>
         <p className="mt-1 text-sm text-muted-foreground">{lastSuccessLine}</p>
         {first?.errorMessage ? (
@@ -78,13 +105,13 @@ export function SyncStatusBar({ overview, now }: { overview: SyncOverview; now: 
               href={`/courses/${first?.courseId ?? ''}`}
               className="inline-flex h-8 items-center rounded-md bg-primary px-3 text-sm font-medium text-primary-foreground"
             >
-              去重新连接 Canvas
+              {t(lang, 'syncStatusBar.goReconnect')}
             </Link>
           ) : (
             <>
-              <SyncRetryButton />
+              <SyncRetryButton lang={lang} />
               <p className="mt-1 text-xs text-muted-foreground">
-                Canvas 或网络暂时不可用，Tempo 会在打开应用时和每天两次自动重试。
+                {t(lang, 'syncStatusBar.retryNote')}
               </p>
             </>
           )}
@@ -100,12 +127,12 @@ export function SyncStatusBar({ overview, now }: { overview: SyncOverview; now: 
         className="rounded-lg border border-border bg-muted/40 p-4"
         data-sync-level="never"
       >
-        <p className="text-sm font-medium text-foreground">Canvas 作业还没同步过</p>
+        <p className="text-sm font-medium text-foreground">{t(lang, 'syncStatusBar.neverTitle')}</p>
         <p className="mt-1 text-sm text-muted-foreground">
-          {overview.total} 门课已关联 Canvas，但还没有拉到任何作业。同步一次后，Canvas 的作业与截止日期会出现在下面的列表里。
+          {t(lang, 'syncStatusBar.neverBody', { n: overview.total })}
         </p>
         <div className="mt-3">
-          <SyncRetryButton label="立即同步" />
+          <SyncRetryButton label={t(lang, 'syncStatusBar.retryNow')} lang={lang} />
         </div>
       </div>
     )
@@ -116,19 +143,21 @@ export function SyncStatusBar({ overview, now }: { overview: SyncOverview; now: 
     <div className="rounded-lg border border-border bg-muted/40 p-4" data-sync-level="stale">
       <p className="text-sm font-medium text-foreground">
         {overview.staleReason === 'never_synced'
-          ? `${overview.neverCount} 门课还没同步过`
-          : 'Canvas 数据可能不是最新的'}
+          ? t(lang, 'syncStatusBar.staleNeverTitle', { n: overview.neverCount })
+          : t(lang, 'syncStatusBar.staleTitle')}
       </p>
       <p className="mt-1 text-sm text-muted-foreground">
         {overview.staleReason === 'never_synced'
-          ? '这些课的 Canvas 作业还没进到任务列表。'
-          : '距离最后一次成功同步已超过 24 小时，作业可能已经有变化。'}
+          ? t(lang, 'syncStatusBar.staleNeverBody')
+          : t(lang, 'syncStatusBar.staleBody')}
         {overview.lastSuccessAt === null
           ? null
-          : `最后一次成功同步：${formatSyncTime(overview.lastSuccessAt, now)}。`}
+          : t(lang, 'syncStatusBar.lastSuccess', {
+              when: formatSyncTime(overview.lastSuccessAt, now, lang),
+            })}
       </p>
       <div className="mt-3">
-        <SyncRetryButton label="立即同步" />
+        <SyncRetryButton label={t(lang, 'syncStatusBar.retryNow')} lang={lang} />
       </div>
     </div>
   )

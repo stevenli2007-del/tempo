@@ -12,13 +12,17 @@ import { createClient } from '@/lib/supabase/server'
 import { toCourseSyncLine, toCourseSyncView } from '@/lib/sync/status'
 import { loadUpcomingTasks } from '@/lib/tasks'
 import type { CanvasCredentialMeta } from '@/types/canvas'
-
-export const metadata = {
-  title: '我的课程 · Tempo',
-}
+import { getLang } from '@/lib/i18n/server'
+import { t } from '@/lib/i18n/translate'
+import type { Lang } from '@/lib/i18n/types'
 
 // 依赖用户 session，绝不能被静态预渲染（同 /dashboard）。
 export const dynamic = 'force-dynamic'
+
+export async function generateMetadata() {
+  const lang = await getLang()
+  return { title: `${t(lang, 'courses.title')} · Tempo` }
+}
 
 /**
  * 课程列表页（P0-3-7b 从 dashboard 拆出）。
@@ -44,6 +48,8 @@ export default async function CoursesPage() {
   if (!user) {
     redirect('/login')
   }
+
+  const lang: Lang = await getLang()
 
   const { data, error } = await supabase
     .from('courses')
@@ -91,44 +97,42 @@ export default async function CoursesPage() {
       .filter((course) => course.canvasCourseId !== null)
       .map((course) => {
         const view = toCourseSyncView(course, { credentialUsable: credentialUsable === true })
-        return [course.id, toCourseSyncLine(view, now)] as const
+        return [course.id, toCourseSyncLine(view, now, lang)] as const
       }),
   )
 
   return (
-    <AppShell title="我的课程">
+    <AppShell title={t(lang, 'courses.title')}>
       <div className="mx-auto max-w-[1100px] space-y-8">
         <div className="flex items-start justify-between gap-4">
           <div>
-            <h1 className="text-2xl font-semibold tracking-tight">我的课程</h1>
-            <p className="mt-2 text-sm text-ink-muted">
-              先建课程，再上传 syllabus —— Tempo 会帮你把里面的考试、评分和日程抽出来。
-            </p>
+            <h1 className="text-2xl font-semibold tracking-tight">{t(lang, 'courses.title')}</h1>
+            <p className="mt-2 text-sm text-ink-muted">{t(lang, 'courses.subtitle')}</p>
           </div>
-          <CourseCreatePanel />
+          <CourseCreatePanel lang={lang} />
         </div>
 
         {error ? (
           <div role="alert" className="rounded-lg border border-destructive/40 bg-card p-4">
-            <p className="text-sm font-medium text-destructive">课程列表加载失败</p>
+            <p className="text-sm font-medium text-destructive">{t(lang, 'courses.loadFailed')}</p>
             <p className="mt-1 text-sm text-muted-foreground">{error.message}</p>
           </div>
         ) : null}
 
         {syllabusError ? (
           <div role="alert" className="rounded-lg border border-destructive/40 bg-card p-4">
-            <p className="text-sm font-medium text-destructive">Syllabus 信息加载失败</p>
+            <p className="text-sm font-medium text-destructive">{t(lang, 'courses.syllabusLoadFailed')}</p>
             <p className="mt-1 text-sm text-muted-foreground">
-              课程列表不受影响，但上传状态可能显示不准。{syllabusError}
+              {t(lang, 'courses.syllabusLoadFailedHint', { error: syllabusError })}
             </p>
           </div>
         ) : null}
 
         {tasksError ? (
           <div role="alert" className="rounded-lg border border-destructive/40 bg-card p-4">
-            <p className="text-sm font-medium text-destructive">任务列表加载失败</p>
+            <p className="text-sm font-medium text-destructive">{t(lang, 'courses.tasksLoadFailed')}</p>
             <p className="mt-1 text-sm text-muted-foreground">
-              课程与 syllabus 不受影响，但卡片上的「近期任务」可能不完整。{tasksError}
+              {t(lang, 'courses.tasksLoadFailedHint', { error: tasksError })}
             </p>
           </div>
         ) : null}
@@ -137,9 +141,9 @@ export default async function CoursesPage() {
             用户不知道那可能是失败态而非真实状态（CodingRules 7）。 */}
         {credentialError ? (
           <div role="alert" className="rounded-lg border border-destructive/40 bg-card p-4">
-            <p className="text-sm font-medium text-destructive">Canvas 连接状态加载失败</p>
+            <p className="text-sm font-medium text-destructive">{t(lang, 'courses.canvasLoadFailed')}</p>
             <p className="mt-1 text-sm text-muted-foreground">
-              卡片上的同步状态可能不准（失败原因会按「暂时性故障」处理）。{credentialError}
+              {t(lang, 'courses.canvasLoadFailedHint', { error: credentialError })}
             </p>
           </div>
         ) : null}
@@ -154,6 +158,7 @@ export default async function CoursesPage() {
                 <CourseCard
                   key={course.id}
                   course={course}
+                  lang={lang}
                   syllabus={syllabiByCourse.get(course.id) ?? null}
                   // 卡片分支不再用「undefined → null」隐式判定加载失败：
                   // Map.get() 不存在（这门课没任务）与查询错误是两种不同状态，

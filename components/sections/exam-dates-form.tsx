@@ -2,6 +2,8 @@
 
 import type { SaveExamDateItem, StoredExamDate } from '@/types/sections'
 
+import { useI18n, useT } from '@/lib/i18n/use-i18n'
+
 import {
   INPUT_CLASS,
   ManualBadge,
@@ -28,6 +30,8 @@ export function ExamDatesForm({
   courseId: string
   items: StoredExamDate[]
 }) {
+  const t = useT()
+  const { lang } = useI18n()
   const form = useSectionForm<StoredExamDate, ExamDraft>({
     endpoint: `/api/v1/courses/${courseId}/exam-dates`,
     initial: items,
@@ -46,7 +50,7 @@ export function ExamDatesForm({
   return (
     <div className="space-y-3">
       <p className="text-xs text-muted-foreground">
-        日期留空 = 待定（TBD）；有日期的考试会自动进任务列表，截止到当天 23:59。
+        {t('exams.dateHint')}
       </p>
 
       {form.rows.map((row, index) => (
@@ -55,9 +59,9 @@ export function ExamDatesForm({
             <input
               value={row.examName}
               onChange={(e) => form.updateRow(index, { examName: e.target.value })}
-              placeholder="考试名称，如 Midterm 1"
+              placeholder={t('exams.namePh')}
               maxLength={120}
-              title={excerptTitle(row._sourceExcerpt)}
+              title={excerptTitle(row._sourceExcerpt, lang)}
               className={INPUT_CLASS}
             />
             {row.examDate === null ? <TbdBadge /> : null}
@@ -66,10 +70,10 @@ export function ExamDatesForm({
               type="button"
               onClick={() => form.removeRow(index)}
               disabled={form.saving}
-              title="删除这条"
+              title={t('sections.deleteRow')}
               className="shrink-0 text-xs text-muted-foreground hover:text-destructive"
             >
-              删除
+              {t('sections.delete')}
             </button>
           </div>
           <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-3">
@@ -79,20 +83,20 @@ export function ExamDatesForm({
               onChange={(e) =>
                 form.updateRow(index, { examDate: e.target.value === '' ? null : e.target.value })
               }
-              title={row.examDate === null ? '留空 = 待定（TBD）' : undefined}
+              title={row.examDate === null ? t('exams.dateTbdTitle') : undefined}
               className={INPUT_CLASS}
             />
             <input
               value={row.examTime ?? ''}
               onChange={(e) => form.updateRow(index, { examTime: e.target.value || null })}
-              placeholder="时间（可空）"
+              placeholder={t('exams.timePh')}
               maxLength={100}
               className={INPUT_CLASS}
             />
             <input
               value={row.location ?? ''}
               onChange={(e) => form.updateRow(index, { location: e.target.value || null })}
-              placeholder="地点（可空）"
+              placeholder={t('exams.locPh')}
               maxLength={200}
               className={INPUT_CLASS}
             />
@@ -102,7 +106,7 @@ export function ExamDatesForm({
 
       <SectionFooter
         count={form.rows.length}
-        addLabel="添加一场考试"
+        addLabel={t('exams.add')}
         onAdd={form.addRow}
         dirty={form.dirty}
         saving={form.saving}

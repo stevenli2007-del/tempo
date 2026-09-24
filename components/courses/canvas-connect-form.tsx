@@ -2,6 +2,9 @@
 
 import { useState } from 'react'
 
+import { t } from '@/lib/i18n/translate'
+import type { Lang } from '@/lib/i18n/types'
+
 /**
  * 连接 Canvas 的表单（P0-2-4）。
  *
@@ -29,9 +32,12 @@ const INPUT_CLASS =
 const LABEL_CLASS = 'block text-sm font-medium text-foreground'
 
 export function CanvasConnectForm({
+  lang,
   onConnected,
   onCancel,
 }: {
+  /** 界面语言。 */
+  lang: Lang
   /** 凭证保存成功后回调（父组件接着去拉课程列表）。 */
   onConnected: () => void
   onCancel: () => void
@@ -68,7 +74,7 @@ export function CanvasConnectForm({
           typeof body === 'object' && body !== null && 'error' in body
             ? (body as { error?: { message?: unknown } }).error?.message
             : undefined
-        setError(typeof message === 'string' ? message : `连接失败（HTTP ${response.status}）`)
+        setError(typeof message === 'string' ? message : t(lang, 'canvas.connectFailed', { status: response.status }))
         return
       }
 
@@ -76,7 +82,7 @@ export function CanvasConnectForm({
       form.reset()
       onConnected()
     } catch {
-      setError('网络错误，请稍后重试')
+      setError(t(lang, 'common.networkError'))
     } finally {
       setIsPending(false)
     }
@@ -85,15 +91,15 @@ export function CanvasConnectForm({
   return (
     <form onSubmit={handleSubmit} className="space-y-4">
       <ol className="list-decimal space-y-1 pl-5 text-xs text-muted-foreground">
-        <li>打开 bCourses → Account → Settings</li>
-        <li>在 Access Tokens 一栏点「+ New Access Token」，过期时间必填（上限 90 天）</li>
-        <li>生成后立刻复制 token 粘到下面 —— 关掉页面就再也看不到了</li>
+        <li>{t(lang, 'canvas.step1')}</li>
+        <li>{t(lang, 'canvas.step2')}</li>
+        <li>{t(lang, 'canvas.step3')}</li>
       </ol>
 
       <div className="grid gap-4 sm:grid-cols-2">
         <div className="space-y-1.5">
           <label htmlFor="canvasDomain" className={LABEL_CLASS}>
-            Canvas 域名 <span className="text-destructive">*</span>
+            {t(lang, 'canvas.domain')} <span className="text-destructive">*</span>
           </label>
           <input
             id="canvasDomain"
@@ -107,7 +113,7 @@ export function CanvasConnectForm({
 
         <div className="space-y-1.5">
           <label htmlFor="expiresAt" className={LABEL_CLASS}>
-            token 过期时间 <span className="text-destructive">*</span>
+            {t(lang, 'canvas.expiry')} <span className="text-destructive">*</span>
           </label>
           <input
             id="expiresAt"
@@ -129,11 +135,11 @@ export function CanvasConnectForm({
           type="password"
           required
           autoComplete="off"
-          placeholder="粘贴在 bCourses 生成的 token"
+          placeholder={t(lang, 'canvas.tokenPlaceholder')}
           className={INPUT_CLASS}
         />
         <p className="text-xs text-muted-foreground">
-          token 只发给我们自己的服务端并加密存储，不会出现在任何响应里。
+          {t(lang, 'canvas.tokenNote')}
         </p>
       </div>
 
@@ -149,7 +155,7 @@ export function CanvasConnectForm({
           disabled={isPending}
           className="h-9 rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground disabled:opacity-50"
         >
-          {isPending ? '连接中…' : '连接 Canvas'}
+          {isPending ? t(lang, 'canvas.connecting') : t(lang, 'canvas.connect')}
         </button>
         <button
           type="button"
@@ -157,7 +163,7 @@ export function CanvasConnectForm({
           disabled={isPending}
           className="h-9 rounded-md px-3 text-sm text-muted-foreground"
         >
-          取消
+          {t(lang, 'common.cancel')}
         </button>
       </div>
     </form>

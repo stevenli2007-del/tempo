@@ -8,6 +8,7 @@ import { EXAM_SURFACE_CLASS, ExamMark } from '@/components/tasks/exam-mark'
 import { courseColorClasses, courseColorKey } from '@/lib/courses/course-color'
 import { isCanvasDone, isEffectivelyDone, isExamTask } from '@/lib/tasks/progress'
 import { SUBMISSION_BADGE_CLASS, submissionBadge } from '@/lib/tasks/submission'
+import { useI18n, useT } from '@/lib/i18n/use-i18n'
 import type { TaskSource, TaskStatus, TaskSubmissionState, TaskType } from '@/types/task'
 
 /**
@@ -93,6 +94,7 @@ interface TaskRowProps {
  */
 
 function TaskRow({ item, busy, onToggle }: TaskRowProps) {
+  const { t, lang } = useI18n()
   const handDone = item.status === 'done'
   const canvasDone = isCanvasDone(item.submissionState)
   // 🔴 P0-3-15：完成态的判定**必须是 `isEffectivelyDone()`**，不能是 `status === 'done'`。
@@ -141,9 +143,9 @@ function TaskRow({ item, busy, onToggle }: TaskRowProps) {
         aria-label={
           canToggle
             ? handDone
-              ? `将「${item.title}」标记为未完成`
-              : `将「${item.title}」标记为已完成`
-            : `「${item.title}」已由 Canvas 判定完成，无需手动勾选`
+              ? t('task.markUndone', { title: item.title })
+              : t('task.markDone', { title: item.title })
+            : t('task.markCanvasDone', { title: item.title })
         }
         aria-pressed={canToggle ? handDone : undefined}
         className={`mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded border text-xs ${boxClass} ${
@@ -166,7 +168,7 @@ function TaskRow({ item, busy, onToggle }: TaskRowProps) {
               href={item.canvasUrl}
               target="_blank"
               rel="noreferrer"
-              title={`在 Canvas 打开「${item.title}」`}
+              title={t('common.openInCanvas', { title: item.title })}
               className={`truncate text-sm font-medium underline-offset-4 hover:underline ${
                 effectivelyDone ? 'text-muted-foreground line-through' : 'text-foreground'
               }`}
@@ -185,7 +187,7 @@ function TaskRow({ item, busy, onToggle }: TaskRowProps) {
           )}
           <Link
             href={`/courses/${item.courseId}`}
-            title={`查看「${item.courseName}」课程详情`}
+            title={t('common.viewCourseDetail', { course: item.courseName })}
             className={`inline-flex shrink-0 items-center rounded-badge px-1.5 py-0.5 text-xs underline-offset-4 hover:underline ${color.chip}`}
           >
             {/* 课程色（P0-3-33）：从一颗 2.5px 圆点升级成"浅底 + 同色文字"的 chip ——
@@ -206,12 +208,12 @@ function TaskRow({ item, busy, onToggle }: TaskRowProps) {
           {/* 考试标记（P0-3-33）：原先是一段 12px 的灰字「考试」，与"提交态徽标"混在一起
               分不出谁是谁；现在换成带底色边框与图标的徽标，与周历 / 今日任务 / 课程页同一套。
               判据 `isExamTask(item)` = `taskType === 'exam'`，唯一来源见 `lib/tasks/progress.ts`。 */}
-          {isExamTask(item) ? <ExamMark /> : null}
+          {isExamTask(item) ? <ExamMark lang={lang} /> : null}
         </div>
         <p className={`mt-0.5 text-xs ${item.isOverdue ? 'text-destructive' : 'text-muted-foreground'}`}>
-          {item.dueLabel ?? '日期待定'}
+          {item.dueLabel ?? t('common.dateTbd')}
           {/* 「缺交」已由徽标表达，日期行不再重复一遍（P0-3-15）。 */}
-          {item.isOverdue ? '（已逾期）' : ''}
+          {item.isOverdue ? t('common.overdueTag') : ''}
         </p>
       </div>
     </li>
@@ -220,6 +222,7 @@ function TaskRow({ item, busy, onToggle }: TaskRowProps) {
 
 export function TaskList({ items }: TaskListProps) {
   const router = useRouter()
+  const t = useT()
   const [isDoneExpanded, setIsDoneExpanded] = useState(false)
   const [isMoreExpanded, setIsMoreExpanded] = useState(false)
   const [busyId, setBusyId] = useState<string | null>(null)
@@ -257,7 +260,7 @@ export function TaskList({ items }: TaskListProps) {
           typeof body === 'object' && body !== null && 'error' in body
             ? (body as { error?: { message?: unknown } }).error?.message
             : undefined
-        setError(typeof message === 'string' ? message : `操作失败（HTTP ${response.status}）`)
+        setError(typeof message === 'string' ? message : t('common.actionFailed', { status: response.status }))
         return
       }
 
@@ -266,7 +269,7 @@ export function TaskList({ items }: TaskListProps) {
       // 这类静默不一致正是 Tempo 最不能犯的错（CodingRules 7）。
       router.refresh()
     } catch {
-      setError('网络错误，请稍后重试')
+      setError(t('common.networkError'))
     } finally {
       setBusyId(null)
     }
@@ -275,9 +278,7 @@ export function TaskList({ items }: TaskListProps) {
   if (items.length === 0) {
     return (
       <div className="rounded-xl border border-dashed border-border p-8 text-center">
-        <p className="text-sm text-muted-foreground">
-          最近没有要做的事。上传 syllabus 后，Tempo 会把考试日期自动放进这里。
-        </p>
+        <p className="text-sm text-muted-foreground">{t('task.empty')}</p>
       </div>
     )
   }
@@ -309,7 +310,7 @@ export function TaskList({ items }: TaskListProps) {
             className="flex w-full items-center gap-2 px-4 py-2.5 text-left text-sm text-muted-foreground"
           >
             <span className="text-xs">{isMoreExpanded ? '▾' : '▸'}</span>
-            还有 {hiddenPending.length} 条待办
+            {t('task.morePending', { n: hiddenPending.length })}
           </button>
           {isMoreExpanded ? (
             <ul className="space-y-2 px-4 pb-3">
@@ -327,7 +328,7 @@ export function TaskList({ items }: TaskListProps) {
       ) : null}
 
       {pending.length === 0 && done.length > 0 ? (
-        <p className="text-sm text-muted-foreground">这段时间的事都做完了。</p>
+        <p className="text-sm text-muted-foreground">{t('task.allDone')}</p>
       ) : null}
 
       {done.length > 0 ? (
@@ -341,7 +342,7 @@ export function TaskList({ items }: TaskListProps) {
             {/* P0-3-35：取数只带回**最近**已完成的行（历史让位给待办，否则几十条已交作业
                 会把未来任务挤出结果集）。数字的含义随之从"学期累计"变成"近期" ——
                 标签必须写明，否则用户只会看到数字从 49 掉到 12 而不知道为什么。 */}
-            最近已完成 {done.length} 项
+            {t('task.recentDone', { n: done.length })}
           </button>
           {isDoneExpanded ? (
             <ul className="space-y-2 px-4 pb-3">

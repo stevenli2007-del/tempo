@@ -1,4 +1,5 @@
 import type { ApiErrorBody } from '@/types/course'
+import type { Lang } from '@/lib/i18n/types'
 
 /**
  * 从 API 错误响应里取出**可以直接展示给用户**的文案。
@@ -8,7 +9,11 @@ import type { ApiErrorBody } from '@/types/course'
  *
  * 只用于 Client Component 的 fetch 调用。
  */
-export async function readApiErrorMessage(response: Response, action: string): Promise<string> {
+export async function readApiErrorMessage(
+  response: Response,
+  action: string,
+  lang: Lang = 'zh',
+): Promise<string> {
   const body: unknown = await response.json().catch(() => null)
 
   if (typeof body === 'object' && body !== null && 'error' in body) {
@@ -18,5 +23,7 @@ export async function readApiErrorMessage(response: Response, action: string): P
     }
   }
 
-  return `${action}失败（HTTP ${response.status}）`
+  return lang === 'en'
+    ? `${action} failed (HTTP ${response.status})`
+    : `${action}失败（HTTP ${response.status}）`
 }

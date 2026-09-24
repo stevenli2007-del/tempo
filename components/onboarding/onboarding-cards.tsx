@@ -9,12 +9,13 @@ import { Button } from '@/components/ui/button'
 import { FEEDBACK_URL } from '@/lib/constants'
 import { readInternalPath } from '@/lib/internal-path'
 import {
+  getOnboardingSteps,
   ONBOARDING_COOKIE,
   ONBOARDING_COOKIE_MAX_AGE,
-  ONBOARDING_STEPS,
   onboardingCookieValue,
 } from '@/lib/onboarding/content'
 import { readSafeUrl } from '@/lib/safe-url'
+import { useI18n } from '@/lib/i18n/use-i18n'
 import { cn } from '@/lib/utils'
 
 interface OnboardingCardsProps {
@@ -54,6 +55,7 @@ export function OnboardingCards({
   replay,
 }: OnboardingCardsProps) {
   const router = useRouter()
+  const { lang, t } = useI18n()
   const [index, setIndex] = useState(0)
   // 翻页方向只用来决定动画从哪边进来，不影响任何业务判定。
   const [forward, setForward] = useState(true)
@@ -61,8 +63,10 @@ export function OnboardingCards({
 
   if (!initialOpen || dismissed) return null
 
-  const total = ONBOARDING_STEPS.length
-  const step = ONBOARDING_STEPS[index]
+  // P0-5-1：步骤内容按语言取（id / 外链 / 媒体路径与 zh 完全一致，只换文案）。
+  const steps = getOnboardingSteps(lang)
+  const total = steps.length
+  const step = steps[index]
   const media = step.media
   const isLast = index === total - 1
 
@@ -91,7 +95,7 @@ export function OnboardingCards({
 
   return (
     <section
-      aria-label="新手引导"
+      aria-label={t('onboarding.title')}
       data-onboarding="cards"
       className="rounded-card border border-line bg-card p-6 shadow-card"
       onKeyDown={(event) => {
@@ -101,7 +105,7 @@ export function OnboardingCards({
     >
       <div className="flex items-center justify-between gap-4">
         <p className="text-xs font-medium text-ink-muted">
-          新手引导
+          {t('onboarding.title')}
           <span className="ml-2 font-normal text-ink-faint">
             {index + 1} / {total}
           </span>
@@ -112,7 +116,7 @@ export function OnboardingCards({
           className="inline-flex items-center gap-1 rounded-button px-2 py-1 text-xs text-ink-muted transition-colors hover:bg-muted hover:text-ink focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
         >
           <X className="size-3.5" aria-hidden />
-          跳过
+          {t('onboarding.skip')}
         </button>
       </div>
 
@@ -191,7 +195,7 @@ export function OnboardingCards({
                 >
                   {step.external.label}
                   <ExternalLink className="size-3.5" aria-hidden />
-                  <span className="sr-only">（在新标签页打开）</span>
+                  <span className="sr-only">{t('onboarding.srNewTab')}</span>
                 </a>
               ) : null}
 
@@ -200,7 +204,7 @@ export function OnboardingCards({
                   href={internalHref}
                   className="inline-flex h-8 items-center gap-1.5 rounded-button bg-lime px-3 text-sm font-medium text-on-lime transition-colors hover:bg-lime/80 focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
                 >
-                  {connectHref === '/courses' ? '去我的课程' : '打开这门课'}
+                  {connectHref === '/courses' ? t('onboarding.myCourses') : t('onboarding.openCourse')}
                   <ArrowRight className="size-3.5" aria-hidden />
                 </Link>
               ) : null}
@@ -208,14 +212,14 @@ export function OnboardingCards({
 
             {isLast && feedbackHref !== null ? (
               <p className="pt-2 text-xs text-ink-faint">
-                哪一步卡住了？{' '}
+                {t('onboarding.stuck')}{' '}
                 <a
                   href={feedbackHref}
                   target="_blank"
                   rel="noopener noreferrer"
                   className="font-medium text-accent-blue underline-offset-4 hover:underline"
                 >
-                  告诉我们
+                  {t('onboarding.tellUs')}
                 </a>
               </p>
             ) : null}
@@ -226,12 +230,12 @@ export function OnboardingCards({
       <div className="mt-6 flex items-center justify-between gap-4 border-t border-line pt-4">
         {/* 进度点：可点直接跳步（验收标准 ①「点步进入下一张」）。 */}
         <div className="flex items-center gap-1.5">
-          {ONBOARDING_STEPS.map((item, i) => (
+          {steps.map((item, i) => (
             <button
               key={item.id}
               type="button"
               aria-current={i === index ? 'step' : undefined}
-              aria-label={`第 ${i + 1} 步：${item.title}`}
+              aria-label={t('onboarding.stepAria', { n: i + 1, title: item.title })}
               onClick={() => goTo(i)}
               className={cn(
                 'h-1.5 rounded-full transition-all duration-200 focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-ring/50',
@@ -250,15 +254,15 @@ export function OnboardingCards({
             onClick={() => goTo(index - 1)}
           >
             <ArrowLeft aria-hidden />
-            上一步
+            {t('onboarding.prev')}
           </Button>
           {isLast ? (
             <Button type="button" size="sm" onClick={dismiss}>
-              开始使用
+              {t('onboarding.start')}
             </Button>
           ) : (
             <Button type="button" size="sm" onClick={() => goTo(index + 1)}>
-              下一步
+              {t('onboarding.next')}
               <ArrowRight aria-hidden />
             </Button>
           )}

@@ -5,6 +5,7 @@ import { useState } from 'react'
 import Link from 'next/link'
 
 import type { CredentialExpiryView } from '@/lib/sync/expiry'
+import { useT } from '@/lib/i18n/use-i18n'
 
 /**
  * Canvas token 过期提醒横幅（P0-2-8，Sync-Strategy §10「可关闭」）。
@@ -34,6 +35,7 @@ export function TokenExpiryBanner({
   reconnectHref: string | null
 }) {
   const [dismissed, setDismissed] = useState(false)
+  const t = useT()
 
   if (view === null || view.level === 'ok' || dismissed) {
     return null
@@ -54,7 +56,7 @@ export function TokenExpiryBanner({
       <button
         type="button"
         onClick={() => setDismissed(true)}
-        aria-label="关闭提醒"
+        aria-label={t('expiry.dismiss')}
         className="absolute right-2 top-2 inline-flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-background hover:text-foreground"
       >
         ✕
@@ -70,16 +72,12 @@ export function TokenExpiryBanner({
             href={reconnectHref}
             className="inline-flex h-8 items-center rounded-md bg-primary px-3 text-sm font-medium text-primary-foreground"
           >
-            去重新连接 Canvas
+            {t('expiry.reconnect')}
           </Link>
-          <p className="mt-1 text-xs text-muted-foreground">
-            在课程详情页点「更改」即可重新生成并粘贴新的访问令牌。
-          </p>
+          <p className="mt-1 text-xs text-muted-foreground">{t('expiry.reconnectNoteA')}</p>
         </div>
       ) : (
-        <p className="mt-1 text-xs text-muted-foreground">
-          在任意课程详情页的「Canvas 关联」区块重新生成并粘贴新的访问令牌。
-        </p>
+        <p className="mt-1 text-xs text-muted-foreground">{t('expiry.reconnectNoteB')}</p>
       )}
     </div>
   )

@@ -1,3 +1,5 @@
+import { t } from '@/lib/i18n/translate'
+import type { Lang } from '@/lib/i18n/types'
 import type { StoredGradeComponent } from '@/types/sections'
 
 /**
@@ -63,12 +65,10 @@ function sumKnownPercent(components: StoredGradeComponent[]): number {
   )
 }
 
-export function GradePie({ components }: { components: StoredGradeComponent[] }) {
+export function GradePie({ components, lang }: { components: StoredGradeComponent[]; lang: Lang }) {
   if (components.length === 0) {
     return (
-      <p className="text-sm text-muted-foreground">
-        还没有成绩构成。上传 syllabus 后 Tempo 会把「作业 / 期中 / 期末各占多少」解析到这里。
-      </p>
+      <p className="text-sm text-muted-foreground">{t(lang, 'grade.empty')}</p>
     )
   }
 
@@ -78,14 +78,12 @@ export function GradePie({ components }: { components: StoredGradeComponent[] })
   if (knownTotal <= 0) {
     return (
       <div className="space-y-2">
-        <p className="text-sm text-muted-foreground">
-          这份 syllabus 没有写各部分的占比，所以画不出构成图。
-        </p>
+        <p className="text-sm text-muted-foreground">{t(lang, 'grade.noWeights')}</p>
         <ul className="space-y-1">
           {components.map((item) => (
             <li key={item.id} className="text-xs text-ink">
               {item.name}
-              <span className="ml-1.5 text-ink-faint">未标占比</span>
+              <span className="ml-1.5 text-ink-faint">{t(lang, 'grade.unlabeled')}</span>
             </li>
           ))}
         </ul>
@@ -143,10 +141,10 @@ export function GradePie({ components }: { components: StoredGradeComponent[] })
         <svg
           viewBox="0 0 100 100"
           role="img"
-          aria-label={`成绩构成：共 ${slices.length} 项，已标注合计 ${knownTotal}%`}
+          aria-label={t(lang, 'grade.ariaLabel', { n: slices.length, pct: knownTotal })}
           className="h-28 w-28 shrink-0 -rotate-90"
         >
-          <title>成绩构成</title>
+          <title>{t(lang, 'grade.caption')}</title>
           {/* 底环：所有扇区都画在同一圈线上，先铺一层浅底，缺角处才有东西可看。 */}
           <circle cx="50" cy="50" r="40" fill="none" stroke="var(--line)" strokeWidth="14" />
           {arcs}
@@ -177,7 +175,7 @@ export function GradePie({ components }: { components: StoredGradeComponent[] })
                 {slice.name}
               </span>
               <span className="shrink-0 tabular-nums text-ink-muted">
-                {slice.percent === null ? '未标占比' : `${slice.percent}%`}
+                {slice.percent === null ? t(lang, 'grade.unlabeled') : `${slice.percent}%`}
               </span>
             </li>
           ))}
@@ -188,7 +186,7 @@ export function GradePie({ components }: { components: StoredGradeComponent[] })
                 style={{ backgroundColor: 'var(--surface2)' }}
                 aria-hidden
               />
-              <span className="min-w-0 flex-1 truncate text-ink-muted">未标注</span>
+              <span className="min-w-0 flex-1 truncate text-ink-muted">{t(lang, 'grade.unlabeledSlice')}</span>
               <span className="shrink-0 tabular-nums text-ink-faint">{unlabeled}%</span>
             </li>
           ) : null}
@@ -197,16 +195,13 @@ export function GradePie({ components }: { components: StoredGradeComponent[] })
 
       {knownTotal !== 100 ? (
         <p className="text-xs text-ink-faint">
-          已标注合计 {knownTotal}%
           {knownTotal < 100
-            ? ' —— syllabus 里没写全的部分留在灰色扇区，不替它摊到其他项上。'
-            : ' —— 超过 100%（原文如此），扇区按 100% 归一显示。'}
+            ? t(lang, 'grade.notFull', { n: knownTotal })
+            : t(lang, 'grade.over100', { n: knownTotal })}
         </p>
       ) : null}
 
-      <p className="text-xs text-ink-faint">
-        这是 syllabus 里写的构成比。要改数字去下方「课程板块 → 成绩构成」。
-      </p>
+      <p className="text-xs text-ink-faint">{t(lang, 'grade.note')}</p>
     </div>
   )
 }

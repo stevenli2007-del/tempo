@@ -31,6 +31,8 @@
  * 勾选框 = **谁判定完成的**（`isCanvasDone()` 为真时不可点，避免点了没反应的静默失败）。
  * 两者一起看，用户才能一眼分清「我勾的」和「Canvas 替我确认的」。
  */
+import { t } from '@/lib/i18n/translate'
+import type { Lang } from '@/lib/i18n/types'
 import { needsManualConfirmation } from '@/lib/tasks/progress'
 import type { Task } from '@/types/task'
 
@@ -56,32 +58,33 @@ export interface SubmissionBadge {
  */
 export function submissionBadge(
   task: Pick<Task, 'source' | 'submissionState'>,
+  lang: Lang = 'zh',
 ): SubmissionBadge | null {
   switch (task.submissionState) {
     case 'unsubmitted':
-      return { label: '未提交', tone: 'warning', title: 'Canvas 记录尚未提交' }
+      return { label: t(lang, 'submission.unsubmitted.label'), tone: 'warning', title: t(lang, 'submission.unsubmitted.title') }
     case 'missing':
-      return { label: '缺交', tone: 'danger', title: 'Canvas 已标记为缺交（逾期且未交）' }
+      return { label: t(lang, 'submission.missing.label'), tone: 'danger', title: t(lang, 'submission.missing.title') }
     case 'submitted':
-      return { label: '已提交', tone: 'positive', title: 'Canvas 已收到提交，尚未评分' }
+      return { label: t(lang, 'submission.submitted.label'), tone: 'positive', title: t(lang, 'submission.submitted.title') }
     case 'pending_review':
-      return { label: '待查重', tone: 'positive', title: 'Canvas 已收到提交，正在查重' }
+      return { label: t(lang, 'submission.pending_review.label'), tone: 'positive', title: t(lang, 'submission.pending_review.title') }
     case 'graded':
-      return { label: '已评分', tone: 'positive', title: 'Canvas 已评分' }
+      return { label: t(lang, 'submission.graded.label'), tone: 'positive', title: t(lang, 'submission.graded.title') }
     case 'external_unconfirmed':
       return {
-        label: '待确认',
+        label: t(lang, 'submission.external_unconfirmed.label'),
         tone: 'neutral',
-        title: '外部平台（如 Gradescope）提交的，Canvas 没有可信记录',
+        title: t(lang, 'submission.external_unconfirmed.title'),
       }
     case null:
       // 只有 **Canvas 来源** 的 null 才标（P0-3-17）：那是 Canvas 明说"我不追踪完成态"，
       // 与"考试派生 / 用户自建任务"的 null 不是一回事（后者干脆不标，见文件头）。
       return needsManualConfirmation(task)
         ? {
-            label: '需手动确认',
+            label: t(lang, 'submission.manual.label'),
             tone: 'neutral',
-            title: 'Canvas 不追踪这类作业的完成状态，需要你自己确认是否已完成',
+            title: t(lang, 'submission.manual.title'),
           }
         : null
   }

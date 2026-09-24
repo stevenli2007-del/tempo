@@ -1,3 +1,5 @@
+import { t } from '@/lib/i18n/translate'
+import type { Lang } from '@/lib/i18n/types'
 import type { Syllabus } from '@/types/syllabus'
 
 /**
@@ -9,20 +11,20 @@ import type { Syllabus } from '@/types/syllabus'
  * extract 与 parse 是两件事、会分别失败，所以文案必须分层表达：
  * 「已上传 / 已提取 / 已解析」是三个不同的进度点。
  */
-export function syllabusStatusText(syllabus: Syllabus | null): string {
-  if (!syllabus) return '还没有 syllabus'
-  if (syllabus.extractStatus === 'pending') return '已上传，等待文本提取'
+export function syllabusStatusText(syllabus: Syllabus | null, lang: Lang = 'zh'): string {
+  if (!syllabus) return t(lang, 'syllabus.none')
+  if (syllabus.extractStatus === 'pending') return t(lang, 'syllabus.uploadedWaitingExtract')
   if (syllabus.extractStatus === 'failed') {
-    return syllabus.extractError ?? '文本提取失败，可手动补充'
+    return syllabus.extractError ?? t(lang, 'syllabus.extractFailed')
   }
   switch (syllabus.parseStatus) {
     case 'completed':
-      return '已解析完成'
+      return t(lang, 'syllabus.parsed')
     case 'processing':
-      return '解析中…'
+      return t(lang, 'syllabus.processing')
     case 'failed':
-      return syllabus.parseError ?? '解析失败，可重试或手动补充'
+      return syllabus.parseError ?? t(lang, 'syllabus.parseFailed')
     default:
-      return '已提取文本，等待解析'
+      return t(lang, 'syllabus.extractedWaitingParse')
   }
 }

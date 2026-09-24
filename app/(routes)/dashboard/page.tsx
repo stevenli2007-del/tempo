@@ -25,9 +25,12 @@ import {
   buildUpcomingExams,
   buildWeekCalendar,
   canBeOverdue,
+  EXAM_LOOKAHEAD,
 } from '@/lib/tasks/progress'
 import { createClient } from '@/lib/supabase/server'
 import { hasSeenOnboarding, ONBOARDING_COOKIE } from '@/lib/onboarding/content'
+import { getLang } from '@/lib/i18n/server'
+import { t } from '@/lib/i18n/translate'
 import {
   recordUsageEvent,
   recordUsageEventOncePerUtcDay,
@@ -39,8 +42,9 @@ import {
 import { addDays, dayKeyToUtcDate, schoolDayKey } from '@/lib/time'
 import type { Task } from '@/types/task'
 
-export const metadata = {
-  title: '课程面板 · Tempo',
+export async function generateMetadata() {
+  const lang = await getLang()
+  return { title: t(lang, 'dashboard.meta') }
 }
 
 /** 总览页任务窗口（天）。与 `GET /api/v1/tasks` 的默认 range 一致。 */
@@ -93,9 +97,9 @@ const EXAM_POOL = 50
 // P0-3-7b 把课程卡整体搬去 `/courses`，但"日期口径"与"是否算完成"两个页面必须一致 ——
 // 各留一份副本，迟早出现"同一条任务在两个页面显示不同日期"。**改那两处 = 两个页面同时改。**
 
-function toListItems(tasks: Task[], now: Date): TaskListItem[] {
+function toListItems(tasks: Task[], now: Date, lang: 'zh' | 'en'): TaskListItem[] {
   return tasks.map((task) => {
-    const { label, isOverdue } = formatDue(task.dueDate, now)
+    const { label, isOverdue } = formatDue(task.dueDate, now, lang)
     return {
       id: task.id,
       courseId: task.courseId,
@@ -138,6 +142,7 @@ export default async function DashboardPage({
   searchParams: Promise<Record<string, string | string[] | undefined>>
 }) {
   const supabase = await createClient()
+  const lang = await getLang()
   const {
     data: { user },
   } = await supabase.auth.getUser()
@@ -181,7 +186,7 @@ export default async function DashboardPage({
   // 查询失败必须让用户看见，不能因为 error 分支返回空数组就渲染成"还没有课程"。
   // 静默的旧数据/空数据比明确的错误更危险（CodingRules 7、PRD F4 失败可见性）。
   const courses = data ? (data as CourseRow[]).map(toCourse) : []
-  const email = user.email ?? '（未设置邮箱）'
+  const email = user.email ?? t(lang, 'dashboard.emailMissing')
   /** 是否已有示例课程（决定展示「先看看效果」入口还是「清空示例数据」）。 */
   const hasDemo = courses.some((course) => course.isDemo)
   /**
@@ -221,7 +226,7 @@ export default async function DashboardPage({
   const expiryView =
     credential === null
       ? null
-      : toCredentialExpiryView(credential.expiresAt, credential.status, now)
+      : toCredentialExpiryView(credential.expiresAt, credential.status, now, lang)
 
   // 埋点：过期横幅**真的展示给了用户**（P0-3-1 —— token 续期完成率的分母）。
   // 条件是横幅会出现（`level !== 'ok'`），而不是"用户点进了重连页" ——
@@ -269,9 +274,9 @@ export default async function DashboardPage({
   // 老师常在 Canvas 里建「Unit 1 Exam」这种**不填截止日的空壳作业**，
   // 不过滤的话同一场考试在页面上是两条（P0-3-36）。
   const visibleTasks = dropCanvasExamPlaceholders(overview.tasks)
-  const today = buildTodayTasks(visibleTasks, now, OVERVIEW_RANGE_DAYS)
-  const calendar = buildWeekCalendar(visibleTasks, now)
-  const exams = buildUpcomingExams(examPool.tasks, now)
+  const today = buildTodayTasks(visibleTasks, now, OVERVIEW_RANGE_DAYS, lang)
+  const calendar = buildWeekCalendar(visibleTasks, now, lang)
+  const exams = buildUpcomingExams(examPool.tasks, now, EXAM_LOOKAHEAD, lang)
 
   // 同步状态视图：只算**已关联 Canvas** 的课（未关联的课没有"同步"这回事）。
   const syncViews = courses
@@ -280,13 +285,13 @@ export default async function DashboardPage({
   const syncOverview = summarizeSyncStatus(syncViews, now)
 
   return (
-    <AppShell title="课程面板">
+    <AppShell title={t(lang, 'nav.dashboard')}>
       <div className="mx-auto max-w-[1100px] space-y-8">
         <div className="flex items-start justify-between gap-4">
           <div>
-            <h1 className="text-2xl font-semibold tracking-tight">接下来</h1>
+            <h1 className="text-2xl font-semibold tracking-tight">{t(lang, 'dashboard.heading')}</h1>
             <p className="mt-2 text-sm text-ink-muted">
-              最近的作业与考试。已经过你截止日的单独收在最上面。
+              {t(lang, 'dashboard.subtitle')}
             </p>
           </div>
           <SyncControls hasCanvasLink={hasCanvasLink} />
@@ -297,39 +302,39 @@ export default async function DashboardPage({
           {hasDemo ? <DemoControls hasDemo={hasDemo} variant="inline" /> : null}
           <form action={signOut}>
             <Button type="submit" variant="outline" size="sm">
-              登出
+              {t(lang, 'common.signOut')}
             </Button>
           </form>
         </div>
 
         {error ? (
           <div role="alert" className="rounded-lg border border-destructive/40 bg-card p-4">
-            <p className="text-sm font-medium text-destructive">课程列表加载失败</p>
+            <p className="text-sm font-medium text-destructive">{t(lang, 'courses.loadFailed')}</p>
             <p className="mt-1 text-sm text-muted-foreground">{error.message}</p>
           </div>
         ) : null}
 
         {tasksError ? (
           <div role="alert" className="rounded-lg border border-destructive/40 bg-card p-4">
-            <p className="text-sm font-medium text-destructive">任务列表加载失败</p>
+            <p className="text-sm font-medium text-destructive">{t(lang, 'courses.tasksLoadFailed')}</p>
             <p className="mt-1 text-sm text-muted-foreground">
-              下面的日历与待办清单可能不完整。{tasksError}
+              {t(lang, 'dashboard.tasksLoadFailedHint', { error: tasksError })}
             </p>
           </div>
         ) : null}
 
         {credentialError ? (
           <div role="alert" className="rounded-lg border border-destructive/40 bg-card p-4">
-            <p className="text-sm font-medium text-destructive">Canvas 连接状态加载失败</p>
+            <p className="text-sm font-medium text-destructive">{t(lang, 'courses.canvasLoadFailed')}</p>
             <p className="mt-1 text-sm text-muted-foreground">
-              同步状态可能不准（失败原因会按「暂时性故障」处理）。{credentialError}
+              {t(lang, 'dashboard.canvasLoadFailedHint', { error: credentialError })}
             </p>
           </div>
         ) : null}
 
         <TokenExpiryBanner view={expiryView} reconnectHref={reconnectHref} />
 
-        <SyncStatusBar overview={syncOverview} now={now} />
+        <SyncStatusBar overview={syncOverview} now={now} lang={lang} />
 
         {/* 新手引导（P0-3-32）。**内联**在页面流里，不是覆盖层 —— 空态下紧跟着的
             就是 Demo Workspace 的「✨ 先看看效果」，两者同屏可见，谁也不挤掉谁（卡面约束 ③）。
@@ -349,21 +354,21 @@ export default async function DashboardPage({
             而不是显示成"今天没有任务"（一个空的卡会被读成"今天没事"，正是静默的错误数据，
             CodingRules 7；上方已有一条「任务列表加载失败」的横幅说明原因）。 */}
         {!error && courses.length > 0 && !tasksError ? (
-          <TodayTasks model={today} />
+          <TodayTasks model={today} lang={lang} />
         ) : null}
 
         {!error && courses.length > 0 ? (
           <section className="space-y-3">
             <div className="flex items-baseline justify-between gap-4">
-              <h2 className="text-lg font-semibold">接下来 7 天</h2>
-              <p className="text-xs text-muted-foreground">作业与考试混排 · 点一条跳到课程</p>
+              <h2 className="text-lg font-semibold">{t(lang, 'dashboard.weekHeading')}</h2>
+              <p className="text-xs text-muted-foreground">{t(lang, 'dashboard.weekNote')}</p>
             </div>
-            <WeekCalendar model={calendar} exams={exams} />
+            <WeekCalendar model={calendar} exams={exams} lang={lang} />
             {/* 考试查询失败时**明说** —— 否则日历会静静地少一条「最近的考试」，
                 用户只会以为"我最近没考试"（CodingRules 7：空数据比错误数据更危险）。 */}
             {examPool.error ? (
               <p role="alert" className="text-xs text-destructive">
-                「最近的考试」加载失败，考试信息可能不完整：{examPool.error}
+                {t(lang, 'dashboard.examsLoadFailed', { error: examPool.error })}
               </p>
             ) : null}
             {overview.total > overview.tasks.length ? (
@@ -371,8 +376,7 @@ export default async function DashboardPage({
               // 既不在日历里、也不在清单里（清单用的就是同一批取回的数据），
               // 那句话会让用户以为没丢。窗口内共多少条、用了多少条，两个数都给出来。
               <p className="text-xs text-ink-faint">
-                窗口内共 {overview.total} 条，页面用的是取回的前 {overview.tasks.length} 条
-                （已排除更早的已完成项）。
+                {t(lang, 'dashboard.windowNote', { total: overview.total, n: overview.tasks.length })}
               </p>
             ) : null}
           </section>
@@ -381,13 +385,15 @@ export default async function DashboardPage({
         {!error && courses.length > 0 ? (
           <section className="space-y-3">
             <div className="flex items-baseline justify-between gap-4">
-              <h2 className="text-lg font-semibold">待办清单</h2>
+              <h2 className="text-lg font-semibold">{t(lang, 'dashboard.todoHeading')}</h2>
               <p className="text-xs text-muted-foreground">
-                {OVERVIEW_RANGE_DAYS} 天内到期 · 已逾期的都在里面 · 已完成只留最近{' '}
-                {OVERVIEW_HISTORY_DAYS} 天 · 勾完成在这里
+                {t(lang, 'dashboard.todoNote', {
+                  days: OVERVIEW_RANGE_DAYS,
+                  history: OVERVIEW_HISTORY_DAYS,
+                })}
               </p>
             </div>
-            <TaskList items={toListItems(visibleTasks, now)} />
+            <TaskList items={toListItems(visibleTasks, now, lang)} />
           </section>
         ) : null}
 

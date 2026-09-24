@@ -1,4 +1,6 @@
 import type { SyncSummary } from '@/types/sync'
+import type { Lang } from '@/lib/i18n/types'
+import { t } from '@/lib/i18n/translate'
 
 /**
  * 浏览器端调 `POST /api/v1/sync/now` 的**唯一**封装。
@@ -43,7 +45,10 @@ function toSyncSummary(body: unknown): SyncSummary | null {
   return body as SyncSummary
 }
 
-export async function callSyncNow(trigger: 'manual' | 'app_open'): Promise<SyncCallResult> {
+export async function callSyncNow(
+  trigger: 'manual' | 'app_open',
+  lang: Lang = 'zh',
+): Promise<SyncCallResult> {
   let res: Response
   try {
     res = await fetch('/api/v1/sync/now', {
@@ -52,7 +57,7 @@ export async function callSyncNow(trigger: 'manual' | 'app_open'): Promise<SyncC
       body: JSON.stringify({ trigger }),
     })
   } catch {
-    return { ok: false, status: 0, message: '网络错误，请稍后重试' }
+    return { ok: false, status: 0, message: t(lang, 'sync.networkError') }
   }
 
   const body: unknown = await res.json().catch(() => null)
@@ -61,13 +66,13 @@ export async function callSyncNow(trigger: 'manual' | 'app_open'): Promise<SyncC
     if (summary) {
       return { ok: true, summary }
     }
-    return { ok: false, status: res.status, message: '同步完成，但响应格式异常' }
+    return { ok: false, status: res.status, message: t(lang, 'sync.responseMalformed') }
   }
 
   return {
     ok: false,
     status: res.status,
-    message: extractErrorMessage(body, `同步失败（HTTP ${res.status}）`),
+    message: extractErrorMessage(body, t(lang, 'sync.failedHttp', { status: res.status })),
   }
 }
 
@@ -83,15 +88,15 @@ export async function callSyncNow(trigger: 'manual' | 'app_open'): Promise<SyncC
  * 40 条通知类公告只产出 1 条摘要消息。只说 `created` 会让用户以为"只收到 1 条公告"，
  * 所以有摘要时把折进去的条数一并说出来。
  */
-function announcementLine(summary: SyncSummary): string {
+function announcementLine(summary: SyncSummary, lang: Lang): string {
   const a = summary.announcements
   if (!a) return ''
-  if (a.error) return `；公告同步失败（${a.error}）`
+  if (a.error) return t(lang, 'sync.announcementFailed', { err: a.error })
   if (a.created === 0) return ''
   if (a.digested > 0) {
-    return `；${a.created} 条进消息栏（${a.digested} 条通知类公告已并入摘要）`
+    return t(lang, 'sync.announcementsCreated', { n: a.created, digested: a.digested })
   }
-  return `；${a.created} 条新公告进了消息栏`
+  return t(lang, 'sync.announcementsPlain', { n: a.created })
 }
 
 /**
@@ -102,28 +107,33 @@ function announcementLine(summary: SyncSummary): string {
  * 「跳过」是本功能的常态结果，说出来只会让用户以为出事了。
  * 只有 `error`（端点真的挂了 / 写库失败）才需要让人看见（ADR-016 R3 防静默失败）。
  */
-function filesLine(summary: SyncSummary): string {
+function filesLine(summary: SyncSummary, lang: Lang): string {
   const f = summary.files
   if (!f) return ''
-  if (f.error) return `；资料索引失败（${f.error}）`
+  if (f.error) return t(lang, 'sync.filesFailed', { err: f.error })
   return ''
 }
 
 /** 把一次成功的同步结果压成一行人话。 */
-export function summarize(summary: SyncSummary): string {
+export function summarize(summary: SyncSummary, lang: Lang = 'zh'): string {
   if (summary.coursesSynced === 0 && summary.coursesFailed === 0) {
-    return '没有已关联 Canvas 的课程，本次未同步'
+    return t(lang, 'sync.noCourses')
   }
+  const joiner = lang === 'zh' ? '，' : ', '
   const changes: string[] = []
-  if (summary.tasksCreated > 0) changes.push(`新增 ${summary.tasksCreated}`)
-  if (summary.tasksUpdated > 0) changes.push(`更新 ${summary.tasksUpdated}`)
-  if (summary.tasksDeleted > 0) changes.push(`移除 ${summary.tasksDeleted}`)
-  const changeLine = changes.length > 0 ? changes.join('，') : '没有新变化'
+  if (summary.tasksCreated > 0) changes.push(t(lang, 'sync.changeAdded', { n: summary.tasksCreated }))
+  if (summary.tasksUpdated > 0) changes.push(t(lang, 'sync.changeUpdated', { n: summary.tasksUpdated }))
+  if (summary.tasksDeleted > 0) changes.push(t(lang, 'sync.changeRemoved', { n: summary.tasksDeleted }))
+  const changeLine = changes.length > 0 ? changes.join(joiner) : t(lang, 'sync.noChanges')
   const failureLine =
     summary.failures.length > 0
-      ? `；${summary.failures.length} 门失败（${summary.failures[0].courseName}：${summary.failures[0].message}）`
+      ? t(lang, 'sync.failures', {
+          n: summary.failures.length,
+          course: summary.failures[0].courseName,
+          msg: summary.failures[0].message,
+        })
       : ''
-  return `已同步 ${summary.coursesSynced} 门课，${changeLine}${failureLine}${announcementLine(summary)}${filesLine(summary)}${driftLine(summary)}`
+  return `${t(lang, 'sync.summaryPrefix', { n: summary.coursesSynced })}${changeLine}${failureLine}${announcementLine(summary, lang)}${filesLine(summary, lang)}${driftLine(summary, lang)}`
 }
 
 /**
@@ -140,10 +150,10 @@ export function summarize(summary: SyncSummary): string {
  * 首次核对 6~13 门课全在 `baselined` 里，报出来就是"13 门课有更新"的假警 ——
  * 与 `announcementLine` 只认 `created`、`filesLine` 只认 `error` 是同一种克制。
  */
-function driftLine(summary: SyncSummary): string {
+function driftLine(summary: SyncSummary, lang: Lang): string {
   const d = summary.drift
   if (!d) return ''
-  if (d.error) return `；大纲漂移检测失败（${d.error}）`
-  if (d.proposed > 0) return `；${d.proposed} 门课的大纲文件有更新，已进消息栏`
+  if (d.error) return t(lang, 'sync.driftFailed', { err: d.error })
+  if (d.proposed > 0) return t(lang, 'sync.driftProposed', { n: d.proposed })
   return ''
 }

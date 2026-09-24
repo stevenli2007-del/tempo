@@ -4,6 +4,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 
 import { readApiErrorMessage } from '@/lib/api/client-error'
+import { t } from '@/lib/i18n/translate'
+import { useI18n, useT } from '@/lib/i18n/use-i18n'
 
 /**
  * 五个板块编辑表单的共用件（P0-1-6）。
@@ -34,9 +36,10 @@ export const INPUT_CLASS =
 
 /** 「手动添加」小标记：source='manual' 的行能被一眼认出来（开工提示要求）。 */
 export function ManualBadge() {
+  const t = useT()
   return (
     <span className="inline-flex shrink-0 items-center rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
-      手动
+      {t('sections.manual')}
     </span>
   )
 }
@@ -51,8 +54,11 @@ export function TbdBadge() {
 }
 
 /** 原文摘录提示。`sourceExcerpt` 是抗幻觉的核心手段，编辑时要能核对依据。 */
-export function excerptTitle(excerpt: string | null | undefined): string | undefined {
-  return excerpt ? `原文摘录：${excerpt}` : undefined
+export function excerptTitle(
+  excerpt: string | null | undefined,
+  lang: 'zh' | 'en' = 'zh',
+): string | undefined {
+  return excerpt ? t(lang, 'sections.excerptTitle', { excerpt }) : undefined
 }
 
 export interface UseSectionFormOptions<TStored, TDraft extends { id?: string } & RowMeta> {
@@ -97,6 +103,8 @@ export function useSectionForm<TStored, TDraft extends { id?: string } & RowMeta
 ): SectionFormState<TDraft> {
   const { endpoint, initial, toDraft, blank } = options
   const router = useRouter()
+  const t = useT()
+  const { lang } = useI18n()
 
   const initialDrafts = useMemo(() => initial.map(toDraft), [initial, toDraft])
   const [rows, setRows] = useState<TDraft[]>(initialDrafts)
@@ -152,7 +160,7 @@ export function useSectionForm<TStored, TDraft extends { id?: string } & RowMeta
         body: JSON.stringify({ items: stripRowMeta(rows as Array<Record<string, unknown>>) }),
       })
       if (!response.ok) {
-        setError(await readApiErrorMessage(response, '保存'))
+        setError(await readApiErrorMessage(response, t('action.save'), lang))
         return
       }
       const body = (await response.json()) as { data: TStored[] }
@@ -168,11 +176,11 @@ export function useSectionForm<TStored, TDraft extends { id?: string } & RowMeta
       // 让 dashboard 的服务端数据（派生 task 等）跟上。
       router.refresh()
     } catch {
-      setError('网络错误，请稍后重试')
+      setError(t('common.networkError'))
     } finally {
       setSaving(false)
     }
-  }, [endpoint, rows, toDraft, router])
+  }, [endpoint, rows, toDraft, router, lang, t])
 
   useEffect(() => {
     return () => {
@@ -207,6 +215,7 @@ export function SectionFooter({
   onSave: () => void
   onReset: () => void
 }) {
+  const t = useT()
   return (
     <div className="space-y-2">
       {error ? (
@@ -217,12 +226,12 @@ export function SectionFooter({
 
       <div className="flex items-center justify-between gap-2">
         <span className="text-xs text-muted-foreground">
-          {count === 0 ? '这个板块还没有条目' : `共 ${count} 条`}
+          {count === 0 ? t('sections.noEntries') : t('sections.count', { n: count })}
         </span>
         <div className="flex items-center gap-2">
           {justSaved ? (
             <span role="status" className="text-xs text-muted-foreground">
-              已保存
+              {t('sections.saved')}
             </span>
           ) : null}
           {dirty ? (
@@ -232,7 +241,7 @@ export function SectionFooter({
               disabled={saving}
               className="text-xs text-muted-foreground underline-offset-2 hover:underline"
             >
-              放弃更改
+              {t('sections.discard')}
             </button>
           ) : null}
           <button
@@ -249,7 +258,7 @@ export function SectionFooter({
             disabled={!dirty || saving}
             className="h-8 rounded-md bg-primary px-3 text-xs font-medium text-primary-foreground disabled:opacity-50"
           >
-            {saving ? '保存中…' : '保存'}
+            {saving ? t('sections.saving') : t('sections.save')}
           </button>
         </div>
       </div>

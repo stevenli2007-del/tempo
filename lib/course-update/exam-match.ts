@@ -23,7 +23,12 @@
  * 要让用户在点确认**之前**看到 9/28 → 9/27）；③ 对话框的预览（客户端）。
  * 三处各写一遍就会变成 P0-3-15 那种"两处都绿、肉眼才看得出"的分叉。
  * 而且它是纯的 —— `scripts/regress-course-updates.ts` 可以直接断言，无需数据库。
+ *
+ * 注：本文件原为「零 import」；i18n 只引入了同仓的纯函数字典（无第三方包），
+ * 不破坏「零外部依赖」的约束。
  */
+import { t } from '@/lib/i18n/translate'
+import type { Lang } from '@/lib/i18n/types'
 
 /** 一条待写入的考试（只要匹配用得到的那几个字段）。 */
 export type ExamMatchInput = {
@@ -308,10 +313,11 @@ export function examScheduleLabel(input: {
   examDate: string | null
   examTime?: string | null
   location?: string | null
+  lang?: Lang
 }): string {
   const bits: string[] = []
   if (input.examName) bits.push(input.examName)
-  bits.push(input.examDate ?? '日期待定')
+  bits.push(input.examDate ?? t(input.lang ?? 'zh', 'exam.tbd'))
   if (input.examTime) bits.push(input.examTime)
   if (input.location) bits.push(input.location)
   return bits.join(' · ')

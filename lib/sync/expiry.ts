@@ -19,6 +19,9 @@
  * ⚠️ 只做纯计算，`now` 由调用方传入（服务端算好），不在内部 `new Date()`。
  */
 
+import type { Lang } from '@/lib/i18n/types'
+import { t } from '@/lib/i18n/translate'
+
 /** 提前提醒窗口（天）。§10：T-14 / T-7 / T-3 / T-1 / 当天。落到这里 = 14 天内都开始提示。 */
 export const EXPIRY_WARNING_WINDOW_DAYS = 14
 
@@ -41,10 +44,10 @@ export type CredentialExpiryView = {
 }
 
 /** 过期日期按 UTC 渲染（与 `status.ts` 的 `formatSyncTime` 同款取舍，防 hydration mismatch）。 */
-function formatExpiryDate(iso: string): string {
+function formatExpiryDate(iso: string, lang: Lang): string {
   const date = new Date(iso)
-  if (Number.isNaN(date.getTime())) return '时间未知'
-  return `${date.getUTCMonth() + 1}月${date.getUTCDate()}日`
+  if (Number.isNaN(date.getTime())) return t(lang, 'sync.timeUnknown')
+  return t(lang, 'expiry.date', { month: date.getUTCMonth() + 1, day: date.getUTCDate() })
 }
 
 /**
@@ -58,6 +61,7 @@ export function toCredentialExpiryView(
   expiresAt: string | null,
   status: string,
   now: Date,
+  lang: Lang = 'zh',
 ): CredentialExpiryView | null {
   // 两种"不该由本横幅提示"的状态：
   //
@@ -89,7 +93,7 @@ export function toCredentialExpiryView(
     return {
       level: 'expired',
       daysLeft,
-      message: `Canvas 访问令牌已于 ${formatExpiryDate(expiresAt)} 过期，请重新连接以继续同步`,
+      message: t(lang, 'expiry.expired', { date: formatExpiryDate(expiresAt, lang) }),
       action: 'reconnect',
     }
   }
@@ -99,7 +103,7 @@ export function toCredentialExpiryView(
     return {
       level: 'warning',
       daysLeft,
-      message: 'Canvas 访问令牌今天过期，请尽快重新连接',
+      message: t(lang, 'expiry.today'),
       action: 'reconnect',
     }
   }
@@ -109,7 +113,10 @@ export function toCredentialExpiryView(
     return {
       level: 'warning',
       daysLeft,
-      message: `Canvas 访问令牌将在 ${daysLeft} 天后过期（${formatExpiryDate(expiresAt)}），记得在 bCourses 重新生成`,
+      message: t(lang, 'expiry.soon', {
+        days: daysLeft,
+        date: formatExpiryDate(expiresAt, lang),
+      }),
       action: 'reconnect',
     }
   }

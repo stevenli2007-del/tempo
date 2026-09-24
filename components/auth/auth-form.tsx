@@ -4,6 +4,7 @@ import Link from 'next/link'
 import { useActionState } from 'react'
 
 import { Button } from '@/components/ui/button'
+import { useT } from '@/lib/i18n/use-i18n'
 import { signIn, signUp } from '@/lib/auth/actions'
 import type { AuthFormState } from '@/types/auth'
 
@@ -23,10 +24,11 @@ export function AuthForm({ mode, initialMessage = null }: AuthFormProps) {
     isSignUp ? signUp : signIn,
     { error: null, message: initialMessage },
   )
+  const t = useT()
 
-  const title = isSignUp ? '创建账号' : '登录 Tempo'
-  const subtitle = isSignUp ? '只要邮箱和密码，30 秒搞定' : '欢迎回来'
-  const submitLabel = isSignUp ? '注册' : '登录'
+  const title = isSignUp ? t('auth.signupTitle') : t('auth.loginTitle')
+  const subtitle = isSignUp ? t('auth.signupSubtitle') : t('auth.loginSubtitle')
+  const submitLabel = isSignUp ? t('auth.submitSignup') : t('auth.submitLogin')
 
   return (
     <div className="w-full max-w-sm rounded-xl border border-border bg-card p-6 shadow-sm">
@@ -38,7 +40,7 @@ export function AuthForm({ mode, initialMessage = null }: AuthFormProps) {
       <form action={formAction} className="space-y-4">
         <div className="space-y-1.5">
           <label htmlFor="email" className="block text-sm font-medium text-foreground">
-            邮箱
+            {t('auth.email')}
           </label>
           <input
             id="email"
@@ -46,14 +48,14 @@ export function AuthForm({ mode, initialMessage = null }: AuthFormProps) {
             type="email"
             required
             autoComplete="email"
-            placeholder="you@berkeley.edu"
+            placeholder={t('auth.emailPlaceholder')}
             className={INPUT_CLASS}
           />
         </div>
 
         <div className="space-y-1.5">
           <label htmlFor="password" className="block text-sm font-medium text-foreground">
-            密码
+            {t('auth.password')}
           </label>
           <input
             id="password"
@@ -62,7 +64,7 @@ export function AuthForm({ mode, initialMessage = null }: AuthFormProps) {
             required
             minLength={6}
             autoComplete={isSignUp ? 'new-password' : 'current-password'}
-            placeholder="至少 6 位"
+            placeholder={t('auth.passwordPlaceholder')}
             className={INPUT_CLASS}
           />
         </div>
@@ -80,17 +82,17 @@ export function AuthForm({ mode, initialMessage = null }: AuthFormProps) {
         ) : null}
 
         <Button type="submit" disabled={isPending} className="h-9 w-full">
-          {isPending ? '处理中…' : submitLabel}
+          {isPending ? t('auth.processing') : submitLabel}
         </Button>
       </form>
 
       <p className="mt-6 text-center text-sm text-muted-foreground">
-        {isSignUp ? '已经有账号了？' : '还没有账号？'}{' '}
+        {isSignUp ? t('auth.hasAccount') : t('auth.noAccount')}{' '}
         <Link
           href={isSignUp ? '/login' : '/signup'}
           className="font-medium text-foreground underline-offset-4 hover:underline"
         >
-          {isSignUp ? '去登录' : '去注册'}
+          {isSignUp ? t('auth.goLogin') : t('auth.goSignup')}
         </Link>
       </p>
     </div>

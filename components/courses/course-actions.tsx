@@ -4,6 +4,8 @@ import { useRouter } from 'next/navigation'
 import { useState } from 'react'
 
 import { CourseForm } from '@/components/courses/course-form'
+import { t } from '@/lib/i18n/translate'
+import type { Lang } from '@/lib/i18n/types'
 import type { Course } from '@/types/course'
 
 /**
@@ -12,7 +14,7 @@ import type { Course } from '@/types/course'
  * P0-1-8 搬过来的（原本在卡片里）。删除后**跳回总览** ——
  * 留在详情页会渲染一门已归档的课程（服务端查不到了），是个死胡同。
  */
-export function CourseActions({ course }: { course: Course }) {
+export function CourseActions({ course, lang }: { course: Course; lang: Lang }) {
   const router = useRouter()
   const [isEditing, setIsEditing] = useState(false)
   const [isConfirmingDelete, setIsConfirmingDelete] = useState(false)
@@ -30,13 +32,13 @@ export function CourseActions({ course }: { course: Course }) {
           typeof body === 'object' && body !== null && 'error' in body
             ? (body as { error?: { message?: unknown } }).error?.message
             : undefined
-        setError(typeof message === 'string' ? message : `删除失败（HTTP ${response.status}）`)
+        setError(typeof message === 'string' ? message : t(lang, 'courses.deleteFailed', { status: response.status }))
         return
       }
       router.push('/dashboard')
       router.refresh()
     } catch {
-      setError('网络错误，请稍后重试')
+      setError(t(lang, 'common.networkError'))
       setIsDeleting(false)
     }
   }
@@ -46,6 +48,7 @@ export function CourseActions({ course }: { course: Course }) {
       <div className="rounded-xl border border-border bg-card p-5 shadow-sm">
         <CourseForm
           mode="edit"
+          lang={lang}
           course={course}
           onDone={() => setIsEditing(false)}
           onCancel={() => setIsEditing(false)}
@@ -61,7 +64,7 @@ export function CourseActions({ course }: { course: Course }) {
         onClick={() => setIsEditing(true)}
         className="h-8 rounded-md border border-border bg-card px-3 text-sm text-foreground"
       >
-        编辑信息
+        {t(lang, 'courses.editInfo')}
       </button>
       <button
         type="button"
@@ -71,13 +74,13 @@ export function CourseActions({ course }: { course: Course }) {
         }}
         className="h-8 rounded-md px-3 text-sm text-muted-foreground hover:text-destructive"
       >
-        删除
+        {t(lang, 'common.delete')}
       </button>
 
       {isConfirmingDelete ? (
         <div className="rounded-lg border border-border bg-muted/40 p-3">
           <p className="text-sm text-foreground">
-            删除「{course.courseName}」？课程及其任务会从列表中隐藏，数据仍保留。
+            {t(lang, 'courses.deleteConfirm', { name: course.courseName })}
           </p>
           <div className="mt-2 flex items-center gap-2">
             <button
@@ -86,7 +89,7 @@ export function CourseActions({ course }: { course: Course }) {
               disabled={isDeleting}
               className="h-8 rounded-md bg-destructive px-3 text-xs font-medium text-destructive-foreground disabled:opacity-50"
             >
-              {isDeleting ? '删除中…' : '确认删除'}
+              {isDeleting ? t(lang, 'common.deleting') : t(lang, 'common.confirmDelete')}
             </button>
             <button
               type="button"
@@ -94,7 +97,7 @@ export function CourseActions({ course }: { course: Course }) {
               disabled={isDeleting}
               className="h-8 rounded-md px-3 text-xs text-muted-foreground"
             >
-              取消
+              {t(lang, 'common.cancel')}
             </button>
           </div>
         </div>

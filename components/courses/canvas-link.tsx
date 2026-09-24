@@ -5,6 +5,8 @@ import { useState } from 'react'
 
 import { CanvasConnectForm } from '@/components/courses/canvas-connect-form'
 import { groupCanvasCourses } from '@/lib/canvas/group-courses'
+import { t } from '@/lib/i18n/translate'
+import type { Lang } from '@/lib/i18n/types'
 import type { CanvasCourse } from '@/types/canvas'
 
 /**
@@ -35,10 +37,13 @@ import type { CanvasCourse } from '@/types/canvas'
  */
 export function CanvasLink({
   courseId,
+  lang,
   canvasCourseId,
   hasCredential,
 }: {
   courseId: string
+  /** 界面语言。 */
+  lang: Lang
   /** 已关联的 Canvas 课程 ID；null = 未关联。 */
   canvasCourseId: string | null
   /**
@@ -75,8 +80,8 @@ export function CanvasLink({
         // 两种情况的用户动作一样：重新粘一个 token。文案区分清楚。
         setError(
           response.status === 404
-            ? '还没有连接 Canvas，先粘一个 token'
-            : 'Canvas 拒绝了当前 token，可能已过期或被撤销，请重新生成',
+            ? t(lang, 'canvas.noToken')
+            : t(lang, 'canvas.tokenRejected'),
         )
         setMode('connecting')
         return
@@ -88,7 +93,7 @@ export function CanvasLink({
           typeof body === 'object' && body !== null && 'error' in body
             ? (body as { error?: { message?: unknown } }).error?.message
             : undefined
-        setError(typeof message === 'string' ? message : `拉取课程列表失败（HTTP ${response.status}）`)
+        setError(typeof message === 'string' ? message : t(lang, 'canvas.fetchFailed', { status: response.status }))
         setMode('collapsed')
         return
       }
@@ -97,7 +102,7 @@ export function CanvasLink({
       setCourses(body.data ?? [])
       setMode('picking')
     } catch {
-      setError('网络错误，请稍后重试')
+      setError(t(lang, 'common.networkError'))
       setMode('collapsed')
     } finally {
       setIsLoading(false)
@@ -120,14 +125,14 @@ export function CanvasLink({
           typeof body === 'object' && body !== null && 'error' in body
             ? (body as { error?: { message?: unknown } }).error?.message
             : undefined
-        setError(typeof message === 'string' ? message : `关联失败（HTTP ${response.status}）`)
+        setError(typeof message === 'string' ? message : t(lang, 'canvas.linkFailed', { status: response.status }))
         return
       }
 
       setMode('collapsed')
       router.refresh()
     } catch {
-      setError('网络错误，请稍后重试')
+      setError(t(lang, 'common.networkError'))
     } finally {
       setPending(null)
     }
@@ -147,7 +152,7 @@ export function CanvasLink({
           typeof body === 'object' && body !== null && 'error' in body
             ? (body as { error?: { message?: unknown } }).error?.message
             : undefined
-        setError(typeof message === 'string' ? message : `解除关联失败（HTTP ${response.status}）`)
+        setError(typeof message === 'string' ? message : t(lang, 'canvas.unlinkFailed', { status: response.status }))
         return
       }
 
@@ -155,7 +160,7 @@ export function CanvasLink({
       setMode('collapsed')
       router.refresh()
     } catch {
-      setError('网络错误，请稍后重试')
+      setError(t(lang, 'common.networkError'))
     } finally {
       setPending(null)
     }
@@ -191,7 +196,7 @@ export function CanvasLink({
           typeof body === 'object' && body !== null && 'error' in body
             ? (body as { error?: { message?: unknown } }).error?.message
             : undefined
-        setError(typeof message === 'string' ? message : `撤销授权失败（HTTP ${response.status}）`)
+        setError(typeof message === 'string' ? message : t(lang, 'canvas.revokeFailed', { status: response.status }))
         return
       }
 
@@ -199,7 +204,7 @@ export function CanvasLink({
       setMode('collapsed')
       router.refresh()
     } catch {
-      setError('网络错误，请稍后重试')
+      setError(t(lang, 'common.networkError'))
     } finally {
       setPending(null)
     }
@@ -209,9 +214,10 @@ export function CanvasLink({
   if (mode === 'connecting') {
     return (
       <Shell>
-        <p className="text-sm text-foreground">连接 Canvas</p>
+        <p className="text-sm text-foreground">{t(lang, 'canvas.connect')}</p>
         {error ? <p className="text-xs text-muted-foreground">{error}</p> : null}
         <CanvasConnectForm
+          lang={lang}
           onConnected={() => void openPicker()}
           onCancel={() => {
             setError(null)
@@ -228,21 +234,22 @@ export function CanvasLink({
     return (
       <Shell>
         <div className="flex items-center justify-between gap-4">
-          <p className="text-sm text-foreground">选择要关联的 Canvas 课程</p>
+          <p className="text-sm text-foreground">{t(lang, 'canvas.pickingTitle')}</p>
           <button
             type="button"
             onClick={() => setMode('collapsed')}
             className="text-xs text-muted-foreground hover:text-foreground"
           >
-            收起
+            {t(lang, 'canvas.collapse')}
           </button>
         </div>
 
         {groups.courseLike.length > 0 ? (
           <div className="space-y-2">
-            <p className="text-xs font-medium text-muted-foreground">课程</p>
+            <p className="text-xs font-medium text-muted-foreground">{t(lang, 'canvas.courses')}</p>
             <CourseList
               courses={groups.courseLike}
+              lang={lang}
               linkedId={canvasCourseId}
               pending={pending}
               onLink={handleLink}
@@ -252,12 +259,13 @@ export function CanvasLink({
 
         {groups.other.length > 0 ? (
           <div className="space-y-2">
-            <p className="text-xs font-medium text-muted-foreground">其他项目</p>
+            <p className="text-xs font-medium text-muted-foreground">{t(lang, 'canvas.others')}</p>
             <p className="text-xs text-muted-foreground">
-              这些看起来不像课程（入学 / 培训类）。需要的话也可以关联，Tempo 不会自动拉进来。
+              {t(lang, 'canvas.othersNote')}
             </p>
             <CourseList
               courses={groups.other}
+              lang={lang}
               linkedId={canvasCourseId}
               pending={pending}
               onLink={handleLink}
@@ -267,7 +275,7 @@ export function CanvasLink({
 
         {courses !== null && courses.length === 0 ? (
           <p className="text-xs text-muted-foreground">
-            Canvas 里没有找到 active 的课程（ enrollment 为空或全部已结束）。
+            {t(lang, 'canvas.emptyList')}
           </p>
         ) : null}
 
@@ -288,7 +296,7 @@ export function CanvasLink({
           {canvasCourseId ? (
             <>
               <p className="text-sm text-foreground">
-                已关联 Canvas 课程
+                {t(lang, 'canvas.linked')}
                 {linked ? (
                   <>
                     ：<span className="font-medium">{linked.name}</span>
@@ -299,15 +307,15 @@ export function CanvasLink({
                 ) : null}
               </p>
               <p className="mt-1 text-xs text-muted-foreground">
-                Canvas 课程 ID {canvasCourseId}
-                {linked ? null : ' · 点「更改」可以看到课程名'}
+                {t(lang, 'canvas.linkedId', { id: canvasCourseId })}
+                {linked ? null : t(lang, 'canvas.linkedClickChange')}
               </p>
             </>
           ) : (
             <>
-              <p className="text-sm text-foreground">未关联 Canvas 课程</p>
+              <p className="text-sm text-foreground">{t(lang, 'canvas.notLinked')}</p>
               <p className="mt-1 text-xs text-muted-foreground">
-                关联后这门课的 Canvas 作业会自动进到任务列表（同步在下一步实现）。
+                {t(lang, 'canvas.notLinkedHint')}
               </p>
             </>
           )}
@@ -320,7 +328,7 @@ export function CanvasLink({
             disabled={isLoading}
             className="h-8 rounded-md border border-border bg-card px-3 text-sm text-foreground disabled:opacity-50"
           >
-            {isLoading ? '拉取中…' : canvasCourseId ? '更改' : '关联 Canvas 课程'}
+            {isLoading ? t(lang, 'canvas.pulling') : canvasCourseId ? t(lang, 'canvas.change') : t(lang, 'canvas.linkCanvas')}
           </button>
           {canvasCourseId ? (
             <button
@@ -331,7 +339,7 @@ export function CanvasLink({
               }}
               className="h-8 rounded-md px-3 text-sm text-muted-foreground hover:text-destructive"
             >
-              解除关联
+              {t(lang, 'canvas.unlink')}
             </button>
           ) : null}
         </div>
@@ -340,7 +348,7 @@ export function CanvasLink({
       {isConfirmingUnlink ? (
         <div className="rounded-lg border border-border bg-muted/40 p-3">
           <p className="text-sm text-foreground">
-            解除与 Canvas 课程 {canvasCourseId} 的关联？Tempo 不再从这门 Canvas 课拉取作业。
+            {t(lang, 'canvas.unlinkConfirm', { id: canvasCourseId ?? '' })}
           </p>
           <div className="mt-2 flex items-center gap-2">
             <button
@@ -349,7 +357,7 @@ export function CanvasLink({
               disabled={pending !== null}
               className="h-8 rounded-md bg-destructive px-3 text-xs font-medium text-destructive-foreground disabled:opacity-50"
             >
-              {pending === 'unlink' ? '解除中…' : '确认解除'}
+              {pending === 'unlink' ? t(lang, 'canvas.unlinking') : t(lang, 'canvas.confirmUnlink')}
             </button>
             <button
               type="button"
@@ -357,7 +365,7 @@ export function CanvasLink({
               disabled={pending !== null}
               className="h-8 rounded-md px-3 text-xs text-muted-foreground"
             >
-              取消
+              {t(lang, 'common.cancel')}
             </button>
           </div>
         </div>
@@ -368,9 +376,9 @@ export function CanvasLink({
         <div className="border-t border-border pt-3">
           <div className="flex items-start justify-between gap-4">
             <div className="min-w-0">
-              <p className="text-xs font-medium text-foreground">撤销 Canvas 授权</p>
+              <p className="text-xs font-medium text-foreground">{t(lang, 'canvas.revokeTitle')}</p>
               <p className="mt-0.5 text-xs text-muted-foreground">
-                删除已保存的访问令牌并停止所有课程的同步。这是账号级操作，不只影响这门课。
+                {t(lang, 'canvas.revokeHint')}
               </p>
             </div>
             <button
@@ -383,17 +391,17 @@ export function CanvasLink({
               }}
               className="h-8 shrink-0 rounded-md px-3 text-sm text-muted-foreground hover:text-destructive"
             >
-              撤销授权
+              {t(lang, 'canvas.revoke')}
             </button>
           </div>
 
           {isConfirmingRevoke ? (
             <div className="mt-2 rounded-lg border border-border bg-muted/40 p-3">
               <p className="text-sm text-foreground">
-                撤销 Tempo 对 bCourses 的访问授权？Tempo 会删除已保存的访问令牌，所有课程停止同步。
+                {t(lang, 'canvas.revokeConfirm')}
               </p>
               <p className="mt-1 text-xs text-muted-foreground">
-                已导入的作业和各门课的关联都会保留 —— 重新连接后即可继续同步，不用重新关联课程。
+                {t(lang, 'canvas.revokeConfirmHint')}
               </p>
               <div className="mt-2 flex items-center gap-2">
                 <button
@@ -402,7 +410,7 @@ export function CanvasLink({
                   disabled={pending !== null}
                   className="h-8 rounded-md bg-destructive px-3 text-xs font-medium text-destructive-foreground disabled:opacity-50"
                 >
-                  {pending === 'revoke' ? '撤销中…' : '确认撤销'}
+                  {pending === 'revoke' ? t(lang, 'canvas.revoking') : t(lang, 'canvas.confirmRevoke')}
                 </button>
                 <button
                   type="button"
@@ -410,7 +418,7 @@ export function CanvasLink({
                   disabled={pending !== null}
                   className="h-8 rounded-md px-3 text-xs text-muted-foreground"
                 >
-                  取消
+                  {t(lang, 'common.cancel')}
                 </button>
               </div>
             </div>
@@ -434,11 +442,13 @@ function Shell({ children }: { children: React.ReactNode }) {
 
 function CourseList({
   courses,
+  lang,
   linkedId,
   pending,
   onLink,
 }: {
   courses: CanvasCourse[]
+  lang: Lang
   linkedId: string | null
   pending: string | null
   onLink: (externalId: string) => void
@@ -452,12 +462,12 @@ function CourseList({
             <div className="min-w-0">
               <p className="truncate text-sm text-foreground">{course.name}</p>
               <p className="text-xs text-muted-foreground">
-                {course.term ?? '未标注学期'} · ID {course.externalId}
+                {course.term ?? t(lang, 'canvas.termMissing')} · ID {course.externalId}
               </p>
             </div>
             {isCurrent ? (
               <span className="shrink-0 rounded-full bg-primary/10 px-2 py-0.5 text-xs font-medium text-primary">
-                当前关联
+                {t(lang, 'canvas.currentLink')}
               </span>
             ) : (
               <button
@@ -466,7 +476,7 @@ function CourseList({
                 disabled={pending !== null}
                 className="h-7 shrink-0 rounded-md border border-border px-2 text-xs text-foreground disabled:opacity-50"
               >
-                {pending === course.externalId ? '关联中…' : '关联'}
+                {pending === course.externalId ? t(lang, 'canvas.linking') : t(lang, 'canvas.linkCanvas')}
               </button>
             )}
           </li>

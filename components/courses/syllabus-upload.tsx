@@ -4,6 +4,8 @@ import { useRouter } from 'next/navigation'
 import { Fragment, useRef, useState } from 'react'
 
 import { readApiErrorMessage } from '@/lib/api/client-error'
+import { t } from '@/lib/i18n/translate'
+import type { Lang } from '@/lib/i18n/types'
 import { readInternalPath } from '@/lib/internal-path'
 import { syllabusStatusText } from '@/components/courses/syllabus-status'
 import { SyllabusCanvasPicker, SyllabusFileLink } from '@/components/courses/syllabus-canvas-picker'
@@ -40,15 +42,21 @@ import type {
 
 interface SyllabusUploadProps {
   courseId: string
+  lang: Lang
   syllabus: Syllabus | null
 }
 
 type Pending = 'uploading' | 'extracting' | 'downloading' | 'parsing'
 
-/** P0-1-11：解析管线的四个阶段，用于进度条展示。 */
-const PARSE_STAGES = ['上传', '提取文本', '解析板块', '完成'] as const
+/** P0-1-11：解析管线的四个阶段（文案按 lang 取），用于进度条展示。 */
+const PARSE_STAGE_KEYS = [
+  'syllabusUpload.stage1',
+  'syllabusUpload.stage2',
+  'syllabusUpload.stage3',
+  'syllabusUpload.stage4',
+] as const
 
-export function SyllabusUpload({ courseId, syllabus }: SyllabusUploadProps) {
+export function SyllabusUpload({ courseId, lang, syllabus }: SyllabusUploadProps) {
   const router = useRouter()
   const inputRef = useRef<HTMLInputElement>(null)
   const [pending, setPending] = useState<Pending | null>(null)
@@ -84,11 +92,11 @@ export function SyllabusUpload({ courseId, syllabus }: SyllabusUploadProps) {
     // 前端预校验：同样的规则服务端会再跑一遍，这里是让用户在上传前就看到原因。
     const ext = extractExtension(file.name)
     if (ext === null || !isAllowedExtension(ext)) {
-      setError(`只支持 ${ALLOWED_EXTENSIONS.join(' / ')} 格式的文件`)
+      setError(t(lang, 'syllabusUpload.onlyFormat', { formats: ALLOWED_EXTENSIONS.join(' / ') }))
       return
     }
     if (file.size > MAX_FILE_SIZE_BYTES) {
-      setError(`文件不能超过 ${MAX_FILE_SIZE_BYTES / 1024 / 1024}MB`)
+      setError(t(lang, 'syllabusUpload.tooLarge', { mb: MAX_FILE_SIZE_BYTES / 1024 / 1024 }))
       return
     }
 
@@ -101,7 +109,7 @@ export function SyllabusUpload({ courseId, syllabus }: SyllabusUploadProps) {
       })
 
       if (!ticketResponse.ok) {
-        setError(await readApiErrorMessage(ticketResponse, '上传'))
+        setError(await readApiErrorMessage(ticketResponse, t(lang, 'action.upload'), lang))
         return
       }
 
@@ -113,7 +121,7 @@ export function SyllabusUpload({ courseId, syllabus }: SyllabusUploadProps) {
         .uploadToSignedUrl(upload.path, upload.token, file)
 
       if (uploadError) {
-        setError('文件上传失败，请重试')
+        setError(t(lang, 'syllabusUpload.uploadFailed'))
         return
       }
 
@@ -126,20 +134,20 @@ export function SyllabusUpload({ courseId, syllabus }: SyllabusUploadProps) {
       if (!extractResponse.ok) {
         // 到不了这里基本只有 409（文件没传完）或网络问题。文件本身已经存下来了，
         // 所以也走 notice 而不是 error —— 用户不需要重新上传。
-        setNotice(await readApiErrorMessage(extractResponse, '文本提取'))
+        setNotice(await readApiErrorMessage(extractResponse, t(lang, 'action.extractText'), lang))
       } else {
         const result = (await extractResponse.json()) as SyllabusExtractResponse
         setPreview(result.previewText)
         if (result.syllabus.extractStatus === 'failed') {
           setNotice(
-            `上传成功，但这份文件读不出文字：${result.syllabus.extractError ?? '原因未知'}`,
+            t(lang, 'syllabusUpload.extractNotice', { reason: result.syllabus.extractError ?? t(lang, 'common.unknown') }),
           )
         }
       }
 
       router.refresh()
     } catch {
-      setError('网络错误，请稍后重试')
+      setError(t(lang, 'common.networkError'))
     } finally {
       setPending(null)
       // 清空 input，否则连续选同一个文件不会再触发 change。
@@ -156,13 +164,13 @@ export function SyllabusUpload({ courseId, syllabus }: SyllabusUploadProps) {
     try {
       const response = await fetch(`/api/v1/syllabi/${syllabus.id}/download`)
       if (!response.ok) {
-        setError(await readApiErrorMessage(response, '获取下载链接'))
+        setError(await readApiErrorMessage(response, t(lang, 'action.downloadUrl'), lang))
         return
       }
       const { downloadUrl } = (await response.json()) as SyllabusDownloadUrl
       window.open(downloadUrl, '_blank', 'noopener,noreferrer')
     } catch {
-      setError('网络错误，请稍后重试')
+      setError(t(lang, 'common.networkError'))
     } finally {
       setPending(null)
     }
@@ -189,7 +197,9 @@ export function SyllabusUpload({ courseId, syllabus }: SyllabusUploadProps) {
           router.refresh()
           return
         }
-        setError(await readApiErrorMessage(response, mode === 'reparse' ? '重新解析' : '解析'))
+        setError(
+          await readApiErrorMessage(response, mode === 'reparse' ? t(lang, 'action.reparse') : t(lang, 'action.parse'), lang),
+        )
         return
       }
 
@@ -197,14 +207,15 @@ export function SyllabusUpload({ courseId, syllabus }: SyllabusUploadProps) {
       // HTTP 200 不代表全成功（ADR-012）：部分失败要在界面上说出来，不能静默吞掉。
       if (result.failedSections.length > 0) {
         setNotice(
-          `解析完成，但 ${result.failedSections.length} 个板块没解析出来（${result.failedSections
-            .map((s) => s.section)
-            .join('、')}）。可以点下方「五个板块」手动补。`,
+          t(lang, 'syllabusUpload.parsePartial', {
+            n: result.failedSections.length,
+            sections: result.failedSections.map((s) => s.section).join(lang === 'en' ? ', ' : '、'),
+          }),
         )
       }
       router.refresh()
     } catch {
-      setError('网络错误，请稍后重试')
+      setError(t(lang, 'common.networkError'))
     } finally {
       setPending(null)
     }
@@ -236,7 +247,7 @@ export function SyllabusUpload({ courseId, syllabus }: SyllabusUploadProps) {
               {syllabus.fileName}
             </p>
             <p className="mt-0.5 text-xs text-muted-foreground">
-              {syllabusStatusText(syllabus)}
+              {syllabusStatusText(syllabus, lang)}
             </p>
           </div>
 
@@ -250,10 +261,10 @@ export function SyllabusUpload({ courseId, syllabus }: SyllabusUploadProps) {
                 disabled={isBusy}
               >
                 {pending === 'parsing'
-                  ? '解析中…'
+                  ? t(lang, 'syllabusUpload.parsing')
                   : syllabus.parseStatus === 'failed'
-                    ? '重试解析'
-                    : '开始解析'}
+                    ? t(lang, 'syllabusUpload.retryParse')
+                    : t(lang, 'syllabusUpload.parse')}
               </Button>
             ) : null}
             {syllabus.parseStatus === 'completed' &&
@@ -267,13 +278,13 @@ export function SyllabusUpload({ courseId, syllabus }: SyllabusUploadProps) {
                 }}
                 disabled={isBusy}
               >
-                重新解析
+                {t(lang, 'syllabusUpload.reparse')}
               </Button>
             ) : null}
             {/* 导入的 syllabus 没有 Storage 对象，`filePath` 是站内路径 → 链到资料页；
                 手动上传的才走"现签下载链"那条路。 */}
             {readInternalPath(syllabus.filePath) ? (
-              <SyllabusFileLink filePath={syllabus.filePath} />
+              <SyllabusFileLink filePath={syllabus.filePath} lang={lang} />
             ) : (
               <Button
                 variant="ghost"
@@ -281,7 +292,7 @@ export function SyllabusUpload({ courseId, syllabus }: SyllabusUploadProps) {
                 onClick={() => void handleDownload()}
                 disabled={isBusy}
               >
-                {pending === 'downloading' ? '获取中…' : '查看'}
+                {pending === 'downloading' ? t(lang, 'syllabusUpload.getting') : t(lang, 'syllabusUpload.view')}
               </Button>
             )}
             <Button
@@ -290,18 +301,18 @@ export function SyllabusUpload({ courseId, syllabus }: SyllabusUploadProps) {
               onClick={() => inputRef.current?.click()}
               disabled={isBusy}
             >
-              重新上传
+              {t(lang, 'syllabusUpload.reupload')}
             </Button>
           </div>
         </div>
 
         {/* P0-3-30：第二个来源 —— 上传按钮保持原样，这里并列一个"直接用 Canvas 上已有的"。 */}
-        <SyllabusCanvasPicker courseId={courseId} hasSyllabus={true} />
+        <SyllabusCanvasPicker courseId={courseId} lang={lang} hasSyllabus={true} />
         </>
       ) : (
         <>
         <div className="flex flex-wrap items-center justify-between gap-3">
-          <p className="text-sm text-muted-foreground">还没有 syllabus</p>
+          <p className="text-sm text-muted-foreground">{t(lang, 'syllabusUpload.none')}</p>
           <Button
             variant="outline"
             size="sm"
@@ -309,23 +320,23 @@ export function SyllabusUpload({ courseId, syllabus }: SyllabusUploadProps) {
             disabled={isBusy}
           >
             {pending === 'uploading'
-              ? '上传中…'
+              ? t(lang, 'syllabusUpload.uploading')
               : pending === 'extracting'
-                ? '提取中…'
-                : '上传 syllabus'}
+                ? t(lang, 'syllabusUpload.extracting')
+                : t(lang, 'syllabusUpload.uploadSyllabus')}
           </Button>
         </div>
 
         {/* 同上：还没有 syllabus 时，两个入口同样并列。 */}
-        <SyllabusCanvasPicker courseId={courseId} hasSyllabus={false} />
+        <SyllabusCanvasPicker courseId={courseId} lang={lang} hasSyllabus={false} />
         </>
       )}
 
       {/* P0-1-11：四阶段进度条，替代原先散落的单行提示，让用户看清"现在到第几步"。 */}
       {pending !== null ? (
-        <ol className="mt-3 flex items-center gap-1" aria-label="解析进度">
-          {PARSE_STAGES.map((label, i) => (
-            <Fragment key={label}>
+        <ol className="mt-3 flex items-center gap-1" aria-label={t(lang, 'syllabusUpload.progressAria')}>
+          {PARSE_STAGE_KEYS.map((key, i) => (
+            <Fragment key={key}>
               <li className="flex items-center gap-1.5">
                 <span
                   className={[
@@ -351,10 +362,10 @@ export function SyllabusUpload({ courseId, syllabus }: SyllabusUploadProps) {
                         : 'text-muted-foreground',
                   ].join(' ')}
                 >
-                  {label}
+                  {t(lang, key)}
                 </span>
               </li>
-              {i < PARSE_STAGES.length - 1 ? (
+              {i < PARSE_STAGE_KEYS.length - 1 ? (
                 <span
                   className={[
                     'h-px flex-1',
@@ -370,8 +381,7 @@ export function SyllabusUpload({ courseId, syllabus }: SyllabusUploadProps) {
       {isConfirmingReparse ? (
         <div className="mt-3 rounded-lg border border-border bg-background p-3">
           <p className="text-sm text-foreground">
-            重新解析会用当前文本整体替换解析来源的条目；手动添加的条目保留，
-            但未保存的修改会丢失。确定重跑吗？
+            {t(lang, 'syllabusUpload.reparseConfirm')}
           </p>
           <div className="mt-2 flex items-center gap-2">
             <Button
@@ -383,7 +393,7 @@ export function SyllabusUpload({ courseId, syllabus }: SyllabusUploadProps) {
               }}
               disabled={isBusy}
             >
-              确认重跑
+              {t(lang, 'syllabusUpload.confirmReparse')}
             </Button>
             <Button
               variant="ghost"
@@ -391,7 +401,7 @@ export function SyllabusUpload({ courseId, syllabus }: SyllabusUploadProps) {
               onClick={() => setIsConfirmingReparse(false)}
               disabled={isBusy}
             >
-              取消
+              {t(lang, 'common.cancel')}
             </Button>
           </div>
         </div>
@@ -412,7 +422,7 @@ export function SyllabusUpload({ courseId, syllabus }: SyllabusUploadProps) {
       {preview ? (
         <details className="mt-3">
           <summary className="cursor-pointer text-xs text-muted-foreground">
-            查看提取到的文本（前 {preview.length} 字符）
+            {t(lang, 'syllabusUpload.preview', { n: preview.length })}
           </summary>
           <pre className="mt-2 max-h-40 overflow-auto whitespace-pre-wrap rounded border border-border bg-background p-2 text-xs text-foreground">
             {preview}

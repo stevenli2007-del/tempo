@@ -21,19 +21,22 @@
 
 import { useState } from "react"
 
+import { useT } from "@/lib/i18n/use-i18n"
+
 import { UpdateActions, UpdateComposer, UpdateReview } from "@/components/tasks/update-flow-parts"
 import { useCourseUpdateFlow } from "@/components/tasks/use-course-update-flow"
 
 export function CourseUpdateFab() {
   const flow = useCourseUpdateFlow()
+  const t = useT()
   const [open, setOpen] = useState(false)
 
   return (
     <>
       <button
         type="button"
-        aria-label="更新课程"
-        title="更新课程"
+        aria-label={t("fab.title")}
+        title={t("fab.title")}
         onClick={() => {
           setOpen(true)
           flow.startSession()
@@ -53,10 +56,10 @@ export function CourseUpdateFab() {
             onClick={(e) => e.stopPropagation()}
           >
             <div className="mb-3 flex items-center justify-between">
-              <h2 className="text-base font-semibold text-ink">更新课程</h2>
+              <h2 className="text-base font-semibold text-ink">{t("fab.title")}</h2>
               <button
                 type="button"
-                aria-label="关闭"
+                aria-label={t("common.close")}
                 onClick={() => setOpen(false)}
                 className="text-muted-foreground transition hover:text-ink"
               >

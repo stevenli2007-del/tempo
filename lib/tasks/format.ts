@@ -1,4 +1,5 @@
 import { SCHOOL_TIME_ZONE } from '@/lib/time'
+import type { Lang } from '@/lib/i18n/types'
 
 /**
  * 任务日期的展示标签。
@@ -15,12 +16,23 @@ import { SCHOOL_TIME_ZONE } from '@/lib/time'
  * 📌 **P0-3-7b：从 dashboard 页搬到独立模块。** 课程列表页（`/courses`）也要用，
  * 复制两份 = 同一条任务在两个页面差一天。**改这里就是两处同时改。**
  */
-const DUE_FORMATTER = new Intl.DateTimeFormat('zh-CN', {
-  month: 'numeric',
-  day: 'numeric',
-  weekday: 'short',
-  timeZone: SCHOOL_TIME_ZONE,
-})
+/**
+ * P0-5-1：zh / en 各一个格式化器。默认走 zh —— 既有调用方（课程列表等）一行不改。
+ */
+const DUE_FORMATTERS: Record<Lang, Intl.DateTimeFormat> = {
+  zh: new Intl.DateTimeFormat('zh-CN', {
+    month: 'numeric',
+    day: 'numeric',
+    weekday: 'short',
+    timeZone: SCHOOL_TIME_ZONE,
+  }),
+  en: new Intl.DateTimeFormat('en-US', {
+    month: 'numeric',
+    day: 'numeric',
+    weekday: 'short',
+    timeZone: SCHOOL_TIME_ZONE,
+  }),
+}
 
 /**
  * `iso === null` 表示**日期待定（TBD）** —— 返回 `label: null` 让展示层渲染成
@@ -29,6 +41,7 @@ const DUE_FORMATTER = new Intl.DateTimeFormat('zh-CN', {
 export function formatDue(
   iso: string | null,
   now: Date,
+  lang: Lang = 'zh',
 ): { label: string | null; isOverdue: boolean } {
   if (iso === null) {
     return { label: null, isOverdue: false }
@@ -37,5 +50,5 @@ export function formatDue(
   if (Number.isNaN(due.getTime())) {
     return { label: null, isOverdue: false }
   }
-  return { label: DUE_FORMATTER.format(due), isOverdue: due.getTime() < now.getTime() }
+  return { label: DUE_FORMATTERS[lang].format(due), isOverdue: due.getTime() < now.getTime() }
 }

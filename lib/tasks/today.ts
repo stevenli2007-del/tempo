@@ -1,4 +1,5 @@
 import { dayKeyToUtcDate, monthDayLabel, schoolDayKey, weekdayLabel } from '@/lib/time'
+import type { Lang } from '@/lib/i18n/types'
 import { isEffectivelyDone, isExamTask } from '@/lib/tasks/progress'
 import type { Task } from '@/types/task'
 
@@ -85,6 +86,7 @@ export function buildTodayTasks(
   tasks: TodayInput[],
   now: Date,
   horizonDays = TODAY_HORIZON_DAYS,
+  lang: Lang = 'zh',
 ): TodayModel {
   const todayKey = schoolDayKey(now)
   const todayMs = dayKeyToUtcDate(todayKey).getTime()
@@ -114,7 +116,7 @@ export function buildTodayTasks(
       courseId: task.courseId,
       courseName: task.courseName,
       title: task.title,
-      dueLabel: `${monthDayLabel(dayKey)} ${weekdayLabel(dayKey)}`,
+      dueLabel: `${monthDayLabel(dayKey, lang)} ${weekdayLabel(dayKey, lang)}`,
       daysUntil,
       weight,
       weightPct: Math.round(weight * 100),

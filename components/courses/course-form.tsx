@@ -4,9 +4,13 @@ import { useRouter } from 'next/navigation'
 import { useState } from 'react'
 
 import { Button } from '@/components/ui/button'
+import { t } from '@/lib/i18n/translate'
+import type { Lang } from '@/lib/i18n/types'
 import type { Course } from '@/types/course'
 
 interface CourseFormBaseProps {
+  /** 界面语言。 */
+  lang: Lang
   /** 保存成功后回调。编辑模式下父组件用它收起表单。 */
   onDone?: () => void
   /** 取消编辑。 */
@@ -26,7 +30,7 @@ const INPUT_CLASS =
 const LABEL_CLASS = 'block text-sm font-medium text-foreground'
 
 export function CourseForm(props: CourseFormProps) {
-  const { mode, onDone, onCancel } = props
+  const { mode, lang, onDone, onCancel } = props
   // 联合类型在 props 未解构时才能正确收窄，所以这里单独取一次。
   const editing = props.mode === 'edit' ? props.course : null
 
@@ -66,7 +70,7 @@ export function CourseForm(props: CourseFormProps) {
           typeof body === 'object' && body !== null && 'error' in body
             ? (body as { error?: { message?: unknown } }).error?.message
             : undefined
-        setError(typeof message === 'string' ? message : `保存失败（HTTP ${response.status}）`)
+        setError(typeof message === 'string' ? message : t(lang, 'common.saveFailed', { status: response.status }))
         return
       }
 
@@ -84,7 +88,7 @@ export function CourseForm(props: CourseFormProps) {
       router.refresh()
       onDone?.()
     } catch {
-      setError('网络错误，请稍后重试')
+      setError(t(lang, 'common.networkError'))
     } finally {
       setIsPending(false)
     }
@@ -95,7 +99,7 @@ export function CourseForm(props: CourseFormProps) {
       <div className="grid gap-4 sm:grid-cols-2">
         <div className="space-y-1.5">
           <label htmlFor="courseName" className={LABEL_CLASS}>
-            课程名 <span className="text-destructive">*</span>
+            {t(lang, 'courseForm.name')} <span className="text-destructive">*</span>
           </label>
           <input
             id="courseName"
@@ -110,7 +114,7 @@ export function CourseForm(props: CourseFormProps) {
 
         <div className="space-y-1.5">
           <label htmlFor="semester" className={LABEL_CLASS}>
-            学期 <span className="text-destructive">*</span>
+            {t(lang, 'courseForm.semester')} <span className="text-destructive">*</span>
           </label>
           <input
             id="semester"
@@ -125,7 +129,7 @@ export function CourseForm(props: CourseFormProps) {
 
         <div className="space-y-1.5">
           <label htmlFor="courseCode" className={LABEL_CLASS}>
-            课程编码
+            {t(lang, 'courseForm.code')}
           </label>
           <input
             id="courseCode"
@@ -139,7 +143,7 @@ export function CourseForm(props: CourseFormProps) {
 
         <div className="space-y-1.5">
           <label htmlFor="instructorName" className={LABEL_CLASS}>
-            授课教师
+            {t(lang, 'courseForm.instructor')}
           </label>
           <input
             id="instructorName"
@@ -160,11 +164,11 @@ export function CourseForm(props: CourseFormProps) {
 
       <div className="flex items-center gap-2">
         <Button type="submit" size="lg" disabled={isPending}>
-          {isPending ? '保存中…' : editing ? '保存修改' : '创建课程'}
+          {isPending ? t(lang, 'courseForm.saving') : editing ? t(lang, 'courseForm.save') : t(lang, 'courseForm.create')}
         </Button>
         {onCancel ? (
           <Button type="button" variant="ghost" size="lg" onClick={onCancel} disabled={isPending}>
-            取消
+            {t(lang, 'courseForm.cancel')}
           </Button>
         ) : null}
       </div>

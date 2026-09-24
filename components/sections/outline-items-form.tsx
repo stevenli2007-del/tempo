@@ -1,5 +1,6 @@
 'use client'
 
+import { useI18n, useT } from '@/lib/i18n/use-i18n'
 import type { SaveCourseOutlineItem, StoredCourseOutlineItem } from '@/types/sections'
 
 import {
@@ -28,6 +29,8 @@ export function OutlineItemsForm({
   courseId: string
   items: StoredCourseOutlineItem[]
 }) {
+  const t = useT()
+  const { lang } = useI18n()
   const form = useSectionForm<StoredCourseOutlineItem, OutlineDraft>({
     endpoint: `/api/v1/courses/${courseId}/outline-items`,
     initial: items,
@@ -52,16 +55,16 @@ export function OutlineItemsForm({
             <input
               value={row.weekLabel ?? ''}
               onChange={(e) => form.updateRow(index, { weekLabel: e.target.value || null })}
-              placeholder="周次（可空）"
+              placeholder={t('outline.weekPh')}
               maxLength={50}
               className={`${INPUT_CLASS} w-32 shrink-0`}
             />
             <input
               value={row.topic}
               onChange={(e) => form.updateRow(index, { topic: e.target.value })}
-              placeholder="主题"
+              placeholder={t('outline.topicPh')}
               maxLength={200}
-              title={excerptTitle(row._sourceExcerpt)}
+              title={excerptTitle(row._sourceExcerpt, lang)}
               className={INPUT_CLASS}
             />
             {row._source === 'manual' ? <ManualBadge /> : null}
@@ -70,7 +73,7 @@ export function OutlineItemsForm({
                 type="button"
                 onClick={() => form.moveRow(index, -1)}
                 disabled={form.saving || index === 0}
-                title="上移"
+                title={t('sections.moveUp')}
                 className="px-1 text-[10px] leading-3 text-muted-foreground hover:text-foreground disabled:opacity-30"
               >
                 ▲
@@ -79,7 +82,7 @@ export function OutlineItemsForm({
                 type="button"
                 onClick={() => form.moveRow(index, 1)}
                 disabled={form.saving || index === form.rows.length - 1}
-                title="下移"
+                title={t('sections.moveDown')}
                 className="px-1 text-[10px] leading-3 text-muted-foreground hover:text-foreground disabled:opacity-30"
               >
                 ▼
@@ -89,10 +92,10 @@ export function OutlineItemsForm({
               type="button"
               onClick={() => form.removeRow(index)}
               disabled={form.saving}
-              title="删除这条"
+              title={t('sections.deleteRow')}
               className="shrink-0 text-xs text-muted-foreground hover:text-destructive"
             >
-              删除
+              {t('sections.delete')}
             </button>
           </div>
         </div>
@@ -100,7 +103,7 @@ export function OutlineItemsForm({
 
       <SectionFooter
         count={form.rows.length}
-        addLabel="添加一周"
+        addLabel={t('outline.add')}
         onAdd={form.addRow}
         dirty={form.dirty}
         saving={form.saving}

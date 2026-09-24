@@ -3,6 +3,8 @@
 import { useRouter } from 'next/navigation'
 import { useState } from 'react'
 
+import type { Lang } from '@/lib/i18n/types'
+import { useT } from '@/lib/i18n/use-i18n'
 import { callSyncNow } from '@/lib/sync/browser'
 
 /**
@@ -15,8 +17,16 @@ import { callSyncNow } from '@/lib/sync/browser'
  * 触发档位固定 `manual`（30s 节流），与标题行按钮共用一个服务端窗口 ——
  * 刚点过标题行再来点这里会拿到 429，那也是正确答案（保护 Canvas 额度）。
  */
-export function SyncRetryButton({ label = '重试' }: { label?: string }) {
+export function SyncRetryButton({
+  label,
+  lang = 'zh',
+}: {
+  /** 不传则按当前语言显示「重试」（P0-5-1）。 */
+  label?: string
+  lang?: Lang
+}) {
   const router = useRouter()
+  const t = useT()
   const [isSyncing, setIsSyncing] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -24,7 +34,7 @@ export function SyncRetryButton({ label = '重试' }: { label?: string }) {
     setError(null)
     setIsSyncing(true)
     try {
-      const result = await callSyncNow('manual')
+      const result = await callSyncNow('manual', lang)
       if (!result.ok) {
         setError(result.message)
         return
@@ -45,7 +55,7 @@ export function SyncRetryButton({ label = '重试' }: { label?: string }) {
         disabled={isSyncing}
         className="h-8 shrink-0 rounded-md border border-border bg-card px-3 text-sm text-foreground disabled:opacity-50"
       >
-        {isSyncing ? '同步中…' : label}
+        {isSyncing ? t('sync.syncing') : (label ?? t('common.retry'))}
       </button>
       {error ? (
         <p role="alert" className="text-xs text-destructive">

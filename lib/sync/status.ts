@@ -1,4 +1,6 @@
 import type { Course } from '@/types/course'
+import type { Lang } from '@/lib/i18n/types'
+import { t } from '@/lib/i18n/translate'
 
 /**
  * 同步状态的视图模型（P0-2-7，Sync-Strategy §9「失败可见性」的落点）。
@@ -103,27 +105,34 @@ const pad = (value: number) => String(value).padStart(2, '0')
  *
  * 不用 `Intl.DateTimeFormat('zh-CN')`：它把月日渲染成 `9/5`，中文界面里偏机器味；
  * 这里要的是"哪天几点"，手写两行比跟格式化器较劲省事。
+ * P0-5-1：文案收进字典（`sync.absolute`），en 渲染成 `9/5 21:47 UTC`。
  */
-function formatAbsoluteUtc(date: Date): string {
-  return `${date.getUTCMonth() + 1}月${date.getUTCDate()}日 ${pad(date.getUTCHours())}:${pad(date.getUTCMinutes())}（UTC）`
+function formatAbsoluteUtc(date: Date, lang: Lang): string {
+  return t(lang, 'sync.absolute', {
+    month: date.getUTCMonth() + 1,
+    day: date.getUTCDate(),
+    time: `${pad(date.getUTCHours())}:${pad(date.getUTCMinutes())}`,
+  })
 }
 
 /** 把 ISO 时间渲染成「3 分钟前 / 5 小时前 / 9月5日 21:47」。 */
-export function formatSyncTime(iso: string, now: Date): string {
+export function formatSyncTime(iso: string, now: Date, lang: Lang = 'zh'): string {
   const then = Date.parse(iso)
   if (Number.isNaN(then)) {
     // 库里的时间串不该解析失败；真出现了也不能编一个"刚刚"出来（静默的错误数据）。
-    return '时间未知'
+    return t(lang, 'sync.timeUnknown')
   }
   const elapsed = now.getTime() - then
   if (elapsed < 0) {
     // 时钟回拨 / 未来时间。宁可说"刚刚"也不要渲染成负数。
-    return '刚刚'
+    return t(lang, 'sync.justNow')
   }
-  if (elapsed < 60_000) return '刚刚'
-  if (elapsed < 60 * 60_000) return `${Math.floor(elapsed / 60_000)} 分钟前`
-  if (elapsed < STALE_AFTER_MS) return `${Math.floor(elapsed / (60 * 60_000))} 小时前`
-  return formatAbsoluteUtc(new Date(then))
+  if (elapsed < 60_000) return t(lang, 'sync.justNow')
+  if (elapsed < 60 * 60_000) return t(lang, 'sync.minutesAgo', { n: Math.floor(elapsed / 60_000) })
+  if (elapsed < STALE_AFTER_MS) {
+    return t(lang, 'sync.hoursAgo', { n: Math.floor(elapsed / (60 * 60_000)) })
+  }
+  return formatAbsoluteUtc(new Date(then), lang)
 }
 
 /**
@@ -236,15 +245,19 @@ export function summarizeSyncStatus(views: CourseSyncView[], now: Date): SyncOve
  * 未关联 Canvas 的课**不该**调用它 —— 那种课没有"同步"这回事，
  * 给它显示一行同步状态是无意义的噪声（调用方负责过滤）。
  */
-export function toCourseSyncLine(view: CourseSyncView, now: Date): CourseSyncLine {
+export function toCourseSyncLine(
+  view: CourseSyncView,
+  now: Date,
+  lang: Lang = 'zh',
+): CourseSyncLine {
   if (view.state === 'never') {
-    return { text: 'Canvas 作业还没同步', tone: 'muted', hint: null }
+    return { text: t(lang, 'sync.lineNever'), tone: 'muted', hint: null }
   }
 
   if (view.state === 'success') {
-    const when = view.lastSuccessAt === null ? null : formatSyncTime(view.lastSuccessAt, now)
+    const when = view.lastSuccessAt === null ? null : formatSyncTime(view.lastSuccessAt, now, lang)
     return {
-      text: when === null ? 'Canvas 已同步' : `Canvas 已同步 · ${when}`,
+      text: when === null ? t(lang, 'sync.lineSynced') : t(lang, 'sync.lineSyncedAt', { when }),
       tone: 'muted',
       hint: null,
     }
@@ -253,18 +266,18 @@ export function toCourseSyncLine(view: CourseSyncView, now: Date): CourseSyncLin
   // 失败态：文案必须说出"数据停留在什么时候"，否则用户会以为列表是新的。
   if (view.failureKind === 'fixable') {
     return {
-      text: 'Canvas 同步失败 · 需要重新连接',
+      text: t(lang, 'sync.lineFailedFixable'),
       tone: 'error',
-      hint: view.errorMessage ?? '需要重新生成 Canvas token',
+      hint: view.errorMessage ?? t(lang, 'sync.lineFailedFixableHint'),
     }
   }
 
-  const when = view.lastSuccessAt === null ? null : formatSyncTime(view.lastSuccessAt, now)
+  const when = view.lastSuccessAt === null ? null : formatSyncTime(view.lastSuccessAt, now, lang)
   return {
     text:
       when === null
-        ? 'Canvas 同步失败 · 还没同步成功过'
-        : `Canvas 同步失败 · 数据停留在 ${when}`,
+        ? t(lang, 'sync.lineFailedStuck')
+        : t(lang, 'sync.lineFailedNever', { when }),
     tone: 'error',
     hint: view.errorMessage,
   }
@@ -275,8 +288,11 @@ export function toCourseSyncLine(view: CourseSyncView, now: Date): CourseSyncLin
  *
  * 六门课全挂时把六个名字铺在顶部不是信息，是压迫感。列出前三个 + "等 N 门"。
  */
-export function formatFailedCourseNames(views: CourseSyncView[], max = 3): string {
+export function formatFailedCourseNames(views: CourseSyncView[], max = 3, lang: Lang = 'zh'): string {
   const names = views.slice(0, max).map((view) => view.courseName)
   const rest = views.length - names.length
-  return rest > 0 ? `${names.join('、')} 等 ${views.length} 门` : names.join('、')
+  const joiner = lang === 'zh' ? '、' : ', '
+  return rest > 0
+    ? `${names.join(joiner)}${t(lang, 'sync.failedNamesRest', { total: views.length })}`
+    : names.join(joiner)
 }

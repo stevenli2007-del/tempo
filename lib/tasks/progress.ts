@@ -1,4 +1,5 @@
 import { addDays, dayKeyToUtcDate, monthDayLabel, schoolDayKey, weekdayLabel } from '@/lib/time'
+import type { Lang } from '@/lib/i18n/types'
 import type { Task, TaskSubmissionState } from '@/types/task'
 
 /**
@@ -242,7 +243,11 @@ function toPill(task: CalendarInput, nowMs: number): { pill: CalendarPill; dueMs
  * 过去的日子**没人会往回翻**。把逾期任务散落在上个月的格子里，等于把它们藏起来，
  * 与 Tempo「不隐藏问题」的原则冲突。
  */
-export function buildWeekCalendar(tasks: CalendarInput[], now: Date): WeekCalendarModel {
+export function buildWeekCalendar(
+  tasks: CalendarInput[],
+  now: Date,
+  lang: Lang = 'zh',
+): WeekCalendarModel {
   const nowMs = now.getTime()
   const todayKey = schoolDayKey(now)
 
@@ -252,8 +257,8 @@ export function buildWeekCalendar(tasks: CalendarInput[], now: Date): WeekCalend
     const key = addDays(todayKey, i)
     const day: CalendarDay = {
       key,
-      weekday: weekdayLabel(key),
-      monthDay: monthDayLabel(key),
+      weekday: weekdayLabel(key, lang),
+      monthDay: monthDayLabel(key, lang),
       isToday: i === 0,
       pills: [],
     }
@@ -344,6 +349,7 @@ export function buildUpcomingExams(
   tasks: CalendarInput[],
   now: Date,
   limit = EXAM_LOOKAHEAD,
+  lang: Lang = 'zh',
 ): UpcomingExam[] {
   const todayKey = schoolDayKey(now)
   const todayMs = dayKeyToUtcDate(todayKey).getTime()
@@ -365,7 +371,7 @@ export function buildUpcomingExams(
         title: task.title,
         courseId: task.courseId,
         courseName: task.courseName,
-        dateLabel: `${monthDayLabel(key)} ${weekdayLabel(key)}`,
+        dateLabel: `${monthDayLabel(key, lang)} ${weekdayLabel(key, lang)}`,
         daysUntil: Math.round((dayKeyToUtcDate(key).getTime() - todayMs) / 86_400_000),
       },
       dueMs,

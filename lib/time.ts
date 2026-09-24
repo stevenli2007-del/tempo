@@ -21,6 +21,12 @@
 
 export const SCHOOL_TIME_ZONE = 'America/Los_Angeles'
 
+/**
+ * 展示标签的语言（P0-5-1）。type-only import：零运行时依赖，不动本模块的纯函数性质。
+ * 默认 `zh` —— 既有调用方（提醒引擎等）一行不改，行为与从前完全一致。
+ */
+import type { Lang } from '@/lib/i18n/types'
+
 /** 真实时刻 → 学校本地日历键（`YYYY-MM-DD`，可直接字符串比较/排序）。 */
 const SCHOOL_DAY_KEY = new Intl.DateTimeFormat('en-CA', {
   timeZone: SCHOOL_TIME_ZONE,
@@ -37,8 +43,14 @@ const UTC_DAY_KEY = new Intl.DateTimeFormat('en-CA', {
   day: '2-digit',
 })
 
-const WEEKDAY = new Intl.DateTimeFormat('zh-CN', { timeZone: 'UTC', weekday: 'short' })
-const MONTH_DAY = new Intl.DateTimeFormat('zh-CN', { timeZone: 'UTC', month: 'numeric', day: 'numeric' })
+const WEEKDAY_FORMATTERS: Record<Lang, Intl.DateTimeFormat> = {
+  zh: new Intl.DateTimeFormat('zh-CN', { timeZone: 'UTC', weekday: 'short' }),
+  en: new Intl.DateTimeFormat('en-US', { timeZone: 'UTC', weekday: 'short' }),
+}
+const MONTH_DAY_FORMATTERS: Record<Lang, Intl.DateTimeFormat> = {
+  zh: new Intl.DateTimeFormat('zh-CN', { timeZone: 'UTC', month: 'numeric', day: 'numeric' }),
+  en: new Intl.DateTimeFormat('en-US', { timeZone: 'UTC', month: 'numeric', day: 'numeric' }),
+}
 
 export function schoolDayKey(date: Date): string {
   return SCHOOL_DAY_KEY.format(date)
@@ -56,14 +68,14 @@ export function addDays(key: string, days: number): string {
   return UTC_DAY_KEY.format(new Date(base.getTime() + days * 86_400_000))
 }
 
-/** 「周日」/「周一」……（zh-CN 的 short weekday）。 */
-export function weekdayLabel(key: string): string {
-  return WEEKDAY.format(dayKeyToUtcDate(key))
+/** 「周日」/「周一」……（zh）/「Sun」/「Mon」…（en）。默认 zh，老调用方行为不变。 */
+export function weekdayLabel(key: string, lang: Lang = 'zh'): string {
+  return WEEKDAY_FORMATTERS[lang].format(dayKeyToUtcDate(key))
 }
 
 /** 「9/13」。 */
-export function monthDayLabel(key: string): string {
-  return MONTH_DAY.format(dayKeyToUtcDate(key))
+export function monthDayLabel(key: string, lang: Lang = 'zh'): string {
+  return MONTH_DAY_FORMATTERS[lang].format(dayKeyToUtcDate(key))
 }
 
 /**

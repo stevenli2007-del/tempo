@@ -1,5 +1,6 @@
 'use client'
 
+import { useI18n, useT } from '@/lib/i18n/use-i18n'
 import type { SaveGradeComponentItem, StoredGradeComponent } from '@/types/sections'
 
 import {
@@ -24,6 +25,8 @@ export function GradeComponentsForm({
   courseId: string
   items: StoredGradeComponent[]
 }) {
+  const t = useT()
+  const { lang } = useI18n()
   const form = useSectionForm<StoredGradeComponent, GradeDraft>({
     endpoint: `/api/v1/courses/${courseId}/grade-components`,
     initial: items,
@@ -44,11 +47,11 @@ export function GradeComponentsForm({
     <div className="space-y-3">
       {form.rows.length === 0 ? null : (
         <p className="text-xs text-muted-foreground">
-          权重合计：
+          {t('grade.totalLabel')}
           <span className={total > 100 ? 'font-medium text-destructive' : 'font-medium'}>
             {formatNumber(total)}%
           </span>
-          {total > 100 ? '（超过 100，请检查）' : ''}
+          {total > 100 ? t('grade.overNote') : ''}
         </p>
       )}
 
@@ -58,9 +61,9 @@ export function GradeComponentsForm({
             <input
               value={row.name}
               onChange={(e) => form.updateRow(index, { name: e.target.value })}
-              placeholder="名称，如 Midterm"
+              placeholder={t('grade.namePh')}
               maxLength={120}
-              title={excerptTitle(row._sourceExcerpt)}
+              title={excerptTitle(row._sourceExcerpt, lang)}
               className={INPUT_CLASS}
             />
             <input
@@ -74,7 +77,7 @@ export function GradeComponentsForm({
                   weightPercent: e.target.value === '' ? null : Number(e.target.value),
                 })
               }
-              placeholder="权重 %"
+              placeholder={t('grade.weightPh')}
               className={`${INPUT_CLASS} w-24 shrink-0`}
             />
             {row._source === 'manual' ? <ManualBadge /> : null}
@@ -82,16 +85,16 @@ export function GradeComponentsForm({
               type="button"
               onClick={() => form.removeRow(index)}
               disabled={form.saving}
-              title="删除这条"
+              title={t('sections.deleteRow')}
               className="shrink-0 text-xs text-muted-foreground hover:text-destructive"
             >
-              删除
+              {t('sections.delete')}
             </button>
           </div>
           <input
             value={row.notes ?? ''}
             onChange={(e) => form.updateRow(index, { notes: e.target.value || null })}
-            placeholder="备注（可空）"
+            placeholder={t('grade.notesPh')}
             maxLength={200}
             className={`${INPUT_CLASS} mt-2`}
           />
@@ -100,7 +103,7 @@ export function GradeComponentsForm({
 
       <SectionFooter
         count={form.rows.length}
-        addLabel="添加一条"
+        addLabel={t('grade.add')}
         onAdd={form.addRow}
         dirty={form.dirty}
         saving={form.saving}

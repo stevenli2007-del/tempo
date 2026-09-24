@@ -6,6 +6,8 @@ import { useState } from 'react'
 
 import { syllabusStatusText } from '@/components/courses/syllabus-status'
 import { ExamMark } from '@/components/tasks/exam-mark'
+import { t } from '@/lib/i18n/translate'
+import type { Lang } from '@/lib/i18n/types'
 import { courseColorClasses, courseColorKey } from '@/lib/courses/course-color'
 import type { CourseSyncLine } from '@/lib/sync/status'
 import { SUBMISSION_BADGE_CLASS, submissionBadge } from '@/lib/tasks/submission'
@@ -53,6 +55,8 @@ export interface UpcomingTaskView {
 
 interface CourseCardProps {
   course: Course
+  /** 界面语言（服务端页面传入，随 cookie 切换）。 */
+  lang: Lang
   /** 该课程最新一份 syllabus；没有则为 null。 */
   syllabus: Syllabus | null
   /**
@@ -75,24 +79,24 @@ interface CourseCardProps {
 
 /** 卡片上的轻量提交态标注（P0-3-10）—— 口径已搬到 `lib/tasks/submission.ts`（P0-3-15）。 */
 
-function UpcomingTasks({ tasks }: { tasks: UpcomingTaskView[] }) {
+function UpcomingTasks({ tasks, lang }: { tasks: UpcomingTaskView[]; lang: Lang }) {
   return (
     <ul className="mt-2 space-y-1">
       {tasks.map((task) => {
         // 徽标口径与总览页任务行**共用一处**（`lib/tasks/submission.ts`，P0-3-15）——
         // 各写一份 switch 迟早出现"同一份作业两页写着不同的状态"。
         // P0-3-17：入参改为整行（`null` 的含义取决于 `source`）。
-        const badge = submissionBadge(task)
+        const badge = submissionBadge(task, lang)
         return (
           <li key={task.id} className="flex items-baseline gap-2 text-xs">
             <span className="truncate text-foreground/80">{task.title}</span>
             {/* 考试标记（P0-3-33）：卡片上的近期任务同样要能认出考试 ——
                 这里与总览清单、周历 pill 用**同一个** `ExamMark`。 */}
-            {task.isExam ? <ExamMark /> : null}
+            {task.isExam ? <ExamMark lang={lang} /> : null}
             <span
               className={`shrink-0 ${task.isOverdue ? 'text-destructive' : 'text-muted-foreground'}`}
             >
-              {task.dueLabel ?? '日期待定'}
+              {task.dueLabel ?? t(lang, 'common.dateTbd')}
               {badge ? (
                 <>
                   {' · '}
@@ -111,6 +115,7 @@ function UpcomingTasks({ tasks }: { tasks: UpcomingTaskView[] }) {
 
 export function CourseCard({
   course,
+  lang,
   syllabus,
   upcomingTasks,
   loadError,
@@ -132,13 +137,13 @@ export function CourseCard({
           typeof body === 'object' && body !== null && 'error' in body
             ? (body as { error?: { message?: unknown } }).error?.message
             : undefined
-        setError(typeof message === 'string' ? message : `删除失败（HTTP ${response.status}）`)
+        setError(typeof message === 'string' ? message : t(lang, 'courses.deleteFailed', { status: response.status }))
         return
       }
       setIsConfirmingDelete(false)
       router.refresh()
     } catch {
-      setError('网络错误，请稍后重试')
+      setError(t(lang, 'common.networkError'))
     } finally {
       setIsDeleting(false)
     }
@@ -149,7 +154,9 @@ export function CourseCard({
    * 课程编码既然已经单独做成彩色的 chip（见下），这一行就只剩教师。
    * 两者都没有时仍然要写清楚"没填" —— 留一行空白会被读成"加载失败"。
    */
-  const teacherLine = course.instructorName ?? (course.courseCode ? '未填写教师' : '未填写编码与教师')
+  const teacherLine =
+    course.instructorName ??
+    (course.courseCode ? t(lang, 'courses.teacherMissing') : t(lang, 'courses.codeTeacherMissing'))
 
   return (
     <div className="relative overflow-hidden rounded-xl border border-border bg-card p-5 shadow-sm">
@@ -174,12 +181,12 @@ export function CourseCard({
             ) : null}
             {course.isDemo ? (
               <span className="shrink-0 rounded-full bg-primary/10 px-2 py-0.5 text-xs font-medium text-primary">
-                示例
+                {t(lang, 'courses.demo')}
               </span>
             ) : null}
           </div>
           <p className="mt-1 truncate text-sm text-muted-foreground">{teacherLine}</p>
-          <p className="mt-2 text-xs text-muted-foreground">{syllabusStatusText(syllabus)}</p>
+          <p className="mt-2 text-xs text-muted-foreground">{syllabusStatusText(syllabus, lang)}</p>
 
           {/* 同步状态行：失败时是红色并带原因（hover 看原文）。
               它排在 syllabus 状态之后、任务列表之前 —— 这条信息解释的是
@@ -196,7 +203,7 @@ export function CourseCard({
 
           {loadError ? (
             <div className="mt-2 space-y-1">
-              <p className="text-xs text-destructive">近期任务加载失败</p>
+              <p className="text-xs text-destructive">{t(lang, 'courses.upcomingLoadFailed')}</p>
               <p
                 className="break-all text-[10px] leading-tight text-muted-foreground/80"
                 title={loadError}
@@ -205,9 +212,9 @@ export function CourseCard({
               </p>
             </div>
           ) : upcomingTasks.length === 0 ? (
-            <p className="mt-2 text-xs text-muted-foreground/70">近期没有待办</p>
+            <p className="mt-2 text-xs text-muted-foreground/70">{t(lang, 'courses.noUpcoming')}</p>
           ) : (
-            <UpcomingTasks tasks={upcomingTasks} />
+            <UpcomingTasks tasks={upcomingTasks} lang={lang} />
           )}
         </Link>
 
@@ -219,14 +226,14 @@ export function CourseCard({
           }}
           className="shrink-0 text-sm text-muted-foreground hover:text-destructive"
         >
-          删除
+          {t(lang, 'common.delete')}
         </button>
       </div>
 
       {isConfirmingDelete ? (
         <div className="mt-4 rounded-lg border border-border bg-muted/40 p-4">
           <p className="text-sm text-foreground">
-            删除「{course.courseName}」？课程及其任务会从列表中隐藏，数据仍保留。
+            {t(lang, 'courses.deleteConfirm', { name: course.courseName })}
           </p>
           <div className="mt-3 flex items-center gap-2">
             <button
@@ -235,7 +242,7 @@ export function CourseCard({
               disabled={isDeleting}
               className="h-8 rounded-md bg-destructive px-3 text-xs font-medium text-destructive-foreground disabled:opacity-50"
             >
-              {isDeleting ? '删除中…' : '确认删除'}
+              {isDeleting ? t(lang, 'common.deleting') : t(lang, 'common.confirmDelete')}
             </button>
             <button
               type="button"
@@ -243,7 +250,7 @@ export function CourseCard({
               disabled={isDeleting}
               className="h-8 rounded-md px-3 text-xs text-muted-foreground"
             >
-              取消
+              {t(lang, 'common.cancel')}
             </button>
           </div>
         </div>
