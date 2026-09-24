@@ -1,4 +1,5 @@
 import Link from 'next/link'
+import { FileText, Folder as FolderIcon } from 'lucide-react'
 
 import { t } from '@/lib/i18n/translate'
 import type { Lang } from '@/lib/i18n/types'
@@ -120,6 +121,7 @@ function Folder({ courseId, lang, node }: { courseId: string; lang: Lang; node: 
   return (
     <details className="border-b border-border last:border-b-0">
       <summary className="flex cursor-pointer flex-wrap items-baseline gap-x-2 gap-y-0.5 px-1 py-2.5 text-sm text-foreground hover:text-ink">
+        <FolderIcon className="h-3.5 w-3.5 shrink-0 text-ink-muted" aria-hidden />
         <span className="font-medium">{node.name}</span>
         <span className="text-xs text-ink-faint">{t(lang, 'files.folderCount', { n: node.totalCount })}</span>
         {node.children.length > 0 && (
@@ -193,6 +195,7 @@ function FileRow({ courseId, lang, file }: { courseId: string; lang: Lang; file:
 
   return (
     <li className="flex items-center gap-3 px-3 py-2">
+      <FileText className="h-3.5 w-3.5 shrink-0 text-ink-muted" aria-hidden />
       <a
         href={file.fileUrl}
         target="_blank"
