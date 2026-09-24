@@ -266,6 +266,7 @@ const zh = {
 
   // ---------- 课程详情页 detail ----------
   'detail.title': '课程详情',
+  'detail.navSyllabus': '课程大纲',
   'detail.loadFailed': '课程详情加载失败',
   'detail.back': '← 返回我的课程',
   'detail.noSemester': '未填写学期与编码',
@@ -722,6 +723,7 @@ export const messages: Record<'zh' | 'en', Record<MessageKey, string>> = {
 
     // ---------- 课程详情页 ----------
     'detail.title': 'Course details',
+    'detail.navSyllabus': 'Syllabus',
     'detail.loadFailed': 'Failed to load course details',
     'detail.back': '← Back to my courses',
     'detail.noSemester': 'Semester and code not set',

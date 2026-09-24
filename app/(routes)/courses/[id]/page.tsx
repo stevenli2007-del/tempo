@@ -5,6 +5,7 @@ import { AssignmentDetail } from '@/components/courses/assignment-detail'
 import { CanvasLink } from '@/components/courses/canvas-link'
 import { CourseFiles } from '@/components/courses/course-files'
 import { CourseActions } from '@/components/courses/course-actions'
+import { CourseDetailNav } from '@/components/courses/course-detail-nav'
 import { ExamReviewSection } from '@/components/courses/exam-review/exam-review-section'
 import { GradePie } from '@/components/courses/grade-pie'
 import { SyllabusUpload } from '@/components/courses/syllabus-upload'
@@ -142,14 +143,22 @@ export default async function CourseDetailPage({ params }: PageProps) {
     (task) => task.submissionScore !== null && task.pointsPossible !== null,
   ).length
 
+  // 左侧目录的四项（标签已按当前语言翻译好，传给客户端组件保持语言无关）。
+  const navItems = [
+    { id: 'syllabus', label: t(lang, 'detail.navSyllabus') },
+    { id: 'assignments', label: t(lang, 'detail.assignments') },
+    { id: 'files', label: t(lang, 'detail.files') },
+    { id: 'exams', label: t(lang, 'detail.examReview') },
+  ]
+
   return (
     <AppShell title={t(lang, 'detail.title')}>
-      <div className="mx-auto max-w-[1100px] space-y-6">
+      <div className="mx-auto max-w-[1500px]">
         <Link href="/courses" className="inline-block text-sm text-ink-muted hover:text-ink">
           {t(lang, 'detail.back')}
         </Link>
 
-        <div>
+        <div className="mt-2">
           <h1 className="text-2xl font-semibold tracking-tight">{detail.courseName}</h1>
           <p className="mt-1 text-sm text-ink-muted">
             {[detail.semester, meta].filter(Boolean).join(' · ') || t(lang, 'detail.noSemester')}
@@ -158,76 +167,90 @@ export default async function CourseDetailPage({ params }: PageProps) {
 
         <CourseActions course={detail} lang={lang} />
 
-        {/* ---------- 概览：宽屏三栏，一屏看完"这门课现在什么样" ---------- */}
-        <div className="grid gap-4 lg:grid-cols-3" data-course-overview>
-          <section className="rounded-xl border border-border bg-card p-5 shadow-sm">
-            <h2 className="mb-3 text-sm font-medium text-foreground">{t(lang, 'detail.canvasLink')}</h2>
-            <CanvasLink
-              courseId={detail.id}
-              lang={lang}
-              canvasCourseId={detail.canvasCourseId}
-              hasCredential={hasCredential}
-            />
-          </section>
+        {/* P0-5-2：左侧目录（sticky）+ 右侧四段锚点内容。取数/判定/写入零改动，纯布局重构。 */}
+        <div className="mt-6 grid gap-8 lg:grid-cols-[200px_1fr]">
+          <CourseDetailNav items={navItems} />
 
-          <section className="rounded-xl border border-border bg-card p-5 shadow-sm lg:col-span-2">
-            <h2 className="mb-3 text-sm font-medium text-foreground">{t(lang, 'detail.gradeComposition')}</h2>
-            <GradePie components={detail.gradeComponents} lang={lang} />
-          </section>
-        </div>
+          <div className="min-w-0 space-y-6">
+            {/* ---------- 课程大纲：Canvas 关联 + 成绩构成 + 课程板块（原「五个板块」） ---------- */}
+            <section id="syllabus" className="scroll-mt-24 space-y-6">
+              <div className="grid gap-4 lg:grid-cols-3" data-course-overview>
+                <section className="rounded-xl border border-border bg-card p-5 shadow-sm">
+                  <h2 className="mb-3 text-sm font-medium text-foreground">{t(lang, 'detail.canvasLink')}</h2>
+                  <CanvasLink
+                    courseId={detail.id}
+                    lang={lang}
+                    canvasCourseId={detail.canvasCourseId}
+                    hasCredential={hasCredential}
+                  />
+                </section>
 
-        {/* ---------- 作业详情（折叠）：默认收起，标题上带条数 ---------- */}
-        <details className="rounded-xl border border-border bg-card shadow-sm" data-assignments-detail>
-          <summary className="cursor-pointer list-none p-5 text-sm font-medium text-foreground">
-            {t(lang, 'detail.assignments')}
-            <span className="ml-2 font-normal text-ink-muted">
-              {/* 🔴 说的必须和展开后看到的是同一件事（P0-3-17 验收修正，2026-09-17）：
-                  区里只列「已出分」的行，所以这里也报已出分的条数；总数另说一句，
-                  好让用户知道被过滤掉多少，不至于以为作业少了。 */}
-              {courseTasks.error
-                ? t(lang, 'detail.loadFailedShort')
-                : scoredCount > 0
-                  ? t(lang, 'detail.scoredLine', { scored: scoredCount }) +
-                    t(lang, 'detail.scoredUnscored', { unscored: courseTaskList.length - scoredCount })
-                  : t(lang, 'detail.totalNoScore', { n: courseTaskList.length })}
-            </span>
-          </summary>
-          <div className="px-5 pb-5">
-            {/* 查询失败必须明说 —— 一个静默空列表会被读成"这门课没有作业"（CodingRules 7）。 */}
-            {courseTasks.error ? (
-              <p role="alert" className="text-sm text-destructive">
-                {t(lang, 'detail.assignmentsFailed', { error: courseTasks.error })}
-              </p>
-            ) : (
-              <AssignmentDetail tasks={courseTaskList} now={now} lang={lang} />
-            )}
+                <section className="rounded-xl border border-border bg-card p-5 shadow-sm lg:col-span-2">
+                  <h2 className="mb-3 text-sm font-medium text-foreground">{t(lang, 'detail.gradeComposition')}</h2>
+                  <GradePie components={detail.gradeComponents} lang={lang} />
+                </section>
+              </div>
+
+              <section className="rounded-xl border border-border bg-card p-5 shadow-sm">
+                <h2 className="mb-3 text-sm font-medium text-foreground">{t(lang, 'detail.sections')}</h2>
+                <SectionEditor
+                  courseId={detail.id}
+                  sections={{
+                    gradeComposition: detail.gradeComponents,
+                    courseOutline: detail.outlineItems,
+                    testDates: detail.examDates,
+                    officeHours: detail.officeHours,
+                    submissionPolicy: detail.submissionPolicies,
+                  }}
+                  parseStatus={detail.syllabus ? detail.syllabus.parseStatus : 'none'}
+                  uploadSlot={
+                    <SyllabusUpload courseId={detail.id} lang={lang} syllabus={detail.syllabus} />
+                  }
+                />
+              </section>
+            </section>
+
+            {/* ---------- 作业详情（折叠）：默认收起，标题上带条数 ---------- */}
+            <section id="assignments" className="scroll-mt-24">
+              <details className="rounded-xl border border-border bg-card shadow-sm" data-assignments-detail>
+                <summary className="cursor-pointer list-none p-5 text-sm font-medium text-foreground">
+                  {t(lang, 'detail.assignments')}
+                  <span className="ml-2 font-normal text-ink-muted">
+                    {/* 🔴 说的必须和展开后看到的是同一件事（P0-3-17 验收修正，2026-09-17）：
+                        区里只列「已出分」的行，所以这里也报已出分的条数；总数另说一句，
+                        好让用户知道被过滤掉多少，不至于以为作业少了。 */}
+                    {courseTasks.error
+                      ? t(lang, 'detail.loadFailedShort')
+                      : scoredCount > 0
+                        ? t(lang, 'detail.scoredLine', { scored: scoredCount }) +
+                          t(lang, 'detail.scoredUnscored', { unscored: courseTaskList.length - scoredCount })
+                        : t(lang, 'detail.totalNoScore', { n: courseTaskList.length })}
+                  </span>
+                </summary>
+                <div className="px-5 pb-5">
+                  {/* 查询失败必须明说 —— 一个静默空列表会被读成"这门课没有作业"（CodingRules 7）。 */}
+                  {courseTasks.error ? (
+                    <p role="alert" className="text-sm text-destructive">
+                      {t(lang, 'detail.assignmentsFailed', { error: courseTasks.error })}
+                    </p>
+                  ) : (
+                    <AssignmentDetail tasks={courseTaskList} now={now} lang={lang} />
+                  )}
+                </div>
+              </details>
+            </section>
+
+            {/* ---------- 资料（P0-3-19）：按 Canvas 文件夹结构分组，点开回 Canvas ---------- */}
+            <section id="files" className="scroll-mt-24">
+              <CourseFiles courseId={detail.id} lang={lang} files={courseFiles.files} error={courseFiles.error} />
+            </section>
+
+            {/* ---------- 考试复习（P0-3-31）：数据源是 exam_dates（只会有考试）→ 非考试任务天然无入口 ---------- */}
+            <section id="exams" className="scroll-mt-24">
+              <ExamReviewSection courseId={detail.id} lang={lang} exams={detail.examDates} />
+            </section>
           </div>
-        </details>
-
-        {/* ---------- 资料（P0-3-19）：按 Canvas 文件夹结构分组，点开回 Canvas ---------- */}
-        <CourseFiles courseId={detail.id} lang={lang} files={courseFiles.files} error={courseFiles.error} />
-
-        {/* ---------- 考试复习（P0-3-31）：数据源是 exam_dates（只会有考试）→ 非考试任务天然无入口 ---------- */}
-        <ExamReviewSection courseId={detail.id} lang={lang} exams={detail.examDates} />
-
-        {/* ---------- 课程板块（原「五个板块」，含 syllabus 上传） ---------- */}
-        <section className="rounded-xl border border-border bg-card p-5 shadow-sm">
-          <h2 className="mb-3 text-sm font-medium text-foreground">{t(lang, 'detail.sections')}</h2>
-          <SectionEditor
-            courseId={detail.id}
-            sections={{
-              gradeComposition: detail.gradeComponents,
-              courseOutline: detail.outlineItems,
-              testDates: detail.examDates,
-              officeHours: detail.officeHours,
-              submissionPolicy: detail.submissionPolicies,
-            }}
-            parseStatus={detail.syllabus ? detail.syllabus.parseStatus : 'none'}
-            uploadSlot={
-              <SyllabusUpload courseId={detail.id} lang={lang} syllabus={detail.syllabus} />
-            }
-          />
-        </section>
+        </div>
       </div>
     </AppShell>
   )
