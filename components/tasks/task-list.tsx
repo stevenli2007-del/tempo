@@ -9,6 +9,7 @@ import { courseColorClasses, courseColorKey } from '@/lib/courses/course-color'
 import { isCanvasDone, isEffectivelyDone, isExamTask } from '@/lib/tasks/progress'
 import { SUBMISSION_BADGE_CLASS, submissionBadge } from '@/lib/tasks/submission'
 import { useI18n, useT } from '@/lib/i18n/use-i18n'
+import { NOTES_UPDATED_EVENT } from '@/lib/notes/event'
 import type { TaskSource, TaskStatus, TaskSubmissionState, TaskType } from '@/types/task'
 
 /**
@@ -247,6 +248,9 @@ export function TaskList({ items }: TaskListProps) {
   async function handleToggle(item: TaskListItem) {
     setError(null)
     setBusyId(item.id)
+    // 记入与彩带只在「标记完成」这个方向上发生 —— 取消勾选不扣音符
+    // （倒扣就是惩罚，ADR-016 R5 明确禁止惩罚性机制）。
+    const markingDone = item.status !== 'done'
     try {
       const response = await fetch(`/api/v1/tasks/${item.id}`, {
         method: 'PATCH',
@@ -262,6 +266,15 @@ export function TaskList({ items }: TaskListProps) {
             : undefined
         setError(typeof message === 'string' ? message : t('common.actionFailed', { status: response.status }))
         return
+      }
+
+      // 音符 + 彩带（P0-5-4）：**记入在服务端做**（PATCH 里，幂等），
+      // 这里只广播"刚完成了一件" —— 侧栏重新取数、彩带层放一次。
+      // 刻意不等任何响应：彩带是被动回声，不该让它反过来拖慢勾选。
+      if (markingDone) {
+        window.dispatchEvent(
+          new CustomEvent(NOTES_UPDATED_EVENT, { detail: { title: item.title } }),
+        )
       }
 
       // 数据由服务端组件持有，刷新即回到最新状态。

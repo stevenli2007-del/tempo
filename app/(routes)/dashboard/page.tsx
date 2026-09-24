@@ -19,6 +19,7 @@ import type { CanvasCredentialMeta } from '@/types/canvas'
 import { COURSE_COLUMNS, toCourse } from '@/lib/courses'
 import type { CourseRow } from '@/lib/courses'
 import { dropCanvasExamPlaceholders, loadTasks, loadUpcomingExams } from '@/lib/tasks'
+import { awardNotesForDone } from '@/lib/notes/store'
 import { formatDue } from '@/lib/tasks/format'
 import { buildTodayTasks } from '@/lib/tasks/today'
 import {
@@ -275,6 +276,29 @@ export default async function DashboardPage({
   // 不过滤的话同一场考试在页面上是两条（P0-3-36）。
   const visibleTasks = dropCanvasExamPlaceholders(overview.tasks)
   const today = buildTodayTasks(visibleTasks, now, OVERVIEW_RANGE_DAYS, lang)
+
+  /**
+   * 音符懒补（P0-5-4）——**记入点之二**：Canvas 代判完成的那部分。
+   *
+   * ### 为什么不写在同步管道里
+   * 同步每轮都跑（打开应用即触发），在那里记等于把"每轮同步"变成"每轮写音符表"；
+   * 更关键的是 `ADR-015`：同步路径只写外部真相，不写属于用户这一侧的东西。
+   * 而 Steven 2026-09-24 拍板的是「Canvas 代判完成**也给**音符，但零操作」——
+   * 所以放在**读**这一侧：打开总览页时按当前可见的完成态补记，用户什么都不用做。
+   *
+   * ### 幂等
+   * `awardNotesForDone()` 只补还没记过的（主键 `(user_id, task_id)` 是最后一关），
+   * 所以这一行每渲染一次就跑一次是安全的 —— 第二次往后全是零写入。
+   *
+   * ### 失败不影响页面
+   * 音符是"回声"不是功能：查不动就让侧栏那一行不显示（端点也会如实报 500），
+   * 绝不能让记入失败把整个总览页打挂。但必须留日志（CodingRules 7：不吞异常）。
+   */
+  try {
+    await awardNotesForDone(supabase, user.id, visibleTasks)
+  } catch (cause) {
+    console.error('[notes] 懒补失败', cause instanceof Error ? cause.message : cause)
+  }
   const calendar = buildWeekCalendar(visibleTasks, now, lang)
   const exams = buildUpcomingExams(examPool.tasks, now, EXAM_LOOKAHEAD, lang)
 

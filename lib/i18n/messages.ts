@@ -26,6 +26,13 @@ const zh = {
   'nav.feedback': '反馈',
   'nav.feedbackSr': '（在新标签页打开）',
 
+  // ---------- 音符（P0-5-4）----------
+  // 🔴 R5：这里**绝不出现**「你真棒 / 继续保持 / 冲刺」一类庆祝性激励文案。
+  //    音符只是"已完成事项"的一个计数，文案一律陈述事实，不做评价、不设目标。
+  'notes.label': '音符',
+  'notes.total': '{n} 项已完成',
+  'notes.awardedSr': '「{title}」已完成',
+
   // ---------- 登录 / 注册 ----------
   'auth.loginTitle': '登录 Tempo',
   'auth.loginSubtitle': '欢迎回来',
@@ -504,6 +511,11 @@ export const messages: Record<'zh' | 'en', Record<MessageKey, string>> = {
     'nav.rewatchTutorial': 'Rewatch tutorial',
     'nav.feedback': 'Feedback',
     'nav.feedbackSr': '(opens in a new tab)',
+
+    // ---------- 音符（P0-5-4）----------
+    'notes.label': 'Notes',
+    'notes.total': '{n} completed',
+    'notes.awardedSr': 'Completed: {title}',
 
     // ---------- 登录 / 注册 ----------
     'auth.loginTitle': 'Sign in to Tempo',

@@ -226,3 +226,46 @@
     text-wrap: balance;
   }
 }
+
+/* ============================================================
+   音符彩带（P0-5-4）
+   ------------------------------------------------------------
+   ⚠️ 刻意写成**普通 CSS 类**而不是 Tailwind 工具类：
+   Tailwind v4「类名写了 ≠ 类被生成」—— 运行时拼出来的类名扫不到，
+   而这里是**动画**，扫不到 = 彩带一动不动、且不报错（CodingRules §10.1 第 9 条）。
+   写在 globals.css 里的类恒久存在，不依赖扫描。
+
+   彩带**不带任何文字**：ADR-016 R5 禁庆祝性激励文案，一句「做得好」
+   就把"记了一枚音符"变成"评价体系"。视觉上只有颜色与运动。
+   ============================================================ */
+
+@keyframes note-confetti-fall {
+  0% {
+    opacity: 0;
+    transform: translate3d(0, -12vh, 0) rotate(0deg);
+  }
+  10% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+    transform: translate3d(0, 86vh, 0) rotate(var(--nc-rot, 360deg));
+  }
+}
+
+.note-confetti {
+  position: absolute;
+  top: 0;
+  border-radius: 2px;
+  animation-name: note-confetti-fall;
+  animation-timing-function: cubic-bezier(0.3, 0.5, 0.4, 1);
+  animation-fill-mode: both;
+}
+
+/* 系统开了「减弱动态效果」时不画彩带（由组件侧判断，这里只兜底：
+   万一有人直接用了这个类，也不该看见满屏飘落）。 */
+@media (prefers-reduced-motion: reduce) {
+  .note-confetti {
+    display: none;
+  }
+}

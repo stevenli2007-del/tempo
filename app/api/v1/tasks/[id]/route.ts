@@ -2,6 +2,8 @@ import { TASK_COLUMNS, loadTaskById, toTask } from '@/lib/tasks'
 import type { TaskRow } from '@/lib/tasks'
 import { normalizeDueDate } from '@/lib/tasks/manual'
 import { normalizeScoreInput } from '@/lib/tasks/score'
+import { isEffectivelyDone } from '@/lib/tasks/progress'
+import { awardNotesForDone } from '@/lib/notes/store'
 import { getCurrentUser, internalError, jsonError, jsonOk } from '@/lib/api/response'
 import { UUID_PATTERN } from '@/lib/api/params'
 import type { TaskScoreSource, TaskStatus } from '@/types/task'
@@ -189,7 +191,29 @@ export async function PATCH(request: Request, { params }: RouteContext) {
     }
 
     // 课程名沿用读到的那份：update 的响应里没有它，而这门课刚刚已被确认未归档。
-    return jsonOk(request, toTask(data as TaskRow, existing.courseName))
+    const updated = toTask(data as TaskRow, existing.courseName)
+
+    /**
+     * 音符（P0-5-4）——**记入点之一**：用户亲手标记完成，当场记一枚。
+     *
+     * - 判据只有 `isEffectivelyDone()`（在 `awardNotesForDone` 内部），这里**不另写**
+     *   `status === 'done'`：那样"手勾的给、Canvas 判的不给"就成了两套口径，
+     *   而用户在同一个界面上看到的是同一个勾选框。
+     * - 幂等由主键 `(user_id, task_id)` 兜底：重复点同一个勾不会重复计（验收 ②）。
+     * - 取消勾选**不回退**：倒扣就是惩罚，ADR-016 R5 禁止。
+     *
+     * 🔴 记入失败**不回滚**这次状态更新：状态是用户刚做的动作，音符是它的回声 ——
+     * 让回声盖掉动作是颠倒主次。但必须留日志，不能静默（CodingRules 7）。
+     * 下一次打开总览页的懒补会把这一枚补回来。
+     */
+    if (isEffectivelyDone(updated)) {
+      const notes = await awardNotesForDone(supabase, user.id, [updated])
+      if (notes.error) {
+        console.error('[notes] 记入失败', { taskId: id, reason: notes.error })
+      }
+    }
+
+    return jsonOk(request, updated)
   } catch (error) {
     return internalError(request, error)
   }
