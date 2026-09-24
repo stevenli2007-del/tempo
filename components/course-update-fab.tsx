@@ -23,13 +23,18 @@ import { useState } from "react"
 
 import { useT } from "@/lib/i18n/use-i18n"
 
+import { LinkComposer } from "@/components/courses/link-composer"
 import { UpdateActions, UpdateComposer, UpdateReview } from "@/components/tasks/update-flow-parts"
 import { useCourseUpdateFlow } from "@/components/tasks/use-course-update-flow"
+
+/** 浮窗两段：`update` = 原有的更新课程流程；`link` = P0-5-3 补的「随手加一条监控链接」。 */
+type FabMode = "update" | "link"
 
 export function CourseUpdateFab() {
   const flow = useCourseUpdateFlow()
   const t = useT()
   const [open, setOpen] = useState(false)
+  const [mode, setMode] = useState<FabMode>("update")
 
   return (
     <>
@@ -39,6 +44,7 @@ export function CourseUpdateFab() {
         title={t("fab.title")}
         onClick={() => {
           setOpen(true)
+          setMode("update") // 每次点开都回到主流程 —— 别让上次停在「监控链接」上
           flow.startSession()
         }}
         className="fixed bottom-6 right-6 z-50 flex size-14 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-lg transition hover:scale-105 active:scale-95"
@@ -67,15 +73,50 @@ export function CourseUpdateFab() {
               </button>
             </div>
 
-            <UpdateComposer flow={flow} />
-            <UpdateReview flow={flow} />
-            <UpdateActions
-              flow={flow}
-              onConfirmSuccess={() => {
-                // 成功后短暂回显回执再收起（原行为，P0-3-8 验收过）。
-                setTimeout(() => setOpen(false), 1200)
-              }}
-            />
+            {/* P0-5-3：两个入口共用这浮窗与同一份课程下拉，避免「加链接」再长出一个新弹窗。 */}
+            <div className="mb-4 flex gap-1 rounded-lg bg-muted p-1">
+              {(
+                [
+                  ["update", "fab.tabUpdate"],
+                  ["link", "fab.tabLink"],
+                ] as const
+              ).map(([value, key]) => (
+                <button
+                  key={value}
+                  type="button"
+                  onClick={() => setMode(value)}
+                  aria-pressed={mode === value}
+                  className={
+                    mode === value
+                      ? "flex-1 rounded-md bg-card px-3 py-1.5 text-sm font-medium text-ink shadow-sm"
+                      : "flex-1 rounded-md px-3 py-1.5 text-sm text-muted-foreground transition hover:text-ink"
+                  }
+                >
+                  {t(key)}
+                </button>
+              ))}
+            </div>
+
+            {mode === "link" ? (
+              <LinkComposer
+                courses={flow.courses}
+                courseId={flow.courseId}
+                onCourseChange={flow.setCourseId}
+                loadingCourses={flow.loadingCourses}
+              />
+            ) : (
+              <>
+                <UpdateComposer flow={flow} />
+                <UpdateReview flow={flow} />
+                <UpdateActions
+                  flow={flow}
+                  onConfirmSuccess={() => {
+                    // 成功后短暂回显回执再收起（原行为，P0-3-8 验收过）。
+                    setTimeout(() => setOpen(false), 1200)
+                  }}
+                />
+              </>
+            )}
           </div>
         </div>
       )}

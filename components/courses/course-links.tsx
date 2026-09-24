@@ -13,6 +13,7 @@
 import { useState } from 'react'
 
 import { SCHOOL_TIME_ZONE } from '@/lib/time'
+import { isHttpUrl } from '@/lib/course-links/url'
 import type { CourseLinkView, LinkCheckStatus } from '@/lib/course-links/store'
 import { t, type MessageKey } from '@/lib/i18n/translate'
 import type { Lang } from '@/lib/i18n/types'
@@ -60,7 +61,8 @@ export function CourseLinks({ courseId, lang, links: initialLinks, error: initia
     setFormError(null)
     const raw = url.trim()
     // 轻量预检（真正的 SSRF/协议校验在服务端，那里是权威）。
-    if (!/^https?:\/\//i.test(raw)) {
+    // ⚠️ 判据与浮窗共用 `isHttpUrl()` —— 别在这里另写一份正则。
+    if (!isHttpUrl(raw)) {
       setFormError(t(lang, 'links.invalidUrl'))
       return
     }
