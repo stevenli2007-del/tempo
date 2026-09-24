@@ -56,7 +56,7 @@
 
 | 项 | 值 |
 |---|---|
-| **当前卡** | `P0-5-3` **外部课程网站链接监控**（🟢 **已上线待 Steven 验收 2026-09-24**；依赖 P0-5-2 ✅。迁移 `20260925000000_course_links.sql` 已由 Steven 跑，`probe:schema` 实证：course_links 表在 / last_status CHECK 在拦 / `messages.type` 放行 'link_change' / 零残留；`1a4053f`+`712eafb` 已 push + Vercel success；无凭证探针 `/api/v1/links/check` → 401、`/api/v1/courses/:id/links` → 401）。**P0-5 批次插在 3-12/13 之前**（2026-09-23 Steven 拍板：视觉 freeze 应最后做，先上功能）。五张做完 → 回 `P0-3-12` 视觉扫尾 → `P0-3-13` freeze（出口门，捎带换域名，见出口顺序行）。 |
+| **当前卡** | `P0-5-3` **外部课程网站链接监控**（🟢 **已上线待 Steven 验收 2026-09-24**；依赖 P0-5-2 ✅。迁移 `20260925000000_course_links.sql` 已由 Steven 跑，`probe:schema` 实证：course_links 表在 / last_status CHECK 在拦 / `messages.type` 放行 'link_change' / 零残留；`1a4053f`+`712eafb` 已 push + Vercel success；无凭证探针 `/api/v1/links/check` → 401、`/api/v1/courses/:id/links` → 401）。**补充 2026-09-24（Steven 要求）：全局浮窗 FAB 加「监控链接」入口** —— 顶部两段切换（`更新课程` / `监控链接`），新增 `components/courses/link-composer.tsx`（只写不列，列表/删除仍在课程详情页，避免第二个真相源）；URL 预检抽成零依赖 `lib/course-links/url.ts` 两处共用。`2256ac0` 已 push + Vercel success（`/login` 200、`/api/v1/links/check` 401）。**P0-5 批次插在 3-12/13 之前**（2026-09-23 Steven 拍板：视觉 freeze 应最后做，先上功能）。五张做完 → 回 `P0-3-12` 视觉扫尾 → `P0-3-13` freeze（出口门，捎带换域名，见出口顺序行）。 |
 | **上一张** | `P0-5-2` 课程详情页 Data C8 式左侧目录 + 资料图标（✅ **Steven 验收通过 2026-09-23 夜**，`e78b486` + 修订 `916fd13` + 图标 `603ef1d` 已 push）。纯布局重构，取数/判定/写入零改动 |
 | **本批新增（2026-09-19 Steven 拍板）** | `P0-3-29 ~ P0-3-34` 六张 = 「发布前必须补的六件事」，**全部排在 `P0-3-12` 视觉扫尾之前**（3-12 自身要求排在所有 UI 改动之后）。来源：Steven 2026-09-19 六段产品意见，理由「第一个版本不抓住用户，后面发的版本就没人感兴趣」。**🔴 六张已于 2026-09-21 全部验收完毕，不再追加**（配对词表缺口、答题自动判分**均搁置**）。详见 §4 排序说明 |
 | **下一张** | `P0-5-4` **音符储值 + 彩带动画**（🔵 未开工；依赖 P0-5-3）→ 之后按 5-5 顺序推进，**一次一张卡** |
