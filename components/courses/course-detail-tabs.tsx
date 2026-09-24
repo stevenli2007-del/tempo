@@ -11,6 +11,7 @@ import { useState } from 'react'
 
 import { SectionEditor } from '@/components/sections/section-editor'
 import type { CourseFileView } from '@/lib/course-files/grouping'
+import type { CourseLinkView } from '@/lib/course-links/store'
 import { t } from '@/lib/i18n/translate'
 import { Lang } from '@/lib/i18n/types'
 import type { CourseDetail } from '@/types/course'
@@ -19,6 +20,7 @@ import type { Task } from '@/types/task'
 import { AssignmentDetail } from './assignment-detail'
 import { CanvasLink } from './canvas-link'
 import { CourseFiles } from './course-files'
+import { CourseLinks } from './course-links'
 import { CourseDetailNav, NavItem } from './course-detail-nav'
 import { ExamReviewSection } from './exam-review/exam-review-section'
 import { GradePie } from './grade-pie'
@@ -34,6 +36,7 @@ type CourseDetailTabsProps = {
   scoredCount: number
   now: Date
   courseFiles: { error: string | null; files: CourseFileView[] }
+  courseLinks: { error: string | null; links: CourseLinkView[] }
 }
 
 export function CourseDetailTabs({
@@ -46,6 +49,7 @@ export function CourseDetailTabs({
   scoredCount,
   now,
   courseFiles,
+  courseLinks,
 }: CourseDetailTabsProps) {
   const [activeTab, setActiveTab] = useState(navItems[0]?.id ?? 'syllabus')
 
@@ -124,7 +128,15 @@ export function CourseDetailTabs({
 
         {/* ---------- 资料 ---------- */}
         {activeTab === 'files' && (
-          <CourseFiles courseId={detail.id} lang={lang} files={courseFiles.files ?? []} error={courseFiles.error ?? null} />
+          <div className="space-y-6">
+            <CourseLinks
+              courseId={detail.id}
+              lang={lang}
+              links={courseLinks.links ?? []}
+              error={courseLinks.error ?? null}
+            />
+            <CourseFiles courseId={detail.id} lang={lang} files={courseFiles.files ?? []} error={courseFiles.error ?? null} />
+          </div>
         )}
 
         {/* ---------- 考试复习 ---------- */}

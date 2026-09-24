@@ -90,6 +90,17 @@ const practiceTestApplier: MessageApplier = async () => ({
 })
 
 /**
+ * `link_change`：外部链接变更通知（P0-5-3 产出）。
+ *
+ * 与 `material` 同一性质 —— 只报"变了 / 哪块变了"，**确认只代表看到了**，
+ * 没有业务数据要写（ADR-015 / 卡面：零写入落点）。这是**刻意**的空写入。
+ */
+const linkChangeApplier: MessageApplier = async () => ({
+  ok: true,
+  summary: '知道了（外部链接有更新，详情见消息里的变化点）',
+})
+
+/**
  * 加载器表。
  *
  * `satisfies Record<ApplierReadyType, ApplierLoader>` 是**编译期**保证：
@@ -100,6 +111,8 @@ const APPLIERS = {
   material: async () => materialApplier,
   // 同样是零依赖的空写入 → 就地定义，不必为它单开一个 appliers/ 文件。
   practice_test: async () => practiceTestApplier,
+  // P0-5-3：外部链接变更通知，与 material 同性质的空写入（确认只代表看到了，无业务数据可写）。
+  link_change: async () => linkChangeApplier,
   announcement: async () => (await import('./appliers/announcement')).announcementApplier,
   // 3-20 的写入器同样惰性加载：它 import 了 `syncExamToTask` / `loadActiveCourseIds`，
   // 顶层引入会把服务端依赖链拖进任何 import 本文件的调用方（见上方 ①）。

@@ -45,6 +45,7 @@ export const MESSAGE_TYPE_LABELS: Record<MessageType, string> = {
   routine: '学习计划',
   material: '资料索引',
   announcement: '课程公告',
+  link_change: '课程链接变更',
 }
 
 /** 默认的确认按钮文案。 */
@@ -414,7 +415,9 @@ export function toMessageView(
       (message.type === 'announcement' && message.payload.landing === false) ||
       (message.type === 'syllabus_drift' && driftStatus === 'clean') ||
       message.type === 'practice_test' ||
-      message.type === 'material'
+      message.type === 'material' ||
+      // P0-5-3：外部链接变更通知，确认什么都不写 → 叫「知道了」。
+      message.type === 'link_change'
         ? ACK_LABEL
         : CONFIRM_LABEL,
     summaryPoints,

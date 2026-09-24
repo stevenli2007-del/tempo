@@ -26,6 +26,7 @@ export const MESSAGE_TYPES: readonly MessageType[] = [
   'routine',
   'material',
   'announcement',
+  'link_change',
 ]
 
 /** 所有合法的 `messages.status`。与迁移的 CHECK 约束必须一致。 */
@@ -66,6 +67,9 @@ export const APPLIER_READY_TYPES = [
   // "去用它"的入口 —— 所以它的 applier 是**刻意的空写入**（同 material）。
   // 真正的行动入口是 `payload.paperPath` 派生成的「打开自测卷 →」，不是确认按钮。
   'practice_test',
+  // P0-5-3：外部链接变更通知。只报"变了 / 哪块变了"，**零写入落点**（ADR-015 / 卡面），
+  // 确认即"知道了"收走，与 material / practice_test 同性质 → 空写入。
+  'link_change',
 ] as const
 
 export type ApplierReadyType = (typeof APPLIER_READY_TYPES)[number]

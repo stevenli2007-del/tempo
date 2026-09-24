@@ -47,6 +47,13 @@ const materialUndoer: MessageUndoer = async () => ({ ok: true })
 const practiceTestUndoer: MessageUndoer = async () => ({ ok: true })
 
 /**
+ * P0-5-3：link_change 与 material / practice_test 同性质 —— 确认只代表"看到了"，
+ * 没有任何业务数据被写入（零落点），所以没有行可回滚。空撤销器只为键一致，
+ * 且 `appliedCount` 为 0 时界面不会显示撤销按钮。
+ */
+const linkChangeUndoer: MessageUndoer = async () => ({ ok: true })
+
+/**
  * 加载器表（与 APPLIERS 同形）。这里不需要动态 import（撤销只在服务端跑，
  * 不存在"把服务端依赖拖进客户端图"的问题），直接静态引用。
  */
@@ -57,6 +64,8 @@ const UNDOERS = {
   // ⚠️ 3-20 的撤销器与公告那一个**本质不同**：漂移里有 update（改期），
   // 撤销要按确认时留下的旧值快照写回去，不能按 id 删。见 `undoers/syllabus-drift.ts`。
   syllabus_drift: syllabusDriftUndoer,
+  // P0-5-3：link_change 零写入 → 空撤销器（与 material / practice_test 同性质）。
+  link_change: linkChangeUndoer,
 } satisfies Record<ApplierReadyType, MessageUndoer>
 
 /** 宽化后的索引视图。 */

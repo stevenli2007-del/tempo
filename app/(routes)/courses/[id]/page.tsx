@@ -8,6 +8,7 @@ import { UUID_PATTERN } from '@/lib/api/params'
 import { loadCredentialMeta } from '@/lib/canvas/credentials'
 import { loadCourseDetail } from '@/lib/course-detail'
 import { loadCourseFiles } from '@/lib/course-files/load'
+import { listCourseLinks } from '@/lib/course-links/store'
 import { createClient } from '@/lib/supabase/server'
 import { dropCanvasExamPlaceholders, loadTasks } from '@/lib/tasks'
 import { getLang } from '@/lib/i18n/server'
@@ -80,10 +81,11 @@ export default async function CourseDetailPage({ params }: PageProps) {
   // 三路查询互不依赖，并行发（详情 + 该课全部任务 + 资料索引）。
   // `now` 服务端算一次注入纯函数，避免与客户端各算一遍导致 hydration mismatch。
   const now = new Date()
-  const [{ found, detail, error }, courseTasks, courseFiles] = await Promise.all([
+  const [{ found, detail, error }, courseTasks, courseFiles, courseLinks] = await Promise.all([
     loadCourseDetail(supabase, id),
     loadTasks(supabase, { courseIds: [id], until: null, limit: COURSE_TASK_LIMIT, offset: 0 }),
     loadCourseFiles(supabase, id),
+    listCourseLinks(supabase, id),
   ])
 
   // 查询失败必须让用户看见，不能降级成「课程不存在」（CodingRules 7）。
@@ -171,6 +173,7 @@ export default async function CourseDetailPage({ params }: PageProps) {
           scoredCount={scoredCount}
           now={now}
           courseFiles={courseFiles}
+          courseLinks={courseLinks}
         />
       </div>
     </AppShell>

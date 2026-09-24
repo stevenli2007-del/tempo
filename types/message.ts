@@ -15,14 +15,21 @@
 
 /**
  * 提案类型。与迁移的 CHECK 约束**必须一致**
- * （`20260917200000_messages.sql` 定前四个，`20260919000000_announcements.sql` 加第五个）。
+ * （`20260917200000_messages.sql` 定前四个，`20260919000000_announcements.sql` 加第五个，
+ * `20260925000000_course_links.sql` 加第六个 `link_change`）。
  *
  * 🔴 加取值要**四处同改**（CodingRules §10.1 第 16 条），漏一处 `toMessage()` 返回 null、
  * 消息在列表里**静默消失**：
- * ① 本文件；② `lib/messages.ts` 的 `MESSAGE_TYPES`；③ 迁移的 CHECK 约束；
+ * ① 本文件；② `lib/messages/registry.ts` 的 `MESSAGE_TYPES`；③ 迁移的 CHECK 约束；
  * ④ `scripts/regress-messages.ts` 的断言。
  */
-export type MessageType = 'syllabus_drift' | 'practice_test' | 'routine' | 'material' | 'announcement'
+export type MessageType =
+  | 'syllabus_drift'
+  | 'practice_test'
+  | 'routine'
+  | 'material'
+  | 'announcement'
+  | 'link_change'
 
 /** 提案状态。同上，与迁移的 CHECK 约束一致。 */
 export type MessageStatus = 'pending' | 'accepted' | 'dismissed' | 'undone'

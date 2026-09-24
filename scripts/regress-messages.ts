@@ -123,9 +123,10 @@ console.log("toMessageView（UI 可用性）")
   //    ⚠️ 每张卡接入自己的 applier 时都要改这一行（3-19 接 material、3-25 接
   //    announcement、3-20 接 syllabus_drift、3-23 接 practice_test）。
   check(
-    "applier 就绪：material + announcement + syllabus_drift + practice_test",
+    "applier 就绪：material + announcement + syllabus_drift + practice_test + link_change",
     isApplierReady("material") && isApplierReady("announcement") &&
       isApplierReady("syllabus_drift") && isApplierReady("practice_test") &&
+      isApplierReady("link_change") &&
       !isApplierReady("routine"),
   )
 }
@@ -193,6 +194,21 @@ console.log("公告视图（P0-3-25）")
   const material = toMessageView(makeMessage("material", "pending"))
   check("material（空写入）→ 文案「知道了」", material.confirmLabel === "知道了", material.confirmLabel)
   check("material 仍可确认（走空写入回执）", material.canAccept === true)
+
+  // 10b. 外部链接变更通知同样是**空写入**（applier 只回执、不碰任何业务表）→ 叫「知道了」。
+  //      P0-5-3 新增，与 material / practice_test 同一口径（只报变化、零落点）。
+  const linkChange = toMessageView(
+    makeMessage("link_change", "pending", {
+      courseName: "MATH 53",
+      sourceUrl: "https://math.berkeley.edu/~gsi/fa26",
+      details: ["内容更新：Office hours 改到 周三 14:00", "新增内容：Midterm 2 日程"],
+    }),
+  )
+  check("link_change 类型标签", linkChange.typeLabel === "课程链接变更", linkChange.typeLabel)
+  check("link_change（空写入）→ 文案「知道了」", linkChange.confirmLabel === "知道了", linkChange.confirmLabel)
+  check("link_change 仍可确认（走空写入回执）", linkChange.canAccept === true)
+  check("link_change 原文链接透传", linkChange.sourceUrl?.endsWith("/fa26") === true, String(linkChange.sourceUrl))
+  check("link_change 渲染变化点详情", linkChange.lines.length === 2, `lines=${linkChange.lines.length}`)
 
   // 11. 🔴 sourceUrl 白名单：payload 是 jsonb，只放行 http(s)。
   //     `javascript:` 如果漏过去，渲染层的 <a href> 就成了"点一下执行"的口子，

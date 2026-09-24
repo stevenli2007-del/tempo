@@ -63,6 +63,7 @@
 | `message_summaries` | 公告 AI 要点缓存（`ok`/`failed` 都落行，failed = 防重试账） | ✅（P0-3-25b 新增） |
 | `practice_tests` | 自测卷缓存（唯一键 `exam_file_id`，一份卷只有一张有效自测卷） | ✅（P0-3-23 新增） |
 | `practice_test_explanations` | 逐题讲解缓存（PK `(practice_test_id, question_key, locale)`） | ✅（P0-3-23 新增） |
+| `course_links` | 外部课程网站链接监控（用户贴的 URL + 上一次抓取的分段指纹，`pending/ok/unreachable/blocked/unsupported` 可见状态，ADR-026 原文绝不落库） | ✅（P0-5-3 新增） |
 | Phase 2+ 预留表 | 规划能力、多数据源 | ❌ 见第 8 节 |
 
 > 相比初版，`sync_runs` / `llm_runs` / `parse_corrections` 是新增的三张表。它们不是"锦上添花"：
@@ -560,6 +561,40 @@ CREATE UNIQUE INDEX course_files_course_file_unique
 > `practice_test_explanations` 再经 `practice_test_id → practice_tests` 二级 CASCADE。
 > 删 `profiles` → 清空两表。
 
+### 3.19 `course_links`（外部课程网站链接监控，P0-5-3 新增）
+
+用户贴的外部课程站点链接（教授个人页 / 课程公告页…）。**每日 Vercel Cron 重抓**，与上次指纹比对，
+有变化才进消息栏（幂等：变化被报告后指纹立即推进，下一轮必然零新消息）。
+
+🔴 **ADR-026 红线**：`fingerprint` 是**分段归一化指纹**（`[{label, hash}]`，见 `lib/course-links/fingerprint.ts`），
+原文**绝不落库 / 落盘 / 进日志**。`label` 只是段落前 ~60 字的简短锚点（给人话的"哪块变了"提示），
+`hash` 是段落 sha256 —— 两样都不可逆、不可还原原文。三道闸门（协议 / 字面量主机 / DNS 真实 IP）
+在发请求前，复用 `lib/ingest/url-fetch.ts` 的 SSRF 守卫。
+
+| 字段名 | 类型 | 说明 |
+|---|---|---|
+| `id` | uuid (PK) | |
+| `course_id` | uuid (FK → courses.id, **ON DELETE CASCADE**) | 归属（本表无 `user_id`，RLS 经 `courses.user_id` 反查，与 `exam_dates` / `course_files` 同模式） |
+| `url` | text (not null) | 用户贴的外部链接（已校验 http(s) + 非本机/内网） |
+| `label` | text (nullable) | 用户给的备注名；展示时回退到 host |
+| `page_title` | text (nullable) | 抓取到的 `<title>`（目前 Cron 只取正文，多为 null） |
+| `fingerprint` | jsonb (nullable) | 上一次成功抓取的分段指纹。**null = 还没成功抓过**（待首次检查）。🔴 只存指纹，绝不存原文 |
+| `last_checked_at` | timestamptz (nullable) | 最近一次 Cron 重抓时刻（null = 还没检查过） |
+| `last_status` | text (not null, default `pending`) | 最近一次检查可见状态：`pending` / `ok` / `unreachable` / `blocked` / `unsupported`（CHECK 约束；失败也要可见，ADR-016 R3） |
+| `last_error` | text (nullable) | 失败的人话原因；成功为 null |
+| `created_at` / `updated_at` | timestamptz | `updated_at` 由 `set_updated_at()` 触发器维护 |
+
+**唯一键**：`UNIQUE (course_id, url)`（同一门课不能重复监控同一 URL）。
+**索引**：`idx_course_links_course (course_id)`（课程页主查询）。
+
+> ⚠️ **P0-3-2 删账号的级联**：经 `course_id → courses` 一级 `ON DELETE CASCADE`。
+> 删 `profiles` → 清空本表。
+
+> 🔴 **枚举扩展四处同改**：`messages.type` 的 CHECK 在本迁移里同步扩入 `'link_change'`
+> （types/message.ts 的 `MessageType` + `lib/messages/registry.ts` 的 `MESSAGE_TYPES` /
+> `APPLIER_READY_TYPES` + `scripts/regress-messages.ts` 断言 + 本迁移 CHECK 共五处，
+> 漏一处链接变更消息静默发不进消息栏）。迁移 `20260925000000_course_links.sql` 必须先于代码执行。
+
 ---
 
 ## 4. 同步语义（Tempo 内核的数据层约定）
@@ -801,3 +836,4 @@ syllabus 可能含教师姓名、office hour 地址、评分细则等个人信�
 | 2026-09-18 | **新增 §3.16 `file_summaries` 表**（P0-3-19b，迁移 `20260922000000_file_summaries.sql`）：单文件「一键总结」缓存，结构化提要、**不含课件原文** | P0-3-19b |
 | 2026-09-18 | **新增 §3.17 `practice_tests` + §3.18 `practice_test_explanations` 两张表**（P0-3-23，迁移 `20260924000000_practice_tests.sql`）—— 自测卷与逐题讲解的缓存。`practice_tests` 的唯一键落在 **`exam_file_id`**（一份试卷永远只有一张当前有效的自测卷 → 关掉"同一份试卷两条卷子"这种无法解释的状态）；`answer_key_file_id` 是**第二个刻意的非 CASCADE 例外**（`ON DELETE SET NULL`：答案文件被删时卷子不该跟着消失，只是从此每题都没答案，界面如实标注）；**差量判据是两个 `modified_at`**（试卷 + 答案各一个，任一不同即重算 —— 老师换掉答案 key 时，旧卷子的答案是**过期的谎话**，比"没有答案"严重得多）。`practice_test_explanations` PK `(practice_test_id, question_key, locale)`，`question_key` 跟着**切题顺序**走（重排后旧讲解不会被错配到新题上）。**零枚举变更**（已核实：复用 3-18 建表时就有的 `messages.type='practice_test'`，两张新表的 `status` CHECK 是新建而非改写）。见 **ADR-027** | P0-3-23、**ADR-027** |
 | 2026-09-18 | **§3.2 `courses` 新增 `syllabus_file_id` / `syllabus_seen_modified_at` 两列**（P0-3-20，迁移 `20260923000000_syllabus_drift.sql`）—— 大纲漂移检测的**差量锚点**。`syllabus_file_id` 是**指针**（「这门课认哪份文件」），`ON DELETE SET NULL` 是**刻意的非 CASCADE 例外**（§6 已注明理由：它不拥有那份文件）；`syllabus_seen_modified_at` 存的是**文件版本**（逐字来自 `course_files.modified_at`）**不是核对时刻** —— 存成 `now()` 会让每轮同步都报"大纲变了"（纯噪音），而真变更反而分辨不出来。**只加两列、不动任何枚举、无需补 CHECK**（已核实 `exam_dates.source` 含 `'canvas'`、`grade_components.source` 已由 `20260918000000` 补平、`messages.type` 含 `'syllabus_drift'`）。§6 表关系简图补两条关系线 + 上述例外说明 | P0-3-20、**ADR-026**、P0-3-19 |
+| 2026-09-23 | **新增 §3.19 `course_links` 表（外部课程网站链接监控）**（P0-5-3，迁移 `20260925000000_course_links.sql`，ADR-026）：用户贴的外部课程站点 URL + 上一次抓取的分段指纹快照（原文绝不落库，只存 `{label, hash}` 指纹）；`last_status` 可见状态（`pending`/`ok`/`unreachable`/`blocked`/`unsupported`）；每日 Cron 重抓比对、有变化进消息栏（幂等：变化即推进指纹）。`messages.type` CHECK 同步扩入 `'link_change'`（枚举四处同改第 3 处，其余为 types/message.ts、`registry.ts`、`regress-messages.ts`） | P0-5-3、**ADR-026** |
