@@ -32,6 +32,14 @@ import type { TaskSource, TaskStatus, TaskSubmissionState, TaskType } from '@/ty
  * 本组件曾经在分组处用了它、却在渲染处写 `status === 'done'` —— 结果 Canvas 已评分的
  * 任务被归进「已完成」盒，却画出空勾选框，看起来还是待办（Steven 2026-09-17 截图抓到）。
  * **改动这里时，分组的 filter 与行内的渲染必须用同一个函数。**
+ *
+ * ### 三盒并排（2026-09-25 Steven）
+ * 待办 / 日期待定 / 最近已完成 三个可折叠盒**并排一行**（窄屏竖排），主页不再被
+ * undated 任务拉长 —— Canvas 的考试占位壳（「Unit 1 Exam · 日期待定」）成串混进
+ * 待办清单，把真正有截止日的待办挤出首屏。
+ * 🔴 undated 的判据 = `dueLabel === null`，与行内渲染「日期待定」**同一个来源**
+ * （`formatDue()` 对 null / 坏日期都返回 null label）—— 分组若另写一份判据
+ * （比如去看原始 `dueDate`），迟早与显示分叉（P0-3-15 的同款教训）。
  */
 
 export interface TaskListItem {
@@ -224,10 +232,50 @@ function TaskRow({ item, busy, onToggle }: TaskRowProps) {
   )
 }
 
+/**
+ * 并排三盒共用的折叠盒（2026-09-25 Steven：主页太长 → 三盒一排、各自可折叠）。
+ * 样式沿用原「最近已完成」折叠盒的视觉语言（`bg-card/40` + ▸/▾），不引入新花样。
+ */
+function CollapsibleBox({
+  label,
+  defaultOpen = false,
+  note,
+  children,
+}: {
+  /** 盒头文案（计数由调用方拼进文案，i18n 键自带 {n}）。 */
+  label: string
+  defaultOpen?: boolean
+  /** 展开后内容顶部的一行说明（如 undated 盒的口径）。 */
+  note?: string
+  children: React.ReactNode
+}) {
+  const [open, setOpen] = useState(defaultOpen)
+  return (
+    <section className="rounded-lg border border-border bg-card/40">
+      <button
+        type="button"
+        onClick={() => setOpen(!open)}
+        aria-expanded={open}
+        className="flex w-full items-center gap-2 px-4 py-2.5 text-left text-sm text-muted-foreground"
+      >
+        <span className="text-xs">{open ? '▾' : '▸'}</span>
+        {label}
+      </button>
+      {open ? (
+        <div className="px-4 pb-3">
+          {note ? <p className="mb-2 text-xs text-muted-foreground">{note}</p> : null}
+          {children}
+        </div>
+      ) : null}
+    </section>
+  )
+}
+
 export function TaskList({ items }: TaskListProps) {
   const router = useRouter()
   const t = useT()
-  const [isDoneExpanded, setIsDoneExpanded] = useState(false)
+  // 三个盒的展开态由 `CollapsibleBox` 各自持有（默认：待办展开、日期待定 / 最近已完成收起）——
+  // 收起时只占一行盒头，这正是"主页不显得这么长"的来源（2026-09-25 Steven）。
   const [isMoreExpanded, setIsMoreExpanded] = useState(false)
   const [busyId, setBusyId] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -242,11 +290,27 @@ export function TaskList({ items }: TaskListProps) {
   const pending = items.filter((item) => !isEffectivelyDone(item))
   const done = items.filter((item) => isEffectivelyDone(item))
 
+  // 三盒分组（2026-09-25）：**先**按完成与否切（做完的事进「已完成」，不再参与分类），
+  // **再**把待办按有无日期切成 dated / undated —— undated 的判据与行内渲染同源，
+  // 见文件头「三盒并排」一节。
+  const datedPending = pending.filter((item) => item.dueLabel !== null)
+  const undatedPending = pending.filter((item) => item.dueLabel === null)
+
   // P0-3-6：最近 OVERVIEW_VISIBLE 条待办直接列出，其余收进可展开 BOX。
   // 注意：这是**展示层**截断，数据已在服务端全部取回（dashboard 的 OVERVIEW_LIMIT 只是 DB 安全上限），
   // 所以「还有 N 条」展开后能看到全部，不会静默消失。
-  const visiblePending = pending.slice(0, OVERVIEW_VISIBLE)
-  const hiddenPending = pending.slice(OVERVIEW_VISIBLE)
+  // 2026-09-25 起截断只作用于 dated 待办 —— undated 已整体搬去自己的盒。
+  const visiblePending = datedPending.slice(0, OVERVIEW_VISIBLE)
+  const hiddenPending = datedPending.slice(OVERVIEW_VISIBLE)
+
+  const renderRow = (item: TaskListItem) => (
+    <TaskRow
+      key={item.id}
+      item={item}
+      busy={busyId === item.id}
+      onToggle={(target) => void handleToggle(target)}
+    />
+  )
 
   async function handleToggle(item: TaskListItem) {
     setError(null)
@@ -321,73 +385,57 @@ export function TaskList({ items }: TaskListProps) {
         </p>
       ) : null}
 
-      <ul className="space-y-2">
-        {visiblePending.map((item) => (
-          <TaskRow
-            key={item.id}
-            item={item}
-            busy={busyId === item.id}
-            onToggle={(target) => void handleToggle(target)}
-          />
-        ))}
-      </ul>
+      {/* 三盒并排（窄屏自动竖排）：待办 / 日期待定 / 最近已完成。 */}
+      <div className="grid gap-3 lg:grid-cols-3 lg:items-start">
+        {/* ① 待办（默认展开）：只收**有截止日期**的待办 —— 倒计时里的事。 */}
+        <CollapsibleBox label={t('task.boxTodo', { n: datedPending.length })} defaultOpen>
+          {datedPending.length === 0 ? (
+            <p className="py-1 text-sm text-muted-foreground">
+              {done.length > 0 ? t('task.allDone') : t('task.empty')}
+            </p>
+          ) : (
+            <>
+              <ul className="space-y-2">{visiblePending.map(renderRow)}</ul>
+              {hiddenPending.length > 0 ? (
+                <div className="mt-2">
+                  <button
+                    type="button"
+                    onClick={() => setIsMoreExpanded(!isMoreExpanded)}
+                    className="text-left text-xs text-muted-foreground hover:text-foreground"
+                  >
+                    <span className="mr-1">{isMoreExpanded ? '▾' : '▸'}</span>
+                    {t('task.morePending', { n: hiddenPending.length })}
+                  </button>
+                  {isMoreExpanded ? (
+                    <ul className="mt-2 space-y-2">
+                      {hiddenPending.map(renderRow)}
+                    </ul>
+                  ) : null}
+                </div>
+              ) : null}
+            </>
+          )}
+        </CollapsibleBox>
 
-      {hiddenPending.length > 0 ? (
-        <div className="rounded-lg border border-border bg-card/40">
-          <button
-            type="button"
-            onClick={() => setIsMoreExpanded(!isMoreExpanded)}
-            className="flex w-full items-center gap-2 px-4 py-2.5 text-left text-sm text-muted-foreground"
+        {/* ② 日期待定（默认收起）：undated 的统一去处 —— Canvas 没填日期的作业、
+            考试占位壳、没定日子的手动任务都收在这里，不再混进待办清单。
+            空盒不渲染：一行「日期待定 · 0」是噪音。 */}
+        {undatedPending.length > 0 ? (
+          <CollapsibleBox
+            label={t('task.boxUndated', { n: undatedPending.length })}
+            note={t('task.boxUndatedNote')}
           >
-            <span className="text-xs">{isMoreExpanded ? '▾' : '▸'}</span>
-            {t('task.morePending', { n: hiddenPending.length })}
-          </button>
-          {isMoreExpanded ? (
-            <ul className="space-y-2 px-4 pb-3">
-              {hiddenPending.map((item) => (
-                <TaskRow
-                  key={item.id}
-                  item={item}
-                  busy={busyId === item.id}
-                  onToggle={(target) => void handleToggle(target)}
-                />
-              ))}
-            </ul>
-          ) : null}
-        </div>
-      ) : null}
+            <ul className="space-y-2">{undatedPending.map(renderRow)}</ul>
+          </CollapsibleBox>
+        ) : null}
 
-      {pending.length === 0 && done.length > 0 ? (
-        <p className="text-sm text-muted-foreground">{t('task.allDone')}</p>
-      ) : null}
-
-      {done.length > 0 ? (
-        <div className="rounded-lg border border-border bg-card/40">
-          <button
-            type="button"
-            onClick={() => setIsDoneExpanded(!isDoneExpanded)}
-            className="flex w-full items-center gap-2 px-4 py-2.5 text-left text-sm text-muted-foreground"
-          >
-            <span className="text-xs">{isDoneExpanded ? '▾' : '▸'}</span>
-            {/* P0-3-35：取数只带回**最近**已完成的行（历史让位给待办，否则几十条已交作业
-                会把未来任务挤出结果集）。数字的含义随之从"学期累计"变成"近期" ——
-                标签必须写明，否则用户只会看到数字从 49 掉到 12 而不知道为什么。 */}
-            {t('task.recentDone', { n: done.length })}
-          </button>
-          {isDoneExpanded ? (
-            <ul className="space-y-2 px-4 pb-3">
-              {done.map((item) => (
-                <TaskRow
-                  key={item.id}
-                  item={item}
-                  busy={busyId === item.id}
-                  onToggle={(target) => void handleToggle(target)}
-                />
-              ))}
-            </ul>
-          ) : null}
-        </div>
-      ) : null}
+        {/* ③ 最近已完成（默认收起）：语义不变（P0-3-35 的「最近」口径），只是搬进并排盒。 */}
+        {done.length > 0 ? (
+          <CollapsibleBox label={t('task.recentDone', { n: done.length })}>
+            <ul className="space-y-2">{done.map(renderRow)}</ul>
+          </CollapsibleBox>
+        ) : null}
+      </div>
     </div>
   )
 }

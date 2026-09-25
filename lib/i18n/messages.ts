@@ -198,8 +198,8 @@ const zh = {
   'dashboard.weekNote': '作业与考试混排 · 点一条跳到课程',
   'dashboard.examsLoadFailed': '「最近的考试」加载失败，考试信息可能不完整：{error}',
   'dashboard.windowNote': '窗口内共 {total} 条，页面用的是取回的前 {n} 条（已排除更早的已完成项）。',
-  'dashboard.todoHeading': '待办清单',
-  'dashboard.todoNote': '{days} 天内到期 · 已逾期的都在里面 · 已完成只留最近 {history} 天 · 勾完成在这里',
+  'dashboard.todoHeading': '任务',
+  'dashboard.todoNote': '{days} 天内到期与逾期的在「待办」· 没填日期的收进「日期待定」· 已完成只留最近 {history} 天',
   'today.heading': '今日任务',
   'today.load': '今日工作量 ≈ {n} 件',
   'today.subtitle': '今天到期按整件算；未来 {days} 天的按「1 / 剩余天数」折算，越远越轻',
@@ -231,6 +231,9 @@ const zh = {
   'task.morePending': '还有 {n} 条待办',
   'task.allDone': '这段时间的事都做完了。',
   'task.recentDone': '最近已完成 {n} 项',
+  'task.boxTodo': '待办 · {n}',
+  'task.boxUndated': '日期待定 · {n}',
+  'task.boxUndatedNote': '没有截止日期的任务（含 Canvas 考试占位）—— 不提醒、不算逾期',
 
   // ---------- 课程列表页 courses ----------
   'courses.title': '我的课程',
@@ -685,8 +688,8 @@ export const messages: Record<'zh' | 'en', Record<MessageKey, string>> = {
     'dashboard.weekNote': 'Assignments and exams mixed · click one to open its course',
     'dashboard.examsLoadFailed': 'Failed to load "Upcoming exams"; exam info may be incomplete: {error}',
     'dashboard.windowNote': '{total} tasks in the window; the page uses the first {n} fetched (older completed items excluded).',
-    'dashboard.todoHeading': 'To-do list',
-    'dashboard.todoNote': 'Due within {days} days · overdue included · completed kept for the last {history} days · check off here',
+    'dashboard.todoHeading': 'Tasks',
+    'dashboard.todoNote': 'Due within {days} days and overdue live under To-do · undated filed under Undated · completed kept for the last {history} days',
     'today.heading': "Today's tasks",
     'today.load': "Today's load ≈ {n} items",
     'today.subtitle': 'Items due today count as one; the next {days} days are weighted 1/remaining-days (lighter the further out)',
@@ -718,6 +721,9 @@ export const messages: Record<'zh' | 'en', Record<MessageKey, string>> = {
     'task.morePending': '{n} more to do',
     'task.allDone': 'Everything for this period is done.',
     'task.recentDone': '{n} recently completed',
+    'task.boxTodo': 'To-do · {n}',
+    'task.boxUndated': 'Undated · {n}',
+    'task.boxUndatedNote': 'No due date (incl. Canvas exam placeholders) — not reminded, not overdue',
 
     // ---------- 课程列表页 ----------
     'courses.title': 'My Courses',
