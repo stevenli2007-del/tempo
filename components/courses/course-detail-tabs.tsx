@@ -95,6 +95,16 @@ export function CourseDetailTabs({
                 }
               />
             </section>
+
+            {/* 监控的外部课程链接：归「课程大纲」tab（2026-09-25 Steven）——
+                它盯的是教授个人页 / 课程公告页这类**大纲外的信息源**，
+                与「资料」tab 的 Canvas 文件索引不是一类东西。 */}
+            <CourseLinks
+              courseId={detail.id}
+              lang={lang}
+              links={courseLinks.links ?? []}
+              error={courseLinks.error ?? null}
+            />
           </div>
         )}
 
@@ -128,15 +138,7 @@ export function CourseDetailTabs({
 
         {/* ---------- 资料 ---------- */}
         {activeTab === 'files' && (
-          <div className="space-y-6">
-            <CourseLinks
-              courseId={detail.id}
-              lang={lang}
-              links={courseLinks.links ?? []}
-              error={courseLinks.error ?? null}
-            />
-            <CourseFiles courseId={detail.id} lang={lang} files={courseFiles.files ?? []} error={courseFiles.error ?? null} />
-          </div>
+          <CourseFiles courseId={detail.id} lang={lang} files={courseFiles.files ?? []} error={courseFiles.error ?? null} />
         )}
 
         {/* ---------- 考试复习 ---------- */}
