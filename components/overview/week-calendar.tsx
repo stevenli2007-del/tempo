@@ -1,7 +1,8 @@
 import Link from 'next/link'
 
 import { EXAM_CHIP_CLASS, ExamMark } from '@/components/tasks/exam-mark'
-import { courseColorClasses, courseColorKey } from '@/lib/courses/course-color'
+import { courseColorClassesFor } from '@/lib/courses/course-color'
+import type { CourseColorKey } from '@/lib/courses/course-color'
 import type { Lang } from '@/lib/i18n/types'
 import { t } from '@/lib/i18n/translate'
 import type { CalendarPill, UpcomingExam, WeekCalendarModel } from '@/lib/tasks/progress'
@@ -29,11 +30,20 @@ import type { CalendarPill, UpcomingExam, WeekCalendarModel } from '@/lib/tasks/
  *    （`TaskList`，PATCH 只允许改 status，ADR-004）。
  */
 
-function Pill({ pill, lang }: { pill: CalendarPill; lang: Lang }) {
+function Pill({
+  pill,
+  lang,
+  colorKeys,
+}: {
+  pill: CalendarPill
+  lang: Lang
+  colorKeys: Record<string, CourseColorKey>
+}) {
   const title = `${pill.courseName} · ${pill.title}${pill.isExam ? t(lang, 'calendar.examTag') : ''}`
   // 课程色三件套（P0-3-33）：类名是静态字面量（`lib/courses/course-color.ts`），
   // 不是 `border-l-${color}` 这种运行时拼接 —— 拼接出来的类 Tailwind 扫不到、不生成。
-  const color = courseColorClasses(courseColorKey(pill.courseId))
+  // 色值来自页面下发的全量分配表（2026-09-25 撞色修复），与课程卡 / 今日任务同源。
+  const color = courseColorClassesFor(colorKeys, pill.courseId)
 
   if (pill.isExam) {
     return (
@@ -61,12 +71,20 @@ function Pill({ pill, lang }: { pill: CalendarPill; lang: Lang }) {
   )
 }
 
-function PillList({ pills, lang }: { pills: CalendarPill[]; lang: Lang }) {
+function PillList({
+  pills,
+  lang,
+  colorKeys,
+}: {
+  pills: CalendarPill[]
+  lang: Lang
+  colorKeys: Record<string, CourseColorKey>
+}) {
   return (
     <ul className="flex flex-wrap gap-1.5">
       {pills.map((pill) => (
         <li key={pill.id} className="max-w-full">
-          <Pill pill={pill} lang={lang} />
+          <Pill pill={pill} lang={lang} colorKeys={colorKeys} />
         </li>
       ))}
     </ul>
@@ -81,7 +99,15 @@ function PillList({ pills, lang }: { pills: CalendarPill[]; lang: Lang }) {
  * 考试是最稀疏、最高风险的一类事项 —— 漏看一次期中的代价远大于漏做一个作业，
  * 所以它值得单独一条、且看得比 7 天更远。
  */
-function UpcomingExams({ exams, lang }: { exams: UpcomingExam[]; lang: Lang }) {
+function UpcomingExams({
+  exams,
+  lang,
+  colorKeys,
+}: {
+  exams: UpcomingExam[]
+  lang: Lang
+  colorKeys: Record<string, CourseColorKey>
+}) {
   if (exams.length === 0) return null
 
   return (
@@ -97,7 +123,7 @@ function UpcomingExams({ exams, lang }: { exams: UpcomingExam[]; lang: Lang }) {
               href={`/courses/${exam.courseId}`}
               title={`${exam.courseName} · ${exam.title} · ${exam.dateLabel}`}
               className={`flex items-center gap-1.5 rounded-badge border-l-2 bg-lime/20 px-2 py-1 text-[11px] hover:bg-lime/30 ${
-                courseColorClasses(courseColorKey(exam.courseId)).edge
+                courseColorClassesFor(colorKeys, exam.courseId).edge
               }`}
             >
               <span className="shrink-0 font-semibold text-lime-dark">
@@ -119,10 +145,12 @@ export function WeekCalendar({
   model,
   exams,
   lang,
+  colorKeys,
 }: {
   model: WeekCalendarModel
   exams: UpcomingExam[]
   lang: Lang
+  colorKeys: Record<string, CourseColorKey>
 }) {
   const { days, overdue, undated } = model
   const isEmpty =
@@ -146,7 +174,7 @@ export function WeekCalendar({
             </span>
           </p>
           <div className="mt-1.5">
-            <PillList pills={overdue} lang={lang} />
+            <PillList pills={overdue} lang={lang} colorKeys={colorKeys} />
           </div>
         </div>
       ) : null}
@@ -172,7 +200,7 @@ export function WeekCalendar({
                 <ul className="flex min-h-[56px] flex-col gap-1">
                   {day.pills.map((pill) => (
                     <li key={pill.id} className="min-w-0">
-                      <Pill pill={pill} lang={lang} />
+                      <Pill pill={pill} lang={lang} colorKeys={colorKeys} />
                     </li>
                   ))}
                 </ul>
@@ -182,7 +210,7 @@ export function WeekCalendar({
         </div>
       )}
 
-      <UpcomingExams exams={exams} lang={lang} />
+      <UpcomingExams exams={exams} lang={lang} colorKeys={colorKeys} />
 
       {undated.length > 0 ? (
         <div className="mt-4 border-t border-line pt-3">
@@ -191,7 +219,7 @@ export function WeekCalendar({
             <span className="ml-1.5">{t(lang, 'calendar.undatedNote')}</span>
           </p>
           <div className="mt-1.5">
-            <PillList pills={undated} lang={lang} />
+            <PillList pills={undated} lang={lang} colorKeys={colorKeys} />
           </div>
         </div>
       ) : null}

@@ -7,6 +7,7 @@ import { AppShell } from '@/components/shell/app-shell'
 import { loadCredentialMeta } from '@/lib/canvas/credentials'
 import { COURSE_COLUMNS, toCourse } from '@/lib/courses'
 import type { CourseRow } from '@/lib/courses'
+import { assignCourseColorKeys } from '@/lib/courses/course-color'
 import { groupBySemester, loadLatestSyllabi, toUpcomingViews } from '@/lib/courses/course-list'
 import { createClient } from '@/lib/supabase/server'
 import { toCourseSyncLine, toCourseSyncView } from '@/lib/sync/status'
@@ -62,6 +63,10 @@ export default async function CoursesPage() {
   const courses = data ? (data as CourseRow[]).map(toCourse) : []
   const groups = groupBySemester(courses)
   const hasDemo = courses.some((course) => course.isDemo)
+
+  // 课程色分配表（2026-09-25 撞色修复）：与 dashboard 同口径（全量非归档课程），
+  // 同一门课跨页面同色。必须全量 —— 传子集会让同一门课两页不同色。
+  const courseColorKeys = assignCourseColorKeys(courses.map((course) => course.id))
 
   // `now` 服务端算一次注入纯函数，避免与客户端各算一遍导致 hydration mismatch。
   const now = new Date()
@@ -168,6 +173,7 @@ export default async function CoursesPage() {
                   loadError={tasksError}
                   // 未关联的课查不到 view → undefined → 卡片不渲染同步行。
                   syncLine={syncLines.get(course.id) ?? null}
+                  colorKeys={courseColorKeys}
                 />
               ))}
             </div>

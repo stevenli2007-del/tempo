@@ -1,7 +1,8 @@
 import Link from 'next/link'
 
 import { EXAM_SURFACE_CLASS, ExamMark } from '@/components/tasks/exam-mark'
-import { courseColorClasses, courseColorKey } from '@/lib/courses/course-color'
+import { courseColorClassesFor } from '@/lib/courses/course-color'
+import type { CourseColorKey } from '@/lib/courses/course-color'
 import type { Lang } from '@/lib/i18n/types'
 import { t } from '@/lib/i18n/translate'
 import type { TodayItem, TodayModel } from '@/lib/tasks/today'
@@ -21,7 +22,8 @@ import type { TodayItem, TodayModel } from '@/lib/tasks/today'
  * ### P0-3-33：两处"看不出来"的修正
  * ① **课程色**从一颗 2px 圆点升级成「左侧整高色边 + 染色的课程名 chip」——
  *    圆点太小，扫一列看不出哪几行是同一门课（Steven 2026-09-20 反馈）。
- *    色值仍是 `courseColorKey(courseId)` 的确定性映射，与课程卡 / 周历**同一门课同一个颜色**。
+ *    色值来自页面下发的**全量分配表**（`assignCourseColorKeys()`），与课程卡 / 周历
+ *    **同一门课同一个颜色**，且同屏不撞色（2026-09-25）。
  * ② **考试整行铺考试底** + 图标 + 「考」—— 之前只有一个绿字「考」前缀，
  *    夹在作业里几乎认不出（Steven：「考试和作业几乎没差别」）。判定仍只用
  *    `TodayItem.isExam`（来自 `isExamTask()` 一处），这里不新增任何判定。
@@ -36,10 +38,20 @@ import type { TodayItem, TodayModel } from '@/lib/tasks/today'
  * HTML 不允许 `<a>` 嵌套 `<a>`（React 会按 hydration 报错/浏览器会拆开标签）。
  * 所以外层是普通 `li`，两个链接各自承担一个动作。
  */
-function Row({ item, trailing, lang }: { item: TodayItem; trailing: string; lang: Lang }) {
+function Row({
+  item,
+  trailing,
+  lang,
+  colorKeys,
+}: {
+  item: TodayItem
+  trailing: string
+  lang: Lang
+  colorKeys: Record<string, CourseColorKey>
+}) {
   const courseHref = `/courses/${item.courseId}`
   const titleClass = 'truncate text-ink underline-offset-4 hover:underline'
-  const color = courseColorClasses(courseColorKey(item.courseId))
+  const color = courseColorClassesFor(colorKeys, item.courseId)
 
   /**
    * 行的底色：考试行整行铺考试底（P0-3-33），其余行只在 hover 时变色。
@@ -98,7 +110,15 @@ function formatLoad(load: number): string {
   return Number.isInteger(load) ? String(load) : load.toFixed(1)
 }
 
-export function TodayTasks({ model, lang }: { model: TodayModel; lang: Lang }) {
+export function TodayTasks({
+  model,
+  lang,
+  colorKeys,
+}: {
+  model: TodayModel
+  lang: Lang
+  colorKeys: Record<string, CourseColorKey>
+}) {
   const { overdue, dueToday, upcoming, load, horizonDays } = model
   const isEmpty = overdue.length === 0 && dueToday.length === 0 && upcoming.length === 0
 
@@ -142,6 +162,7 @@ export function TodayTasks({ model, lang }: { model: TodayModel; lang: Lang }) {
                     key={item.id}
                     item={item}
                     lang={lang}
+                    colorKeys={colorKeys}
                     trailing={t(lang, 'today.overdueDays', { n: -item.daysUntil })}
                   />
                 ))}
@@ -156,7 +177,7 @@ export function TodayTasks({ model, lang }: { model: TodayModel; lang: Lang }) {
               </p>
               <ul className="mt-1">
                 {dueToday.map((item) => (
-                  <Row key={item.id} item={item} lang={lang} trailing={`${item.weightPct}%`} />
+                  <Row key={item.id} item={item} lang={lang} colorKeys={colorKeys} trailing={`${item.weightPct}%`} />
                 ))}
               </ul>
             </div>
@@ -169,7 +190,7 @@ export function TodayTasks({ model, lang }: { model: TodayModel; lang: Lang }) {
               </p>
               <ul className="mt-1">
                 {upcoming.map((item) => (
-                  <Row key={item.id} item={item} lang={lang} trailing={`${item.weightPct}%`} />
+                  <Row key={item.id} item={item} lang={lang} colorKeys={colorKeys} trailing={`${item.weightPct}%`} />
                 ))}
               </ul>
             </div>

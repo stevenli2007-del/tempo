@@ -18,6 +18,7 @@ import { loadCredentialMeta } from '@/lib/canvas/credentials'
 import type { CanvasCredentialMeta } from '@/types/canvas'
 import { COURSE_COLUMNS, toCourse } from '@/lib/courses'
 import type { CourseRow } from '@/lib/courses'
+import { assignCourseColorKeys } from '@/lib/courses/course-color'
 import { dropCanvasExamPlaceholders, loadTasks, loadUpcomingExams } from '@/lib/tasks'
 import { awardNotesForDone } from '@/lib/notes/store'
 import { NoteCatchup } from '@/components/notes/note-catchup'
@@ -188,6 +189,12 @@ export default async function DashboardPage({
   // 查询失败必须让用户看见，不能因为 error 分支返回空数组就渲染成"还没有课程"。
   // 静默的旧数据/空数据比明确的错误更危险（CodingRules 7、PRD F4 失败可见性）。
   const courses = data ? (data as CourseRow[]).map(toCourse) : []
+  /**
+   * 课程色分配表（2026-09-25 撞色修复）：从**全量非归档课程**算一次，三个任务视图共用 ——
+   * `/courses` 页也用同一口径算，同一门课跨页面同色。必须传全量：传子集会让
+   * 同一门课在不同页面拿到不同颜色（见 `assignCourseColorKeys()` 注释）。
+   */
+  const courseColorKeys = assignCourseColorKeys(courses.map((course) => course.id))
   const email = user.email ?? t(lang, 'dashboard.emailMissing')
   /** 是否已有示例课程（决定展示「先看看效果」入口还是「清空示例数据」）。 */
   const hasDemo = courses.some((course) => course.isDemo)
@@ -392,7 +399,7 @@ export default async function DashboardPage({
             而不是显示成"今天没有任务"（一个空的卡会被读成"今天没事"，正是静默的错误数据，
             CodingRules 7；上方已有一条「任务列表加载失败」的横幅说明原因）。 */}
         {!error && courses.length > 0 && !tasksError ? (
-          <TodayTasks model={today} lang={lang} />
+          <TodayTasks model={today} lang={lang} colorKeys={courseColorKeys} />
         ) : null}
 
         {!error && courses.length > 0 ? (
@@ -401,7 +408,7 @@ export default async function DashboardPage({
               <h2 className="text-lg font-semibold">{t(lang, 'dashboard.weekHeading')}</h2>
               <p className="text-xs text-muted-foreground">{t(lang, 'dashboard.weekNote')}</p>
             </div>
-            <WeekCalendar model={calendar} exams={exams} lang={lang} />
+            <WeekCalendar model={calendar} exams={exams} lang={lang} colorKeys={courseColorKeys} />
             {/* 考试查询失败时**明说** —— 否则日历会静静地少一条「最近的考试」，
                 用户只会以为"我最近没考试"（CodingRules 7：空数据比错误数据更危险）。 */}
             {examPool.error ? (
@@ -431,7 +438,7 @@ export default async function DashboardPage({
                 })}
               </p>
             </div>
-            <TaskList items={toListItems(visibleTasks, now, lang)} />
+            <TaskList items={toListItems(visibleTasks, now, lang)} colorKeys={courseColorKeys} />
           </section>
         ) : null}
 

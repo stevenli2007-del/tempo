@@ -8,7 +8,8 @@ import { syllabusStatusText } from '@/components/courses/syllabus-status'
 import { ExamMark } from '@/components/tasks/exam-mark'
 import { t } from '@/lib/i18n/translate'
 import type { Lang } from '@/lib/i18n/types'
-import { courseColorClasses, courseColorKey } from '@/lib/courses/course-color'
+import { courseColorClassesFor } from '@/lib/courses/course-color'
+import type { CourseColorKey } from '@/lib/courses/course-color'
 import type { CourseSyncLine } from '@/lib/sync/status'
 import { SUBMISSION_BADGE_CLASS, submissionBadge } from '@/lib/tasks/submission'
 import type { Course } from '@/types/course'
@@ -75,6 +76,11 @@ interface CourseCardProps {
    * 文案与时间都由服务端算好再传进来（客户端算时区会 hydration mismatch）。
    */
   syncLine?: CourseSyncLine | null
+  /**
+   * 课程色分配表（2026-09-25 撞色修复）：页面从全量课程算好下发，
+   * 与总览页的任务视图同一份口径 —— 同一门课跨页面同色、同屏不撞色。
+   */
+  colorKeys: Record<string, CourseColorKey>
 }
 
 /** 卡片上的轻量提交态标注（P0-3-10）—— 口径已搬到 `lib/tasks/submission.ts`（P0-3-15）。 */
@@ -120,6 +126,7 @@ export function CourseCard({
   upcomingTasks,
   loadError,
   syncLine,
+  colorKeys,
 }: CourseCardProps) {
   const router = useRouter()
   const [isConfirmingDelete, setIsConfirmingDelete] = useState(false)
@@ -149,7 +156,7 @@ export function CourseCard({
     }
   }
 
-  const color = courseColorClasses(courseColorKey(course.id))
+  const color = courseColorClassesFor(colorKeys, course.id)
   /**
    * 课程编码既然已经单独做成彩色的 chip（见下），这一行就只剩教师。
    * 两者都没有时仍然要写清楚"没填" —— 留一行空白会被读成"加载失败"。
@@ -163,7 +170,8 @@ export function CourseCard({
       {/* 课程色条（P0-3-33）：从一颗 3px 圆点升级成整张卡高的 4px 色条 ——
           圆点太小，一屏十几张卡扫不出哪张是哪门课（Steven 2026-09-20：
           「单单一颗很小的颜色亮点不足以区分」）。同一门课在课程卡 / 待办清单 /
-          周历 pill / 今日任务行上是**同一个颜色**（`courseColorKey()` 一处决定）。
+          周历 pill / 今日任务行上是**同一个颜色**（页面下发的全量分配表，2026-09-25
+          撞色修复后 ≤5 门课保证互不相同）。
           `overflow-hidden` + 绝对定位：色条贴着卡片的圆角走，不会从圆角里戳出一截直角。 */}
       <span className={`absolute inset-y-0 left-0 w-1 ${color.bar}`} aria-hidden />
       <div className="flex items-start justify-between gap-4">

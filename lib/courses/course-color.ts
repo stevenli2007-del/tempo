@@ -2,7 +2,8 @@
  * 课程颜色（P0-3-6 配套小功能）：把每门课映射到一个确定性颜色，
  * 让总览任务列表 / 课程卡能用同一颗小色点标识课程归属，一眼区分。
  *
- * **不存数据库** —— 用 courseId 做确定性哈希，零迁移、所有视图一致。
+ * **不存数据库** —— 用 courseId 做确定性**排序分配**（`assignCourseColorKeys()`），
+ * 零迁移、所有视图一致。
  * 若以后要做「用户自选颜色」，只改这一处（换成读 `courses.color` 字段）即可，
  * 调用方（TaskList / CourseCard）不用动。
  *
@@ -13,14 +14,61 @@
 export const COURSE_COLOR_KEYS = ['purple', 'blue', 'green', 'coral', 'amber'] as const
 export type CourseColorKey = (typeof COURSE_COLOR_KEYS)[number]
 
-/** 由种子（courseId）确定性地选一个颜色键。同一门课永远同色。 */
-export function courseColorKey(seed: string): CourseColorKey {
+/** 由种子（courseId）算出确定性 32 位哈希。排序与兜底选色共用这一份。 */
+function hashSeed(seed: string): number {
   let h = 0
   for (let i = 0; i < seed.length; i++) {
     // 31 是经典字符串哈希乘子，分布均匀且不易溢出（用 >>>0 保持无符号 32 位）。
     h = (h * 31 + seed.charCodeAt(i)) >>> 0
   }
-  return COURSE_COLOR_KEYS[h % COURSE_COLOR_KEYS.length]
+  return h
+}
+
+/**
+ * 单课哈希选色。**可能撞色** —— 只作 `courseColorClassesFor()` 在分配表缺行时的兜底，
+ * 正常路径一律走 `assignCourseColorKeys()` 的全量分配。
+ */
+export function courseColorKey(seed: string): CourseColorKey {
+  return COURSE_COLOR_KEYS[hashSeed(seed) % COURSE_COLOR_KEYS.length]
+}
+
+/**
+ * 全量课程 → 颜色键的**去重分配**（2026-09-25 Steven：「每个课程的颜色又重复了」）。
+ *
+ * ### 为什么不再逐课哈希取模
+ * 纯哈希把课扔进 5 个桶，撞色概率随课数暴涨：4 门课约 **81%** 必撞
+ * （1 − 5·4·3·2/5⁴）—— Steven 的 4 门课里三门同色不是倒霉，是数学必然。
+ * 调色板扩容治标不治本，真正要的是"**一次分配，两两不同**"。
+ *
+ * ### 算法
+ * 每门课算哈希，按（哈希值, id）**全序排序**后按位置发色（`KEYS[i % 5]`）：
+ * - 前 5 门课**保证互不相同**；第 6 门起才开始循环复用（5 色板的硬上限，
+ *   真到 6+ 门再议扩色板，不在这里塞凑数颜色）；
+ * - 排序依据只来自 courseId 本身，与传入顺序无关 → 同一批课在任何页面算出同一份分配；
+ * - 🔴 调用方必须传**同一份全量列表**（dashboard 与 /courses 都是非归档全量课程）：
+ *   传子集会让同一门课在不同页面拿到不同颜色，破坏"同一门课永远同色"。
+ *
+ * 返回普通对象（不是 Map）：要跨 server → client 边界传给客户端组件，必须可序列化。
+ */
+export function assignCourseColorKeys(courseIds: string[]): Record<string, CourseColorKey> {
+  const entries = Array.from(new Set(courseIds)).map((id) => ({ id, h: hashSeed(id) }))
+  entries.sort((a, b) => a.h - b.h || a.id.localeCompare(b.id))
+  const result: Record<string, CourseColorKey> = {}
+  entries.forEach((entry, index) => {
+    result[entry.id] = COURSE_COLOR_KEYS[index % COURSE_COLOR_KEYS.length]
+  })
+  return result
+}
+
+/**
+ * 从分配表取三件套。表里缺行（理论上不该发生：表由同一页的全量课程算出）
+ * 退回旧的哈希选色 —— 兜底只在该坏处坏一行，不把整个组件打挂。
+ */
+export function courseColorClassesFor(
+  colorKeys: Record<string, CourseColorKey>,
+  courseId: string,
+): CourseColorClasses {
+  return courseColorClasses(colorKeys[courseId] ?? courseColorKey(courseId))
 }
 
 /** 返回该颜色键对应的、随主题切换的 CSS 颜色值（如 `var(--purple)`）。 */

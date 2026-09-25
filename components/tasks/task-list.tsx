@@ -5,7 +5,8 @@ import { useRouter } from 'next/navigation'
 import { useState } from 'react'
 
 import { EXAM_SURFACE_CLASS, ExamMark } from '@/components/tasks/exam-mark'
-import { courseColorClasses, courseColorKey } from '@/lib/courses/course-color'
+import { courseColorClassesFor } from '@/lib/courses/course-color'
+import type { CourseColorClasses, CourseColorKey } from '@/lib/courses/course-color'
 import { isCanvasDone, isEffectivelyDone, isExamTask } from '@/lib/tasks/progress'
 import { SUBMISSION_BADGE_CLASS, submissionBadge } from '@/lib/tasks/submission'
 import { useI18n, useT } from '@/lib/i18n/use-i18n'
@@ -79,6 +80,11 @@ export interface TaskListItem {
 
 interface TaskListProps {
   items: TaskListItem[]
+  /**
+   * 课程色分配表（2026-09-25 撞色修复）：页面从**全量课程**算好下发（普通对象，
+   * 可跨 server → client 边界）。行组件不自己选色 —— 三件套在 `TaskList` 算好传入。
+   */
+  colorKeys: Record<string, CourseColorKey>
 }
 
 /**
@@ -90,6 +96,8 @@ const OVERVIEW_VISIBLE = 10
 
 interface TaskRowProps {
   item: TaskListItem
+  /** 课程色三件套 —— 由 `TaskList` 用页面下发的全量分配表算好传入（行组件不自己选色）。 */
+  color: CourseColorClasses
   busy: boolean
   onToggle: (item: TaskListItem) => void
 }
@@ -102,7 +110,7 @@ interface TaskRowProps {
  * 两处各写一份 switch 迟早漂开，所以收在 `lib/tasks/submission.ts`。
  */
 
-function TaskRow({ item, busy, onToggle }: TaskRowProps) {
+function TaskRow({ item, color, busy, onToggle }: TaskRowProps) {
   const { t, lang } = useI18n()
   const handDone = item.status === 'done'
   const canvasDone = isCanvasDone(item.submissionState)
@@ -127,8 +135,6 @@ function TaskRow({ item, busy, onToggle }: TaskRowProps) {
     : handDone
       ? 'border-primary bg-primary text-primary-foreground'
       : 'border-border hover:border-foreground/50'
-
-  const color = courseColorClasses(courseColorKey(item.courseId))
 
   /**
    * 考试行整行铺考试底（P0-3-33）。
@@ -271,7 +277,7 @@ function CollapsibleBox({
   )
 }
 
-export function TaskList({ items }: TaskListProps) {
+export function TaskList({ items, colorKeys }: TaskListProps) {
   const router = useRouter()
   const t = useT()
   // 三个盒的展开态由 `CollapsibleBox` 各自持有（默认：待办展开、日期待定 / 最近已完成收起）——
@@ -307,6 +313,7 @@ export function TaskList({ items }: TaskListProps) {
     <TaskRow
       key={item.id}
       item={item}
+      color={courseColorClassesFor(colorKeys, item.courseId)}
       busy={busyId === item.id}
       onToggle={(target) => void handleToggle(target)}
     />
