@@ -135,6 +135,9 @@ function TaskRow({ item, busy, onToggle }: TaskRowProps) {
 
   return (
     <li
+      // data-task-row：音符飘行动画（P0-5-4）靠它定位"完成的那一行"——
+      // 勾选后行会被 refresh 换掉，起飞点必须在 dispatch 前按 id 查。
+      data-task-row={item.id}
       className={`flex items-start gap-3 rounded-lg border-l-2 px-4 py-3 ${color.edge} ${surfaceClass}`}
     >
       <button
@@ -269,11 +272,25 @@ export function TaskList({ items }: TaskListProps) {
       }
 
       // 音符 + 彩带（P0-5-4）：**记入在服务端做**（PATCH 里，幂等），
-      // 这里只广播"刚完成了一件" —— 侧栏重新取数、彩带层放一次。
+      // 这里只广播"刚完成了一件" —— 计数重新取数、彩带层放一次、
+      // 飘行层从这一行的位置起飞一枚 ♪（ Steven 2026-09-24 验收反馈）。
       // 刻意不等任何响应：彩带是被动回声，不该让它反过来拖慢勾选。
       if (markingDone) {
+        // 起飞点 = 完成那一行的中心（视口坐标）。行可能已被 refresh 换掉，
+        // 所以必须在 dispatch 前读 —— 晚一拍就读不到了。
+        const row = document.querySelector(`[data-task-row="${item.id}"]`)
+        const box = row?.getBoundingClientRect()
         window.dispatchEvent(
-          new CustomEvent(NOTES_UPDATED_EVENT, { detail: { title: item.title } }),
+          new CustomEvent(NOTES_UPDATED_EVENT, {
+            detail: {
+              title: item.title,
+              count: 1,
+              origin:
+                box && box.width > 0
+                  ? { x: box.left + box.width / 2, y: box.top + box.height / 2 }
+                  : null,
+            },
+          }),
         )
       }
 

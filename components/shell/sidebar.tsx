@@ -11,7 +11,6 @@ import type { MessageKey } from "@/lib/i18n/translate"
 import { useT } from "@/lib/i18n/use-i18n"
 import { readSafeUrl } from "@/lib/safe-url"
 import { MESSAGES_UPDATED_EVENT } from "@/lib/messages/event"
-import { NoteCounter } from "@/components/notes/note-counter"
 import { SIDEBAR_W } from "./shell-widths"
 
 /**
@@ -121,11 +120,8 @@ export function Sidebar() {
       </nav>
 
       <div className="space-y-1.5 px-5 py-4 text-xs text-ink-muted">
-        {/* 音符（P0-5-4）：**只此一处**展示，不弹窗、不进课程卡、不做等级。
-            放在导航之外的底部角落，与「重看教程」/「反馈」同层 ——
-            它是"已完成事项的计数"，不是导航目标，也不该抢一个导航位。
-            查不到时组件自己不渲染（见 NoteCounter 注释：绝不把故障显示成 0）。 */}
-        <NoteCounter />
+        {/* 音符计数 2026-09-24 起搬到顶栏（`components/shell/topbar.tsx`）——
+            Steven 验收反馈：侧栏底部看不见，且飘行动画需要一个常驻落点。 */}
         <p>Course OS · v0.1</p>
         {/* 「重看教程」放在导航之外的底部角落：它是一次性的辅助入口，
             不该占一个导航位（P0-3-32 约束 ③）。 */}

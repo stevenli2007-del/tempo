@@ -32,6 +32,7 @@ const zh = {
   'notes.label': '音符',
   'notes.total': '{n} 项已完成',
   'notes.awardedSr': '「{title}」已完成',
+  'notes.catchupSr': '{count} 项任务已完成',
 
   // ---------- 登录 / 注册 ----------
   'auth.loginTitle': '登录 Tempo',
@@ -516,6 +517,7 @@ export const messages: Record<'zh' | 'en', Record<MessageKey, string>> = {
     'notes.label': 'Notes',
     'notes.total': '{n} completed',
     'notes.awardedSr': 'Completed: {title}',
+    'notes.catchupSr': '{count} tasks completed',
 
     // ---------- 登录 / 注册 ----------
     'auth.loginTitle': 'Sign in to Tempo',

@@ -20,6 +20,7 @@ import { COURSE_COLUMNS, toCourse } from '@/lib/courses'
 import type { CourseRow } from '@/lib/courses'
 import { dropCanvasExamPlaceholders, loadTasks, loadUpcomingExams } from '@/lib/tasks'
 import { awardNotesForDone } from '@/lib/notes/store'
+import { NoteCatchup } from '@/components/notes/note-catchup'
 import { formatDue } from '@/lib/tasks/format'
 import { buildTodayTasks } from '@/lib/tasks/today'
 import {
@@ -291,11 +292,22 @@ export default async function DashboardPage({
    * 所以这一行每渲染一次就跑一次是安全的 —— 第二次往后全是零写入。
    *
    * ### 失败不影响页面
-   * 音符是"回声"不是功能：查不动就让侧栏那一行不显示（端点也会如实报 500），
+   * 音符是"回声"不是功能：查不动就让顶栏那一行不显示（端点也会如实报 500），
    * 绝不能让记入失败把整个总览页打挂。但必须留日志（CodingRules 7：不吞异常）。
+   *
+   * ### `notesAwarded` 要传给客户端（2026-09-24 验收反馈）
+   * 记入在服务端，彩带 / 飘行层在客户端 —— 新记入几枚要经
+   * `<NoteCatchup>`（挂载后广播同一个事件）带回，自动检测到的完成才有反馈。
+   * 手勾路径不会双响：PATCH 已当场记入，refresh 后这里的 awarded 是 0。
    */
+  let notesAwarded = 0
   try {
-    await awardNotesForDone(supabase, user.id, visibleTasks)
+    const notes = await awardNotesForDone(supabase, user.id, visibleTasks)
+    if (notes.error) {
+      console.error('[notes] 懒补失败', notes.error)
+    } else {
+      notesAwarded = notes.awarded
+    }
   } catch (cause) {
     console.error('[notes] 懒补失败', cause instanceof Error ? cause.message : cause)
   }
@@ -310,6 +322,8 @@ export default async function DashboardPage({
 
   return (
     <AppShell title={t(lang, 'nav.dashboard')}>
+      {/* 懒补回声（P0-5-4）：服务端新记入的枚数带回客户端，彩带 / 飘行才有得放。 */}
+      <NoteCatchup awarded={notesAwarded} />
       <div className="mx-auto max-w-[1100px] space-y-8">
         <div className="flex items-start justify-between gap-4">
           <div>

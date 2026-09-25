@@ -13,7 +13,15 @@ export const NOTES_UPDATED_EVENT = 'tempo-notes-updated'
  *
  * `title` 只给读屏用（彩带本身**不带任何文字**，见 `components/notes/confetti.tsx`）——
  * 屏幕阅读器用户拿不到"屏幕上飘了一层彩带"这个信号，用一句中性的事实补上。
+ *
+ * `count`：本次完成几件。手勾 = 1；总览页懒补（Canvas 代判）可能一批多件。
+ *
+ * `origin`：触发点的**视口坐标**（完成那一行的中心）。飘行动画
+ * （`components/notes/note-fly.tsx`）从这里起飞一枚 ♪ 飞向顶栏计数；
+ * 懒补没有"那一行"（可能来自屏上任意几条），传 null → 从视口中下部起飞。
  */
 export interface NotesUpdatedDetail {
   title: string
+  count?: number
+  origin?: { x: number; y: number } | null
 }

@@ -116,7 +116,7 @@ console.log('\nR5 文案闸门：庆祝性 / 激励性文案')
   }
 
   check('zh / en 键集一致', Object.keys(messages.zh).length === Object.keys(messages.en).length, `${Object.keys(messages.zh).length} vs ${Object.keys(messages.en).length}`)
-  check('notes.* 三个键都在', ['notes.label', 'notes.total', 'notes.awardedSr'].every((k) => k in messages.zh && k in messages.en))
+  check('notes.* 四个键都在', ['notes.label', 'notes.total', 'notes.awardedSr', 'notes.catchupSr'].every((k) => k in messages.zh && k in messages.en))
 
   for (const word of hardBanned) {
     const hits = allValues.filter((entry) => entry.value.includes(word))
@@ -124,7 +124,7 @@ console.log('\nR5 文案闸门：庆祝性 / 激励性文案')
   }
 
   const noteValues = allValues.filter((entry) => entry.key.startsWith('notes.'))
-  check('音符文案至少有一条（否则闸门在空集上假绿）', noteValues.length >= 3, String(noteValues.length))
+  check('音符文案至少有一条（否则闸门在空集上假绿）', noteValues.length >= 4, String(noteValues.length))
   for (const word of notesBanned) {
     const hits = noteValues.filter((entry) => entry.value.includes(word))
     check(`音符文案无「${word}」`, hits.length === 0, hits.map((h) => `${h.lang}.${h.key}`).join(', '))
@@ -132,13 +132,38 @@ console.log('\nR5 文案闸门：庆祝性 / 激励性文案')
 
   // 彩带本身不带文字（卡面：不带文字，或只带中性的「+1」；我们选了不带）。
   const confetti = readFileSync(resolve(process.cwd(), 'components/notes/confetti.tsx'), 'utf8')
-  // 卡面允许「不带文字」或「只带中性的 +1」；我们选了不带 ——
-  // 判据 = 整个组件只用到**一处** `t()`，而那一处就挂在 sr-only 上。
-  const tCalls = confetti.match(/\bt\('/g) ?? []
-  check('彩带只有一处文案，且它挂在 sr-only 上', tCalls.length === 1 && /role="status"[\s\S]{0,120}t\('notes\./.test(confetti), `${tCalls.length} 处 t()`)
+  // sr-only 恰好两句（手勾带标题 / 懒补带数量），都是 `notes.*` 键、都挂在 role="status" 上 ——
+  // 视觉层一个字的文案都没有。
+  const tCalls = confetti.match(/\bt\('notes\./g) ?? []
+  check('彩带只有 sr-only 的两句中性陈述（notes.* 键）', tCalls.length === 2 && /role="status"[\s\S]{0,200}notes\.awardedSr[\s\S]{0,120}notes\.catchupSr/.test(confetti), `${tCalls.length} 处 notes.* 文案`)
   check('视觉层整体 aria-hidden（读屏不读碎片）', /aria-hidden[\s\S]{0,200}note-confetti/.test(confetti) || /note-confetti[\s\S]{0,200}aria-hidden/.test(confetti))
   check('彩带整层不拦点击（pointer-events-none）', confetti.includes('pointer-events-none'))
   check('彩带尊重 prefers-reduced-motion', confetti.includes('prefers-reduced-motion'))
+}
+
+console.log('\n飘行 + 顶栏计数（2026-09-24 验收反馈）')
+{
+  const fly = readFileSync(resolve(process.cwd(), 'components/notes/note-fly.tsx'), 'utf8')
+  check('飘行层尊重 prefers-reduced-motion', fly.includes('prefers-reduced-motion'))
+  check('飘行层整层不拦点击', fly.includes('pointer-events-none'))
+  check('飘行层不携带任何文案（只有 aria-hidden 的 ♪）', /aria-hidden/.test(fly) && !/\bt\(/.test(fly))
+  check('一次最多放飞 6 枚（懒补一批几十枚时不能糊脸）', /MAX_FLIGHTS = 6/.test(fly))
+
+  const counter = readFileSync(resolve(process.cwd(), 'components/notes/note-counter.tsx'), 'utf8')
+  // 飘行动画的落点靠这个 id 定位（note-fly.tsx 按 getElementById('note-counter') 找）——
+  // 改名两处必须同改，这里钉住一侧。
+  check('计数器带 note-counter id（飘行的落点）', counter.includes("id=\"note-counter\"") || counter.includes("id='note-counter'"))
+
+  const shell = readFileSync(resolve(process.cwd(), 'components/shell/app-shell.tsx'), 'utf8')
+  check('飘行层挂在壳上（与彩带同层，任何页面都生效）', shell.includes('NoteFlyLayer'))
+  const topbar = readFileSync(resolve(process.cwd(), 'components/shell/topbar.tsx'), 'utf8')
+  const sidebar = readFileSync(resolve(process.cwd(), 'components/shell/sidebar.tsx'), 'utf8')
+  check('计数在顶栏、侧栏已移除（Steven 2026-09-24：底部看不见）', topbar.includes('NoteCounter') && !sidebar.includes('NoteCounter'))
+
+  const catchup = readFileSync(resolve(process.cwd(), 'components/notes/note-catchup.tsx'), 'utf8')
+  check('懒补回声只在 awarded > 0 时广播（手勾路径不双响）', /awarded <= 0/.test(catchup))
+  const dashboard = readFileSync(resolve(process.cwd(), 'app/(routes)/dashboard/page.tsx'), 'utf8')
+  check('总览页把懒补枚数传给 NoteCatchup', dashboard.includes('notesAwarded') && dashboard.includes('<NoteCatchup'))
 }
 
 console.log('')

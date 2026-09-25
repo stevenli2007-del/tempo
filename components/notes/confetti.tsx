@@ -67,6 +67,8 @@ interface Burst {
   /** React key + 清理计时器的凭据：连续完成两件事要各放一次。 */
   id: number
   title: string
+  /** 本次完成几件：手勾 = 1；总览页懒补（Canvas 代判）可能一批多件。 */
+  count: number
   animate: boolean
 }
 
@@ -78,7 +80,12 @@ export function ConfettiLayer() {
     function onNotesUpdated(event: Event) {
       const detail = (event as CustomEvent<NotesUpdatedDetail>).detail
       const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches
-      setBurst({ id: Date.now(), title: detail?.title ?? '', animate: !reduced })
+      setBurst({
+        id: Date.now(),
+        title: detail?.title ?? '',
+        count: Math.max(1, detail?.count ?? 1),
+        animate: !reduced,
+      })
     }
 
     window.addEventListener(NOTES_UPDATED_EVENT, onNotesUpdated)
@@ -117,9 +124,13 @@ export function ConfettiLayer() {
           ))}
         </div>
       ) : null}
-      {/* 彩带没有文字，读屏用户拿不到这个信号 —— 用一句中性陈述补上（不评价、不祝贺）。 */}
+      {/* 彩带没有文字，读屏用户拿不到这个信号 —— 用一句中性陈述补上（不评价、不祝贺）。
+          两条路径各有一句：手勾带标题（完成的是这一件）；懒补（Canvas 代判，
+          可能一批几件、没有单条标题）只报数量 —— 都是事实陈述，不是祝贺。 */}
       <p role="status" className="sr-only">
-        {t('notes.awardedSr', { title: burst.title })}
+        {burst.title !== ''
+          ? t('notes.awardedSr', { title: burst.title })
+          : t('notes.catchupSr', { count: burst.count })}
       </p>
     </>
   )

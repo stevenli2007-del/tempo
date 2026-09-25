@@ -269,3 +269,28 @@
     display: none;
   }
 }
+
+/* 音符计数收到完成事件后的轻弹（note-counter.tsx）：数字变了要看得见，
+   但只是 1.06 倍的一次回弹 —— 不是跳动/发光那种"庆祝"（R5）。
+   减弱动态效果时直接不弹。 */
+@keyframes note-counter-pulse {
+  0% {
+    transform: scale(1);
+  }
+  35% {
+    transform: scale(1.06);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
+.note-counter-pulse {
+  animation: note-counter-pulse 0.6s cubic-bezier(0.3, 0.7, 0.4, 1);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .note-counter-pulse {
+    animation: none;
+  }
+}
