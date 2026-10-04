@@ -188,6 +188,79 @@ type CanvasApiAnnouncement = {
   workflow_state?: string | null
 }
 
+/**
+ * 单条公告的路径（P0-5-5 ①，按需路径专用）。
+ *
+ * ### 为什么懒补不能复用批量端点
+ * 批量端点 `/api/v1/announcements` 的窗口是「当天 + 昨天」（ADR-023 锚点收窄），
+ * 而用户可能**几天后**才打开消息栏 —— 那时那条公告早已不在窗口内，打批量端点拿不到它。
+ * 单条端点按 id 取，与日期无关。
+ *
+ * 公告在 Canvas 里就是 `discussion_topic`（`type=announcement`），id 通用。
+ */
+export function announcementPath(
+  externalCourseId: string,
+  externalAnnouncementId: string,
+): string {
+  return `/api/v1/courses/${encodeURIComponent(externalCourseId)}/discussion_topics/${encodeURIComponent(externalAnnouncementId)}`
+}
+
+/**
+ * 公告附件（P0-5-5 ①）。
+ *
+ * 🔴 **ADR-026 第 3 条：`url` 是能力凭据**（`?verifier=…`，不带 Authorization 也能取到文件）。
+ * 所以本形状只在**本次请求的内存里**存在：不落库、不下发客户端、用完即弃。
+ * 这也是为什么附件清单**不进 `course_announcements` 表** —— 存下来等于在库里放一堆永久钥匙。
+ */
+export type CanvasAnnouncementAttachment = {
+  externalId: string
+  /** 落盘文件名（带后缀），`checkFetchable` 靠它判能不能抽字。 */
+  filename: string
+  contentType: string | null
+  /** null = 不知道多大 → 按 ADR-026 红线拒绝下载。 */
+  sizeBytes: number | null
+  /** 能力凭据。**只在本次请求内使用**，绝不返回给调用方之外的任何地方。 */
+  url: string
+}
+
+/** 单条公告响应里我们用到的字段。 */
+type CanvasApiAnnouncementDetail = {
+  attachments?: unknown
+}
+
+/**
+ * 原始响应 → 附件列表。
+ *
+ * 只收「有 id + 有 url」的条目：没有 url 就取不到内容，留着只会让后面
+ * 走一遍"下载失败"的分支，给出一条用户看不懂的错误。
+ */
+export function toAnnouncementAttachments(raw: unknown): CanvasAnnouncementAttachment[] {
+  if (!raw || typeof raw !== 'object') return []
+  const list = (raw as CanvasApiAnnouncementDetail).attachments
+  if (!Array.isArray(list)) return []
+
+  const result: CanvasAnnouncementAttachment[] = []
+  for (const item of list) {
+    if (!item || typeof item !== 'object') continue
+    const record = item as Record<string, unknown>
+    const id = record.id
+    const url = record.url
+    if (typeof id !== 'number' && typeof id !== 'string') continue
+    if (typeof url !== 'string' || url.trim() === '') continue
+    const filename = typeof record.filename === 'string' ? record.filename : ''
+    if (filename.trim() === '') continue
+    const size = record.size
+    result.push({
+      externalId: String(id),
+      filename,
+      contentType: typeof record['content-type'] === 'string' ? record['content-type'] : null,
+      sizeBytes: typeof size === 'number' && Number.isFinite(size) && size >= 0 ? size : null,
+      url,
+    })
+  }
+  return result
+}
+
 /** `course_1234` → `1234`；不是课程上下文（如 `group_5`）返回 null。 */
 export function announcementCourseExternalId(contextCode: string | null | undefined): string | null {
   if (typeof contextCode !== 'string') return null

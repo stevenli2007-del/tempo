@@ -29,8 +29,22 @@ export const announcementUndoer: MessageUndoer = async (ctx: UndoContext): Promi
   const restores = (Array.isArray(applied.examRestores) ? applied.examRestores : [])
     .map(toRestore)
     .filter((item): item is MessageExamRestore => item !== null)
+  // P0-5-5 ②：被改期的**作业**行，同样按旧值写回（不是删）。
+  const taskRestores = (Array.isArray(applied.taskRestores) ? applied.taskRestores : []).flatMap(
+    (item) => {
+      if (!item || typeof item !== 'object') return []
+      const id = typeof item.id === 'string' ? item.id : ''
+      if (id === '') return []
+      return [{ id, dueDate: typeof item.dueDate === 'string' ? item.dueDate : null }]
+    },
+  )
 
-  if (examIds.length === 0 && componentIds.length === 0 && restores.length === 0) {
+  if (
+    examIds.length === 0 &&
+    componentIds.length === 0 &&
+    restores.length === 0 &&
+    taskRestores.length === 0
+  ) {
     // 没写任何业务数据，撤销即空操作。
     return { ok: true }
   }
@@ -67,6 +81,32 @@ export const announcementUndoer: MessageUndoer = async (ctx: UndoContext): Promi
     if ((data ?? []).length === 0) {
       // 行没了（用户在这期间手动删过）→ 目标状态本来就是"这条不在了"，不算失败。
       console.warn('[messages] 撤销公告时被更正的考试已不存在，跳过还原:', restore.id)
+    }
+  }
+
+  // ---------- 1b) 被改期的作业：按旧值写回（P0-5-5 ②）----------
+  //
+  // 🔴 与考试改期同一条纪律：**写回旧值，不删行**。删了那条作业就没了，
+  // 而用户撤销的只是"把 9/25 改成 9/27"这一件事。
+  // `.eq('source','manual')` 同样是收口：tasks 有两个写入方，撤销也只碰手动那一行。
+  for (const restore of taskRestores) {
+    const { data, error } = await supabase
+      .from('tasks')
+      .update({ due_date: restore.dueDate })
+      .eq('id', restore.id)
+      .eq('course_id', courseId)
+      .eq('source', 'manual')
+      .select('id')
+    if (error) {
+      return {
+        ok: false,
+        code: 'task_restore_failed',
+        message: `还原作业截止日失败：${error.message}`,
+      }
+    }
+    if ((data ?? []).length === 0) {
+      // 行没了 / 已被改成非 manual → 目标状态不可达，留痕但不算失败。
+      console.warn('[messages] 撤销公告时那条作业已不存在或已不可写，跳过还原:', restore.id)
     }
   }
 

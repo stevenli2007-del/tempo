@@ -3,7 +3,8 @@ import { TASK_COLUMNS, toTask } from '@/lib/tasks'
 import type { Task } from '@/types/task'
 import type { createClient } from '@/lib/supabase/server'
 import { generateUnsubToken } from './token'
-import { DEFAULT_TIMEZONE, buildReminderEmail, isRemindable, isSameLocalDay } from './build'
+import { DEFAULT_TIMEZONE, buildReminderEmail, isSameLocalDay } from './build'
+import { selectReminderTasks } from './select'
 import { sendReminderEmail } from './send'
 
 /**
@@ -150,7 +151,10 @@ export async function buildAndSendReminder(
   //     `status='pending'` 只说明"用户还没手勾"，不代表"还没做"：Canvas 已提交/已评分的
   //     任务同样是 pending（ADR-015：同步永不写 status）。不筛这一层就会出现
   //     「Canvas 显示已提交、邮件却说你逾期 14 天」的自相矛盾（2026-09-17 实发信的 bug）。
-  const tasks = allPending.filter(isRemindable)
+  //
+  //     P0-5-5 ③：同一步里再过一遍 Canvas 考试空壳（老师建的同名无截止日作业）。
+  //     判据与总览页/课程详情页共用 `dropCanvasExamPlaceholders`，此处不另写一套。
+  const tasks = selectReminderTasks(allPending)
   if (tasks.length === 0) {
     return { userId, sent: false, reason: 'no_tasks' }
   }

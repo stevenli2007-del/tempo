@@ -2,11 +2,13 @@ import { applyCourseUpdate, summarizeApply } from '@/lib/course-update/apply'
 import {
   readComponentProposals,
   readExamProposals,
+  readTaskProposals,
 } from '@/lib/messages/exam-proposals/ensure'
 import { validateExamInput, validateGradeComponentInput } from '@/lib/course-update/normalize'
 import { parseCourseUpdate } from '@/lib/course-update/parse'
 import type { ParsedExam, ParsedGradeComponent } from '@/lib/course-update/normalize'
 import type { ApplyContext, ApplyOutcome, MessageApplier } from '@/lib/messages/apply'
+import type { MessageTaskRestore } from '@/types/message'
 
 /**
  * 公告的写入器（P0-3-25，Sync-Strategy §14「落点规则」）。
@@ -284,6 +286,7 @@ async function applyFromProposals(input: {
   const { ctx, courseId } = input
   const proposals = readExamProposals(ctx.payload)
   const components = readComponentProposals(ctx.payload)
+  const taskProposals = readTaskProposals(ctx.payload)
 
   // `update` 却没有目标 id = 半截数据（手工改库 / 老数据）。不算可写，也不许退化成新增。
   const isWritable = (item: { kind: string; targetId: string | null }) =>
@@ -291,15 +294,66 @@ async function applyFromProposals(input: {
   const writable = proposals.filter(isWritable)
   const blocked = proposals.filter((item) => !isWritable(item))
 
-  if (writable.length === 0 && components.length === 0) {
+  // P0-5-5 ②：作业改期里**可写的只有 `update`**（命中唯一一条手动任务）。
+  // 其余（多命中 / 没匹配上 / 命中但来自 Canvas 或派生）一律不写，但要在回执里点名。
+  const writableTasks = taskProposals.filter(
+    (item) => item.kind === 'update' && item.targetId !== null,
+  )
+  const blockedTasks = taskProposals.filter((item) => !writableTasks.includes(item))
+
+  if (writable.length === 0 && components.length === 0 && writableTasks.length === 0) {
     const first = blocked[0]
+    const firstTask = blockedTasks[0]
     // 空写入的按钮/回执必须是「知道了」（R3）：这里确实一个字段都不会写。
+    const why =
+      firstTask?.reason ??
+      (first ? `${first.examName}：${first.reason ?? '没有可写入的变更'}` : null) ??
+      '这条公告里没有可写入的考试 / 成绩构成 / 作业改期'
     return {
       ok: true,
-      summary: first
-        ? `知道了（${first.examName}：${first.reason ?? '没有可写入的变更'}）`
-        : '知道了（这条公告里没有可写入的考试 / 成绩构成）',
+      summary: `知道了（${why}）`,
     }
+  }
+
+  // ---------- 写入作业改期 ----------
+  //
+  // 🔴 `.eq('source', 'manual')` 不是可选项：tasks 有两个写入方（Canvas 同步与本路径），
+  // 漏了它就会把 Canvas 的行当成"可以改"写掉，而下一轮同步又把它改回去 ——
+  // 表现为"改了没生效"，且没有任何报错（两个写入方共用一张表的经典事故）。
+  const taskRestores: MessageTaskRestore[] = []
+  let tasksUpdated = 0
+  const taskFailures: string[] = []
+
+  for (const item of writableTasks) {
+    const taskId = item.targetId!
+    // 先读旧值 —— 撤销要按它写回。读不到就不写（宁可不改，也不能改得撤不回来）。
+    const { data: before, error: readError } = await ctx.supabase
+      .from('tasks')
+      .select('id, due_date')
+      .eq('id', taskId)
+      .eq('course_id', courseId)
+      .eq('source', 'manual')
+      .maybeSingle()
+
+    if (readError || !before) {
+      taskFailures.push(`${item.title}：找不到那条可改的任务，未写入`)
+      continue
+    }
+    const beforeRow = before as { id: string; due_date: string | null }
+
+    const { error: writeError } = await ctx.supabase
+      .from('tasks')
+      .update({ due_date: item.dueDate })
+      .eq('id', taskId)
+      .eq('course_id', courseId)
+      .eq('source', 'manual')
+
+    if (writeError) {
+      taskFailures.push(`${item.title}：写入失败（${writeError.message}）`)
+      continue
+    }
+    taskRestores.push({ id: beforeRow.id, dueDate: beforeRow.due_date })
+    tasksUpdated += 1
   }
 
   const exams: ParsedExam[] = writable.map((item) => ({
@@ -331,20 +385,29 @@ async function applyFromProposals(input: {
   }
 
   const parts = [summarizeApply(result)]
+  if (tasksUpdated > 0) {
+    parts.push(`作业改期 ${tasksUpdated} 条`)
+  }
   if (blocked.length > 0) {
     parts.push(
       `另有 ${blocked.length} 条没写（${blocked[0].examName}：${blocked[0].reason ?? '未写入'}）`,
     )
   }
+  // 写不了 / 没写成的作业也要逐条点名 —— 用户以为改了、库里没改，是最坏的那种静默失败。
+  for (const item of blockedTasks) {
+    parts.push(`${item.title}：${item.reason ?? '未写入'}`)
+  }
+  parts.push(...taskFailures)
 
   const applied = result.applied
   const hasApplied =
     (applied.examDateIds?.length ?? 0) > 0 ||
     (applied.gradeComponentIds?.length ?? 0) > 0 ||
-    (applied.examRestores?.length ?? 0) > 0
+    (applied.examRestores?.length ?? 0) > 0 ||
+    taskRestores.length > 0
   return {
     ok: true,
     summary: parts.join(' · '),
-    ...(hasApplied ? { applied } : {}),
+    ...(hasApplied ? { applied: { ...applied, ...(taskRestores.length > 0 ? { taskRestores } : {}) } } : {}),
   }
 }

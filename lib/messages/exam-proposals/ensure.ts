@@ -10,12 +10,18 @@ import {
   resolveExamTargets,
   type ExamRowRef,
 } from '@/lib/course-update/exam-match'
+import { resolveTaskTargets, type TaskMatchInput } from '@/lib/course-update/task-match'
+import { readAttachmentExams } from '@/lib/messages/announcement-attachments'
+import { t } from '@/lib/i18n/translate'
+import type { TaskCandidate } from '@/types/task'
 import type {
   Message,
   MessageComponentProposal,
   MessageExamProposal,
   MessagePayload,
   MessageRow,
+  MessageTaskProposal,
+  TaskProposalKind,
 } from '@/types/message'
 
 import type { createClient } from '@/lib/supabase/server'
@@ -165,6 +171,57 @@ export function readExamProposals(payload: MessagePayload): MessageExamProposal[
   return items
 }
 
+/**
+ * 读作业改期提案（P0-5-5 ②）—— 与 `readExamProposals` 同一套防御式解析。
+ *
+ * `payload` 是 jsonb：客户端可以提交任意形状，所以每个字段都独立校验，
+ * 不认识的 `kind` 直接丢弃（"认不出就当没有"，绝不退化成新增）。
+ */
+export function readTaskProposals(payload: MessagePayload): MessageTaskProposal[] {
+  const raw = payload.taskProposals
+  if (!Array.isArray(raw)) return []
+  const kinds: TaskProposalKind[] = [
+    'update',
+    'duplicate',
+    'ambiguous',
+    'unmatched',
+    'blocked_canvas',
+    'blocked_derived',
+    'missing',
+  ]
+  const items: MessageTaskProposal[] = []
+  for (const entry of raw) {
+    if (typeof entry !== 'object' || entry === null) continue
+    const record = entry as Record<string, unknown>
+    const title = text(record.title)
+    if (title === null) continue
+    const kind = record.kind
+    if (typeof kind !== 'string' || !kinds.includes(kind as TaskProposalKind)) continue
+    const candidates = Array.isArray(record.candidates)
+      ? record.candidates.flatMap((item) => {
+          if (typeof item !== 'object' || item === null) return []
+          const c = item as Record<string, unknown>
+          const id = text(c.id)
+          const label = text(c.label)
+          return id && label ? [{ id, label }] : []
+        })
+      : []
+    items.push({
+      title,
+      dueDate: text(record.dueDate),
+      notes: text(record.notes),
+      sourceExcerpt: text(record.sourceExcerpt) ?? '',
+      kind: kind as TaskProposalKind,
+      targetId: text(record.targetId),
+      beforeLabel: text(record.beforeLabel),
+      afterLabel: text(record.afterLabel) ?? title,
+      candidates,
+      reason: text(record.reason),
+    })
+  }
+  return items
+}
+
 export function readComponentProposals(payload: MessagePayload): MessageComponentProposal[] {
   const raw = payload.componentProposals
   if (!Array.isArray(raw)) return []
@@ -230,6 +287,109 @@ export async function ensureExamProposals(input: {
   return outcome
 }
 
+/**
+ * 作业改期提案（P0-5-5 ②）。
+ *
+ * ### 🔴 只在解析真有作业类内容时才查 tasks 表
+ * 绝大多数公告没有作业改期，白查一次纯属浪费；而 `resolveTaskTargets` 需要
+ * 这门课现有任务做候选，所以必须查 —— 用「有没有解析出作业」决定查不查。
+ *
+ * ### 🔴 查不到任务 = 暂时性失败（返回 null，下次重试）
+ * 与考试那边同一条二分法：读库失败不是"这门课没有作业"，
+ * 写成 `clean` 会让用户以为"确实没得改"（ADR-016 R3 的诬告）。
+ */
+async function buildTaskProposals(input: {
+  supabase: ServerSupabase
+  courseId: string
+  rawTasks: unknown
+  messageId: string
+}): Promise<MessageTaskProposal[]> {
+  const { supabase, courseId, rawTasks, messageId } = input
+
+  const items: TaskMatchInput[] = (Array.isArray(rawTasks) ? rawTasks : []).flatMap((raw) => {
+    if (!raw || typeof raw !== 'object') return []
+    const record = raw as Record<string, unknown>
+    const title = typeof record.title === 'string' ? record.title.trim() : ''
+    // 没有标题就没有可匹配的字面；没有截止日的"作业"谈不上改期（那是新建，本卡不做）。
+    if (title === '') return []
+    const dueDate = typeof record.dueDate === 'string' ? record.dueDate : null
+    if (dueDate === null) return []
+    return [
+      {
+        title,
+        dueDate,
+        notes: typeof record.notes === 'string' ? record.notes : null,
+        sourceExcerpt: typeof record.sourceExcerpt === 'string' ? record.sourceExcerpt : '',
+      },
+    ]
+  })
+  if (items.length === 0) return []
+
+  const { data: taskRows, error } = await supabase
+    .from('tasks')
+    .select('id, title, due_date, task_type, source, is_derived')
+    .eq('course_id', courseId)
+    .eq('is_deleted', false)
+  if (error) {
+    console.warn('[exam-proposals] 读任务失败（下次会重试）:', messageId, error.message)
+    return []
+  }
+
+  const existing: TaskCandidate[] = ((taskRows ?? []) as {
+    id: string
+    title: string
+    due_date: string | null
+    task_type: TaskCandidate['taskType']
+    source: TaskCandidate['source']
+    is_derived: boolean
+  }[]).map((row) => ({
+    id: row.id,
+    title: row.title,
+    dueDate: row.due_date,
+    taskType: row.task_type,
+    source: row.source,
+    isDerived: row.is_derived,
+  }))
+
+  const dueLabel = (value: string | null): string => value ?? t('zh', 'exam.tbd')
+
+  return resolveTaskTargets(items, existing).map((resolution) => ({
+    title: resolution.task.title,
+    dueDate: resolution.task.dueDate,
+    notes: resolution.task.notes,
+    sourceExcerpt: resolution.task.sourceExcerpt,
+    kind: resolution.kind,
+    targetId: resolution.target?.id ?? null,
+    beforeLabel:
+      resolution.kind === 'update' && resolution.target ? dueLabel(resolution.target.dueDate) : null,
+    afterLabel: dueLabel(resolution.task.dueDate),
+    candidates: resolution.candidates.map((item) => ({
+      id: item.id,
+      label: `${item.title} · ${dueLabel(item.dueDate)}`,
+    })),
+    reason: resolution.reason,
+  }))
+}
+
+/**
+ * 本地课程 uuid → Canvas 课程 id（读附件要用它拼单条公告端点）。
+ *
+ * 查不到返回 null，调用方按"读不了附件"处理 —— 这门课没关联 Canvas，
+ * 本来也就没有附件可读。
+ */
+async function loadCanvasCourseId(
+  supabase: ServerSupabase,
+  courseId: string,
+): Promise<string | null> {
+  const { data } = await supabase
+    .from('courses')
+    .select('canvas_course_id')
+    .eq('id', courseId)
+    .maybeSingle()
+  const row = data as { canvas_course_id: string | null } | null
+  return row?.canvas_course_id ?? null
+}
+
 /** 算一条并写回。**暂时性失败返回 null**（下次再试）。 */
 async function computeOne(input: {
   supabase: ServerSupabase
@@ -241,7 +401,7 @@ async function computeOne(input: {
   // ---------- 1) 回查公告正文（RLS 保证它属于我） ----------
   const { data: announcement, error: loadError } = await supabase
     .from('course_announcements')
-    .select('id, course_id, body_text')
+    .select('id, course_id, body_text, canvas_announcement_id')
     .eq('id', candidate.announcementId)
     .maybeSingle()
 
@@ -257,7 +417,12 @@ async function computeOne(input: {
     )
   }
 
-  const row = announcement as { id: string; course_id: string; body_text: string | null }
+  const row = announcement as {
+    id: string
+    course_id: string
+    body_text: string | null
+    canvas_announcement_id: string | null
+  }
   // 归属一致性：payload 说的课与账上的课必须一致，不一致就停下来（绝不"以账为准"）。
   if (row.course_id !== candidate.courseId) {
     return writePatch(
@@ -323,7 +488,36 @@ async function computeOne(input: {
     location: item.location,
   }))
 
-  const resolutions = resolveExamTargets(examItems, rows)
+  // ---------- 3a) P0-5-5 ①：正文里没说地点，而地点常常在 **PDF 附件**里 ----------
+  //
+  // 触发条件刻意收得很紧：只有「解析出了考试，但它没带地点」时才去读附件。
+  // 每条公告都下 PDF 会同时烧 Canvas 限流、模型与用户的等待时间；
+  // 而"已经有地点了"还去读，纯属浪费（且可能用附件里的旧值覆盖正文的新值）。
+  let attachmentNote: string | null = null
+  let allExamItems = examItems
+  const canvasCourseId = examItems.some((item) => (item.location ?? null) === null)
+    ? await loadCanvasCourseId(supabase, candidate.courseId)
+    : null
+  const externalAnnouncementId = row.canvas_announcement_id ?? ''
+  // 缺 Canvas 课程 id 或外部公告 id → 这条路走不了（不读附件，也不算失败：
+  // 正文那批提案照常出，用户不会因为"附件读不了"而失去处理正文的能力）。
+  if (canvasCourseId && externalAnnouncementId !== '') {
+    const fromAttachments = await readAttachmentExams({
+      supabase,
+      userId,
+      canvasCourseId,
+      externalAnnouncementId,
+    })
+    if (fromAttachments.exams.length > 0) {
+      // 🔴 附件抽出的考试**追加**在正文那批之后：同一场会被 `resolveExamTargets`
+      // 的"批内占位"挡成 duplicate（不会连写两次），名字对不上的才会各归各。
+      allExamItems = [...examItems, ...fromAttachments.exams]
+    } else if (fromAttachments.note) {
+      attachmentNote = fromAttachments.note
+    }
+  }
+
+  const resolutions = resolveExamTargets(allExamItems, rows)
 
   const proposals: MessageExamProposal[] = resolutions.map((resolution, index) => ({
     examName: resolution.exam.examName,
@@ -368,6 +562,17 @@ async function computeOne(input: {
     sourceExcerpt: item.sourceExcerpt ?? '',
   }))
 
+  // ---------- 3b) P0-5-5 ②：作业改期提案（同一次解析，零额外模型调用） ----------
+  //
+  // 与考试提案**同一份** `parsed.data` 的不同数组 —— 一次解析同时喂两条通道，
+  // 不为作业再打一次模型（钱和延迟都是双份，且两次解析可能给出不一致的结论）。
+  const taskProposals = await buildTaskProposals({
+    supabase,
+    courseId: candidate.courseId,
+    rawTasks: parsed.data.tasks,
+    messageId: candidate.row.id,
+  })
+
   const writable = proposals.filter((item) => item.kind === 'create' || item.kind === 'update')
   /**
    * P0-3-36：带候选、等用户挑一条的提案（`ambiguous` / `unidentifiable`）。
@@ -380,8 +585,19 @@ async function computeOne(input: {
     (item) =>
       (item.kind === 'ambiguous' || item.kind === 'unidentifiable') && item.candidates.length > 0,
   )
+  // 作业改期里「可写」的只有 `update`（本卡不新增作业）；多命中同样算待挑。
+  const writableTasks = taskProposals.filter((item) => item.kind === 'update')
+  const taskNeedsChoice = taskProposals.some(
+    (item) => item.kind === 'ambiguous' && item.candidates.length > 0,
+  )
   const status: 'ready' | 'clean' =
-    writable.length > 0 || components.length > 0 || needsChoice ? 'ready' : 'clean'
+    writable.length > 0 ||
+    components.length > 0 ||
+    needsChoice ||
+    writableTasks.length > 0 ||
+    taskNeedsChoice
+      ? 'ready'
+      : 'clean'
 
   const lines: string[] = []
   for (const item of proposals) {
@@ -399,7 +615,26 @@ async function computeOne(input: {
   if (components.length > 0) {
     lines.push(`成绩构成 ${components.length} 条：${components.map((c) => c.name).join('、')}`)
   }
-  if (writable.length === 0 && components.length === 0 && proposals.length === 0) {
+  // 附件读了但没读出东西 → 如实说一句（R3：不做没意义的事可以，静默不行）。
+  if (attachmentNote) {
+    lines.push(`附件：${attachmentNote}`)
+  }
+  // 作业改期：改期的那句「旧 → 新」必须出现，写不了的那句也要出现（R3）。
+  for (const item of taskProposals) {
+    if (item.kind === 'update') {
+      lines.push(`作业改期：${item.title} ${item.beforeLabel ?? ''} → ${item.afterLabel}`)
+    } else if (item.kind === 'ambiguous') {
+      lines.push(`待你指定：${item.title}（${item.reason ?? '请指定要改哪一条'}）`)
+    } else {
+      lines.push(`${item.title}：${item.reason ?? '未写入'}`)
+    }
+  }
+  if (
+    writable.length === 0 &&
+    components.length === 0 &&
+    proposals.length === 0 &&
+    taskProposals.length === 0
+  ) {
     lines.push('这条公告里没有可写入的考试 / 成绩构成')
   }
 
@@ -410,6 +645,7 @@ async function computeOne(input: {
       examProposals: proposals,
       componentProposals: components,
       examProposalsStatus: status,
+      ...(taskProposals.length > 0 ? { taskProposals } : {}),
     },
     lines,
   )

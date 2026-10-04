@@ -16,6 +16,8 @@ import {
   isSameLocalDay,
   sortByDueDateAsc,
 } from '@/lib/reminders/build'
+import { selectReminderTasks } from '@/lib/reminders/select'
+import type { Task } from '@/types/task'
 
 let passed = 0
 let failed = 0
@@ -174,6 +176,83 @@ const TZ = 'America/Los_Angeles'
   assert(
     built.html.includes('另有 <strong') && built.html.includes('2</strong> 项更远的任务'),
     '聚焦(不可行动)：折叠行仍给出总数',
+  )
+}
+
+// ---------- P0-5-5 ③：提醒邮件的任务筛选（空壳 + 可提醒，两层同一份判据） ----------
+//
+// 这一层原先只在 `engine.ts`（异步 IO）里，回归够不着 —— 现在抽成 `select.ts`，
+// 「邮件里到底列了什么」可以直接钉死。空壳判据与总览页共用，此处不另写一套。
+{
+  let seq = 0
+  function mkTask(over: Partial<Task>): Task {
+    seq += 1
+    return {
+      id: `t${seq}`,
+      courseId: 'c1',
+      courseName: 'CHEM 1A',
+      title: `任务 ${seq}`,
+      dueDate: null,
+      taskType: 'assignment',
+      source: 'canvas',
+      status: 'pending',
+      isDerived: false,
+      // Canvas 作业常态：`unsubmitted`。留 null 会被 `needsManualConfirmation`
+      // （= canvas + 无提交态，即 Canvas 明说不追踪的那类）判为"不该催"。
+      submissionState: 'unsubmitted',
+      submittedAt: null,
+      canvasUrl: null,
+      pointsPossible: null,
+      submissionScore: null,
+      scoreSource: null,
+      ...over,
+    }
+  }
+
+  // ① 老师在 Canvas 建的同名无截止日「壳」：不该进邮件。
+  const withShell = [
+    mkTask({ title: 'Unit 1 Exam', taskType: 'exam', source: 'syllabus', dueDate: '2026-09-22T23:59:00Z', submissionState: null }),
+    mkTask({ title: 'Unit 1 Exam', source: 'canvas', dueDate: null }),
+    mkTask({ title: 'Homework 9', source: 'canvas', dueDate: '2026-09-25T06:59:00Z' }),
+  ]
+  const kept = selectReminderTasks(withShell)
+  assert(kept.length === 2, '提醒筛选：Canvas 考试空壳被去掉')
+  assert(
+    kept.every((t) => t.title !== 'Unit 1 Exam' || t.source === 'syllabus'),
+    '提醒筛选：保留的是有日期的那条考试，不是壳',
+  )
+
+  // ② 自愈：老师给那行填上日期 → 它不再是壳，必须回来（Canvas 对自己来源的行有权威）。
+  const filled = [
+    mkTask({ title: 'Unit 1 Exam', taskType: 'exam', source: 'syllabus', dueDate: '2026-09-22T23:59:00Z', submissionState: null }),
+    mkTask({ title: 'Unit 1 Exam', source: 'canvas', dueDate: '2026-09-23T23:59:00Z' }),
+  ]
+  assert(selectReminderTasks(filled).length === 2, '提醒筛选：填了日期的 Canvas 行不再被隐藏')
+
+  // ③ 不误伤：名字对不上任何考试的无日期作业照常提醒（它可能是真的没截止日）。
+  const unrelated = [
+    mkTask({ title: 'Unit 1 Exam', taskType: 'exam', source: 'syllabus', dueDate: '2026-09-22T23:59:00Z', submissionState: null }),
+    mkTask({ title: 'Week 5 Discussion', source: 'canvas', dueDate: null }),
+  ]
+  assert(selectReminderTasks(unrelated).length === 2, '提醒筛选：名字对不上的无日期作业不误伤')
+
+  // ④ 🔴 顺序：先去空壳再判可提醒。反过来做时，已完成的考试行会先被滤掉 →
+  //    建不出 examKeys → 它的壳漏回来（「另有 N 项」的计数就对不上账）。
+  const doneExam = [
+    mkTask({ title: 'Unit 1 Exam', taskType: 'exam', source: 'syllabus', dueDate: '2026-09-22T23:59:00Z', submissionState: null, status: 'done' }),
+    mkTask({ title: 'Unit 1 Exam', source: 'canvas', dueDate: null }),
+    mkTask({ title: 'Homework 9', source: 'canvas', dueDate: '2026-09-25T06:59:00Z' }),
+  ]
+  const afterDone = selectReminderTasks(doneExam)
+  assert(afterDone.length === 1, '提醒筛选顺序：考试已完成时，它的壳照样被去掉')
+  assert(afterDone[0]?.title === 'Homework 9', '提醒筛选顺序：只剩那条正常作业')
+
+  // ⑤ 两层都在：已完成的考试行本身也不该被提醒（isRemindable 那一半）。
+  assert(
+    selectReminderTasks([
+      mkTask({ title: 'Unit 1 Exam', taskType: 'exam', source: 'syllabus', dueDate: '2026-09-22T23:59:00Z', submissionState: null, status: 'done' }),
+    ]).length === 0,
+    '提醒筛选：已勾完成的任务不进邮件',
   )
 }
 

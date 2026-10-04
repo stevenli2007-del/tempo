@@ -21,9 +21,12 @@ import {
   announcementsPath,
   decodeHtmlEntities,
   pickWindowAnchor,
+  announcementPath,
   stripHtml,
+  toAnnouncementAttachments,
   toCanvasAnnouncements,
 } from "@/lib/canvas/announcements"
+import { pickReadableAttachments } from "@/lib/messages/announcement-attachments"
 import { hasStructuredLanding } from "@/lib/course-update/landing"
 import {
   MAX_DIGEST_ITEMS,
@@ -425,6 +428,63 @@ console.log("partitionByLanding / buildAnnouncementDigestPayload（C 口径）")
 }
 
 console.log("")
+// ---------- P0-5-5 ①：公告附件的按需读取（判定层）----------
+{
+  const detail = {
+    id: 9001,
+    attachments: [
+      {
+        id: 501,
+        filename: "Exam1Locations.pdf",
+        "content-type": "application/pdf",
+        url: "https://bcourses.example/files/501/download?verifier=abc",
+        size: 204800,
+      },
+      {
+        id: 502,
+        filename: "seating-chart.png",
+        "content-type": "image/png",
+        url: "https://bcourses.example/files/502/download?verifier=def",
+        size: 900000,
+      },
+      {
+        id: 503,
+        filename: "notes.pdf",
+        "content-type": "application/pdf",
+        url: "https://bcourses.example/files/503/download?verifier=ghi",
+        size: 40 * 1024 * 1024,
+      },
+      {
+        id: 504,
+        filename: "handout.pdf",
+        "content-type": "application/pdf",
+        url: "https://bcourses.example/files/504/download?verifier=jkl",
+      },
+      { id: 505, filename: "broken.pdf", "content-type": "application/pdf" },
+    ],
+  }
+
+  const all = toAnnouncementAttachments(detail)
+  check("附件：四条有效（缺 url / 缺文件名的被丢掉）", all.length === 4, `got=${all.length}`)
+  check("附件：保留了原始 filename 与 contentType", all[0]!.filename === "Exam1Locations.pdf" && all[0]!.contentType === "application/pdf")
+  check("附件：没有 size 的记为 null（不是 0）", all.find((a) => a.filename === "handout.pdf")!.sizeBytes === null)
+
+  const readable = pickReadableAttachments(all)
+  // PNG 读不出字、40MB 超限、无大小不敢下 —— 只剩那份 200KB 的 PDF。
+  check("附件：只有真正读得出字的 PDF 被选中", readable.length === 1, `got=${readable.length}`)
+  check("附件：选中的就是那份座位 PDF", readable[0]!.attachment.filename === "Exam1Locations.pdf")
+
+  check("附件：空响应 → 空列表", toAnnouncementAttachments(null).length === 0)
+  check("附件：没有 attachments 字段 → 空列表", toAnnouncementAttachments({ id: 1 }).length === 0)
+
+  // 单条端点按 id 取，与日期窗口无关（懒补在几天后才发生，批量端点那时已取不到）。
+  check(
+    "附件：单条公告端点按 id 拼（不受日期窗口影响）",
+    announcementPath("12345", "67890") === "/api/v1/courses/12345/discussion_topics/67890",
+    announcementPath("12345", "67890"),
+  )
+}
+
 console.log(`结果：${passed} 通过 / ${failed} 失败`)
 if (failed > 0) {
   process.exit(1)

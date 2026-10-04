@@ -28,6 +28,8 @@ import {
   resolveExamTargets,
 } from "@/lib/course-update/exam-match"
 import { summarizeWeightTotals, weightWarning, weightWarnings } from "@/lib/course-update/weights"
+import { canEditTask, resolveTaskTargets, type TaskMatchInput } from "@/lib/course-update/task-match"
+import type { TaskCandidate } from "@/types/task"
 
 let passed = 0
 let failed = 0
@@ -483,6 +485,86 @@ console.log("schema ↔ 校验器 一致性")
   // tasks 里不该再出现 exam —— 解禁是"搬到 exams 字段"，不是"放宽 tasks"。
   const taskTypes = props.tasks?.items?.properties?.taskType?.enum ?? []
   check("tasks.taskType 仍不含 exam", !taskTypes.includes("exam"), taskTypes.join("|"))
+}
+
+// ---------- P0-5-5 ②：作业改期的匹配判定（task-match） ----------
+{
+  const mkTask = (over: Partial<TaskCandidate>): TaskCandidate => ({
+    id: "t-default",
+    title: "Homework 3",
+    dueDate: null,
+    taskType: "assignment",
+    source: "manual",
+    isDerived: false,
+    ...over,
+  })
+  const input = (over: Partial<TaskMatchInput> = {}): TaskMatchInput => ({
+    title: "Homework 3",
+    dueDate: "2026-09-27",
+    notes: null,
+    sourceExcerpt: "Homework 3 is now due 9/27",
+    ...over,
+  })
+
+  // ① 唯一命中一条**可写**的手动任务 → 改期。
+  const one = resolveTaskTargets([input()], [mkTask({ id: "a", dueDate: "2026-09-25" })])
+  check("作业改期：唯一可写命中 → update", one[0]!.kind === "update", one[0]!.kind)
+  check("作业改期：带上目标行 id", one[0]!.target?.id === "a")
+
+  // ② 只命中 Canvas 同步来的行 → 不写，但**说清为什么**（Steven 拍板：出提案标不可写）。
+  const canvasOnly = resolveTaskTargets(
+    [input()],
+    [mkTask({ id: "c", source: "canvas", dueDate: "2026-09-25" })],
+  )
+  check("作业改期：命中 Canvas 行 → blocked_canvas", canvasOnly[0]!.kind === "blocked_canvas", canvasOnly[0]!.kind)
+  check("作业改期：blocked 给出去 Canvas 改的指引", (canvasOnly[0]!.reason ?? "").includes("Canvas"))
+
+  // ③ 只命中派生行（考试）→ 指向课程页，不让改 tasks（ADR-004）。
+  const derivedOnly = resolveTaskTargets(
+    [input()],
+    [mkTask({ id: "d", source: "syllabus", isDerived: true, taskType: "exam", dueDate: "2026-09-25" })],
+  )
+  check("作业改期：命中派生考试行 → blocked_derived", derivedOnly[0]!.kind === "blocked_derived", derivedOnly[0]!.kind)
+
+  // ④ 🔴 0 命中 → unmatched，**绝不新增**（公告不该凭空建作业）。
+  const none = resolveTaskTargets([input()], [mkTask({ id: "z", title: "Lab Report 2", dueDate: "2026-09-25" })])
+  check("作业改期：0 命中 → unmatched（不是 create）", none[0]!.kind === "unmatched", none[0]!.kind)
+  check("作业改期：unmatched 说明不新建的理由", (none[0]!.reason ?? "").length > 0)
+
+  // ⑤ 多条可写 → 列出来让人挑，绝不替他猜。
+  const many = resolveTaskTargets(
+    [input()],
+    [mkTask({ id: "a", title: "Homework 3", dueDate: "2026-09-25" }), mkTask({ id: "b", title: "Homework 3 (draft)", dueDate: "2026-09-20" })],
+  )
+  check("作业改期：多命中 → ambiguous", many[0]!.kind === "ambiguous", many[0]!.kind)
+  check("作业改期：ambiguous 带上候选", many[0]!.candidates.length >= 1)
+
+  // ⑥ 已经是这个日期 → duplicate（不做无意义的写入）。
+  const same = resolveTaskTargets([input({ dueDate: "2026-09-25" })], [mkTask({ id: "a", dueDate: "2026-09-25" })])
+  check("作业改期：日期没变 → duplicate", same[0]!.kind === "duplicate", same[0]!.kind)
+
+  // ⑦ 显式指定一条 Canvas 行 → 照样 blocked，**不退化成新增**。
+  const forced = resolveTaskTargets(
+    [input({ targetTaskId: "c" })],
+    [mkTask({ id: "c", source: "canvas", dueDate: "2026-09-25" })],
+  )
+  check("作业改期：显式指定不可写行 → 不退化成新增", forced[0]!.kind === "blocked_canvas", forced[0]!.kind)
+
+  // ⑧ 指定了一条不在的 → missing。
+  const gone = resolveTaskTargets([input({ targetTaskId: "nope" })], [mkTask({ id: "a" })])
+  check("作业改期：指定的行不在 → missing", gone[0]!.kind === "missing", gone[0]!.kind)
+
+  // ⑨ 批内占位：两条命中同一行 → 第二条不重复写（否则撤销只能还原到中间态）。
+  const dup = resolveTaskTargets(
+    [input(), input()],
+    [mkTask({ id: "a", dueDate: "2026-09-25" })],
+  )
+  check("作业改期：批内同占一行 → 第二条 duplicate", dup[1]!.kind === "duplicate", dup[1]!.kind)
+
+  // ⑩ 可写判据本身（与对话框同源）。
+  check("canEditTask：手动非派生 → 可写", canEditTask({ source: "manual", isDerived: false }))
+  check("canEditTask：canvas → 不可写", !canEditTask({ source: "canvas", isDerived: false }))
+  check("canEditTask：派生 → 不可写", !canEditTask({ source: "manual", isDerived: true }))
 }
 
 console.log("")

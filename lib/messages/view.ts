@@ -490,6 +490,7 @@ function countApplied(payload: MessagePayload): number {
     examDateIds?: unknown
     gradeComponentIds?: unknown
     examRestores?: unknown
+    taskRestores?: unknown
   }
   const exams = Array.isArray(applied.examDateIds) ? applied.examDateIds.length : 0
   const components = Array.isArray(applied.gradeComponentIds) ? applied.gradeComponentIds.length : 0
@@ -500,7 +501,10 @@ function countApplied(payload: MessagePayload): number {
    * 而他刚才明明看到 Tempo 把期中日期改掉了。
    */
   const restores = Array.isArray(applied.examRestores) ? applied.examRestores.length : 0
-  return exams + components + restores
+  // P0-5-5 ②：作业改期也是"写过东西"。漏掉它 → 用户看到「✓ 已确认」却找不到撤销按钮，
+  // 而他刚才明明看到 Tempo 把截止日改掉了（与上面 examRestores 同一个坑）。
+  const taskRestores = Array.isArray(applied.taskRestores) ? applied.taskRestores.length : 0
+  return exams + components + restores + taskRestores
 }
 
 function readTitle(payload: MessagePayload): string {

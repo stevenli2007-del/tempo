@@ -37,6 +37,8 @@ import {
 } from "@/lib/course-update/weights"
 import { looksLikeUrl } from "@/lib/ingest/detect"
 import { normalizeScoreInput } from "@/lib/tasks/score"
+import { canEditTask } from "@/lib/course-update/task-match"
+import type { TaskSource } from "@/types/task"
 
 export type CourseOption = { id: string; courseName: string }
 
@@ -163,8 +165,15 @@ export function formatDay(iso: string | null): string {
 }
 
 /** 只有手动、非派生的任务允许在这里直接改内容（与 `PATCH` 的准入一致）。 */
+/**
+ * 这条候选能被改吗。
+ *
+ * 🔴 判据本身在 `lib/course-update/task-match.ts` 的 `canEditTask()` ——
+ * 公告路径（P0-5-5 ②）与这里是**同一份**。原先它写在本文件里，收到 lib 之后
+ * 两端才不会漂开（界面说"能改"、公告说"写不了"这种自相矛盾）。
+ */
 export function isEditable(candidate: Candidate): boolean {
-  return candidate.source === "manual" && !candidate.isDerived
+  return canEditTask({ source: candidate.source as TaskSource, isDerived: candidate.isDerived })
 }
 
 /** 候选来源标签 + 不可编辑时的原因。 */

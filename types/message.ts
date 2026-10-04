@@ -248,6 +248,14 @@ export type MessagePayload = {
   examProposalsStatus?: MessageExamProposalsStatus
   /** 核对不出来的人话原因（`examProposalsStatus='failed'` 时必有）。 */
   examProposalsError?: string
+  /**
+   * P0-5-5 ②：同批算出来的**作业改期**提案（与考试提案同一次解析的产物）。
+   *
+   * 刻意复用 `examProposalsStatus` 这一个状态字段而不是另开一个：
+   * 它们是**同一次解析**的两部分，状态分开就会出现"考试算好了、作业还没算"的中间态，
+   * 而界面只能画一个状态。
+   */
+  taskProposals?: MessageTaskProposal[]
   [key: string]: unknown
 }
 
@@ -308,6 +316,43 @@ export type MessageExamProposal = {
   /** 不写的原因（人话）。`create` / `update` 为 null。 */
   reason: string | null
 }
+
+/**
+ * 一条**作业改期**提案（P0-5-5 ②，与考试提案同批懒补 —— 省掉确认时那次解析）。
+ *
+ * ### 与考试提案的两处差异
+ * 1. **没有 `create`**：0 命中就是 `unmatched`，不凭一条公告新建作业（见 `task-match.ts`）。
+ * 2. **多了两类「看得到但写不了」**：`blocked_canvas` / `blocked_derived`。
+ *    它们**照样出现在界面上**并说明原因 —— Steven 拍板：出提案但标不可写，
+ *    好过什么都不说（R3：不写可以，必须说清为什么不写）。
+ */
+export type MessageTaskProposal = {
+  title: string
+  dueDate: string | null
+  notes: string | null
+  sourceExcerpt: string
+  /** 与 `lib/course-update/task-match.ts` 的 `TaskResolutionKind` 同一套取值。 */
+  kind: TaskProposalKind
+  /** `update` 时命中的那一行 id；其余为 null。 */
+  targetId: string | null
+  /** 旧值的人话（`update` 时必有）。 */
+  beforeLabel: string | null
+  /** 新值的人话。 */
+  afterLabel: string
+  /** 多命中时列出来让人挑。 */
+  candidates: { id: string; label: string }[]
+  /** 不写的原因（人话）。`update` 为 null。 */
+  reason: string | null
+}
+
+export type TaskProposalKind =
+  | 'update'
+  | 'duplicate'
+  | 'ambiguous'
+  | 'unmatched'
+  | 'blocked_canvas'
+  | 'blocked_derived'
+  | 'missing'
 
 /** 一条成绩构成提案（P0-3-29，与考试提案同批懒补 —— 省掉确认时那次解析）。 */
 export type MessageComponentProposal = {
@@ -380,6 +425,20 @@ export type MessageApplied = {
    * 「Unit 3 Exam · 2026-10-20 · 7-9pm」这句话拆不回 `exam_time`。
    */
   examRestores?: MessageExamRestore[]
+  /**
+   * **被改期**的作业行旧值快照（P0-5-5 ②）。
+   *
+   * 与 `examRestores` 同一条道理：改期是 **update**，撤销不能按 id 删
+   * （那会把这条作业整条删掉）。留旧值、按 id 写回。
+   */
+  taskRestores?: MessageTaskRestore[]
+}
+
+/** 一条作业被改掉的旧值（`tasks` 里这次会改动的字段）。 */
+export type MessageTaskRestore = {
+  id: string
+  /** 旧截止日。**结构化值**，不是界面那句「9/25」—— 那句拆不回 ISO。 */
+  dueDate: string | null
 }
 
 /** 一行考试的旧值快照（`exam_dates` 里所有会被写入器改动的字段）。 */

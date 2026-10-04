@@ -112,6 +112,17 @@ const zh = {
   'exam.markSr': '考试',
   'exam.tbd': '日期待定',
 
+  // ---------- 作业改期（P0-5-5 ②，task-match）----------
+  // 这几句都是"为什么没写成"的原因 —— R3：不写可以，但必须说清为什么不写。
+  'task.blockedCanvas': '这条来自 Canvas，Tempo 改了也会被下次同步改回去 —— 请到 Canvas 改',
+  'task.blockedDerived': '这是考试，日期归课程页管 —— 请到课程页改',
+  'task.blockedSyllabus': '这条不能直接改',
+  'task.missing': '你指定的那条任务已经不在了（可能被删），未写入',
+  'task.claimed': '本批已有一条落到这一行，未重复写入',
+  'task.unmatched': '这门课里没有对得上的任务，未写入（Tempo 不凭一条公告新建作业）',
+  'task.sameDueDate': '这门课那条已经是这个截止日了，未重复写入',
+  'task.ambiguous': '这门课有 {count} 条对得上的任务，Tempo 不替你猜是哪一条',
+
   // ---------- 同步（sync/status / expiry / browser）----------
   'sync.timeUnknown': '时间未知',
   'sync.justNow': '刚刚',
@@ -601,6 +612,16 @@ export const messages: Record<'zh' | 'en', Record<MessageKey, string>> = {
     'exam.markShort': 'EX',
     'exam.markSr': 'Exam',
     'exam.tbd': 'Date TBD',
+
+    // ---------- 作业改期 ----------
+    'task.blockedCanvas': 'This one comes from Canvas — changing it here would be overwritten by the next sync. Please change it in Canvas',
+    'task.blockedDerived': 'This is an exam — its date is managed on the course page. Please change it there',
+    'task.blockedSyllabus': 'This entry cannot be edited directly',
+    'task.missing': 'The task you picked is gone (maybe deleted) — nothing was written',
+    'task.claimed': 'This batch already wrote to that row — not written twice',
+    'task.unmatched': 'No matching task in this course — nothing written (Tempo will not create an assignment from an announcement)',
+    'task.sameDueDate': 'That task already has this due date — nothing written',
+    'task.ambiguous': 'There are {count} matching tasks in this course — Tempo will not guess which one you meant',
 
     // ---------- 同步 ----------
     'sync.timeUnknown': 'Unknown time',
