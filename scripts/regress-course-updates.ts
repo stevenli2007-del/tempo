@@ -28,7 +28,7 @@ import {
   resolveExamTargets,
 } from "@/lib/course-update/exam-match"
 import { summarizeWeightTotals, weightWarning, weightWarnings } from "@/lib/course-update/weights"
-import { canEditTask, resolveTaskTargets, type TaskMatchInput } from "@/lib/course-update/task-match"
+import { canEditTask, resolveTaskTargets, toTaskMatchInputs, type TaskMatchInput } from "@/lib/course-update/task-match"
 import type { TaskCandidate } from "@/types/task"
 
 let passed = 0
@@ -565,6 +565,52 @@ console.log("schema ↔ 校验器 一致性")
   check("canEditTask：手动非派生 → 可写", canEditTask({ source: "manual", isDerived: false }))
   check("canEditTask：canvas → 不可写", !canEditTask({ source: "canvas", isDerived: false }))
   check("canEditTask：派生 → 不可写", !canEditTask({ source: "manual", isDerived: true }))
+
+  // ⑪ 🔴 模型给的日期必须归一化后才进匹配层。
+  // 2026-10-05 真库验收撞到的 bug：`10/8` 被原样写进 timestamptz 列 →
+  // Postgres `invalid input syntax for type timestamp with time zone: "10/8"`，
+  // 整条改期静默失败（回执里只有一句"写入失败"）。
+  const NOW = new Date("2026-10-05T12:00:00Z")
+  {
+    const r = toTaskMatchInputs(
+      [{ title: "Week Five Homework", dueDate: "10/8", notes: null, sourceExcerpt: "x" }],
+      NOW,
+    )
+    check("作业改期输入：10/8 归一化成 ISO", r.items[0]?.dueDate === "2026-10-08T23:59:59Z", String(r.items[0]?.dueDate))
+    check("作业改期输入：没有跳过的条目", r.skipped.length === 0, `skipped=${r.skipped.length}`)
+  }
+  {
+    // 缺年份 → 当前学年推断（8 月及以后取当年），与对话框建任务同一套规则。
+    const sep = toTaskMatchInputs([{ title: "HW", dueDate: "9/20" }], NOW)
+    const jan = toTaskMatchInputs([{ title: "HW", dueDate: "1/15" }], NOW)
+    check("作业改期输入：9/20 → 当年", sep.items[0]?.dueDate === "2026-09-20T23:59:59Z", String(sep.items[0]?.dueDate))
+    check("作业改期输入：1/15 → 次年", jan.items[0]?.dueDate === "2027-01-15T23:59:59Z", String(jan.items[0]?.dueDate))
+  }
+  {
+    // 读不懂 → 挑出来点名，**不吞**（吞掉 = 用户以为老师说的没被处理）。
+    const junk = toTaskMatchInputs([{ title: "Problem Set 4", dueDate: "next Friday" }], NOW)
+    check("作业改期输入：读不懂的日期进 skipped", junk.skipped.length === 1, `skipped=${junk.skipped.length}`)
+    check("作业改期输入：skipped 保留原标题与原文", junk.skipped[0]?.title === "Problem Set 4" && junk.skipped[0]?.rawDueDate === "next Friday")
+    check("作业改期输入：读不懂的不进匹配", junk.items.length === 0, `items=${junk.items.length}`)
+  }
+  {
+    // 没有标题 / 没有截止日 → 本来就不是"改期"，静默丢弃（与从前一致）。
+    const bare = toTaskMatchInputs(
+      [{ title: "  ", dueDate: "10/8" }, { title: "Reading", dueDate: null }, null, "x"],
+      NOW,
+    )
+    check("作业改期输入：无标题 / 无日期不产生条目", bare.items.length === 0 && bare.skipped.length === 0,
+      `items=${bare.items.length} skipped=${bare.skipped.length}`)
+  }
+  {
+    // ⑫ 比**时刻**不比字符串：库回 `+00:00`、归一化后是 `Z` —— 同一瞬间不能判成"要改"。
+    const sameInstantRow = resolveTaskTargets(
+      [input({ dueDate: "2026-09-25T23:59:59Z" })],
+      [mkTask({ id: "a", dueDate: "2026-09-25T23:59:59+00:00" })],
+    )
+    check("作业改期：同一瞬间（不同写法）→ duplicate", sameInstantRow[0]!.kind === "duplicate",
+      sameInstantRow[0]!.kind)
+  }
 }
 
 console.log("")

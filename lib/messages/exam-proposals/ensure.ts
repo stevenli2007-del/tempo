@@ -10,8 +10,9 @@ import {
   resolveExamTargets,
   type ExamRowRef,
 } from '@/lib/course-update/exam-match'
-import { resolveTaskTargets, type TaskMatchInput } from '@/lib/course-update/task-match'
+import { toTaskMatchInputs, resolveTaskTargets } from '@/lib/course-update/task-match'
 import { readAttachmentExams } from '@/lib/messages/announcement-attachments'
+import { monthDayLabel, schoolDayKey } from '@/lib/time'
 import { t } from '@/lib/i18n/translate'
 import type { TaskCandidate } from '@/types/task'
 import type {
@@ -306,24 +307,24 @@ async function buildTaskProposals(input: {
 }): Promise<MessageTaskProposal[]> {
   const { supabase, courseId, rawTasks, messageId } = input
 
-  const items: TaskMatchInput[] = (Array.isArray(rawTasks) ? rawTasks : []).flatMap((raw) => {
-    if (!raw || typeof raw !== 'object') return []
-    const record = raw as Record<string, unknown>
-    const title = typeof record.title === 'string' ? record.title.trim() : ''
-    // 没有标题就没有可匹配的字面；没有截止日的"作业"谈不上改期（那是新建，本卡不做）。
-    if (title === '') return []
-    const dueDate = typeof record.dueDate === 'string' ? record.dueDate : null
-    if (dueDate === null) return []
-    return [
-      {
-        title,
-        dueDate,
-        notes: typeof record.notes === 'string' ? record.notes : null,
-        sourceExcerpt: typeof record.sourceExcerpt === 'string' ? record.sourceExcerpt : '',
-      },
-    ]
-  })
-  if (items.length === 0) return []
+  const { items, skipped } = toTaskMatchInputs(rawTasks)
+
+  // 读不懂的截止日期照样要出提案（R3：不吞）。这类条目没有可匹配的字面
+  // （连日期都不成形），所以不参与匹配，但仍要在消息里点名说出为什么没写。
+  const unreadable: MessageTaskProposal[] = skipped.map((item) => ({
+    title: item.title,
+    dueDate: null,
+    notes: null,
+    sourceExcerpt: '',
+    kind: 'unreadable_date' as const,
+    targetId: null,
+    beforeLabel: null,
+    afterLabel: item.rawDueDate,
+    candidates: [],
+    reason: t('zh', 'task.unreadableDate', { value: item.rawDueDate }),
+  }))
+
+  if (items.length === 0) return unreadable
 
   const { data: taskRows, error } = await supabase
     .from('tasks')
@@ -351,24 +352,43 @@ async function buildTaskProposals(input: {
     isDerived: row.is_derived,
   }))
 
-  const dueLabel = (value: string | null): string => value ?? t('zh', 'exam.tbd')
+  /**
+   * 作业那一侧的日期标签（P0-5-5 ②）。
+   *
+   * 🔴 必须统一到「10/6」这一种形状：旧值来自库（timestamptz 原串
+   * `2026-10-06T23:59:59+00:00`），新值来自模型（口语的 `10/8`）——
+   * 不统一的话「作业改期 旧 → 新」那一行左右不是一个东西，用户没法一眼看出改了什么，
+   * 而且带着 UTC 后缀看起来像"改到了另一个时区"。
+   * 解析不出来的按原样返回（宁可露出原串，也不要把值改写成"日期待定"骗人）。
+   */
+  const dueLabel = (value: string | null): string => {
+    if (typeof value !== 'string' || value.trim() === '') return t('zh', 'exam.tbd')
+    const parsed = new Date(value)
+    if (Number.isNaN(parsed.getTime())) return value
+    return monthDayLabel(schoolDayKey(parsed), 'zh')
+  }
 
-  return resolveTaskTargets(items, existing).map((resolution) => ({
-    title: resolution.task.title,
-    dueDate: resolution.task.dueDate,
-    notes: resolution.task.notes,
-    sourceExcerpt: resolution.task.sourceExcerpt,
-    kind: resolution.kind,
-    targetId: resolution.target?.id ?? null,
-    beforeLabel:
-      resolution.kind === 'update' && resolution.target ? dueLabel(resolution.target.dueDate) : null,
-    afterLabel: dueLabel(resolution.task.dueDate),
-    candidates: resolution.candidates.map((item) => ({
-      id: item.id,
-      label: `${item.title} · ${dueLabel(item.dueDate)}`,
+  return [
+    ...unreadable,
+    ...resolveTaskTargets(items, existing).map((resolution) => ({
+      title: resolution.task.title,
+      dueDate: resolution.task.dueDate,
+      notes: resolution.task.notes,
+      sourceExcerpt: resolution.task.sourceExcerpt,
+      kind: resolution.kind,
+      targetId: resolution.target?.id ?? null,
+      beforeLabel:
+        resolution.kind === 'update' && resolution.target
+          ? dueLabel(resolution.target.dueDate)
+          : null,
+      afterLabel: dueLabel(resolution.task.dueDate),
+      candidates: resolution.candidates.map((item) => ({
+        id: item.id,
+        label: `${item.title} · ${dueLabel(item.dueDate)}`,
+      })),
+      reason: resolution.reason,
     })),
-    reason: resolution.reason,
-  }))
+  ]
 }
 
 /**

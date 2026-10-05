@@ -1,4 +1,6 @@
 import { t } from '@/lib/i18n/translate'
+import { sameInstant } from '@/lib/time'
+import { normalizeDueDate } from '@/lib/tasks/manual'
 import type { Lang } from '@/lib/i18n/types'
 import type { TaskCandidate, TaskMatch } from '@/types/task'
 import { matchTasks } from '@/lib/tasks/match'
@@ -33,6 +35,14 @@ import { matchTasks } from '@/lib/tasks/match'
 /** 一条待写入的作业改期（只要匹配用得到的字段）。 */
 export type TaskMatchInput = {
   title: string
+  /**
+   * 归一化**之后**的截止时间（ISO / timestamptz 可解析串）。
+   *
+   * 🔴 绝不放模型给的展示串（`10/8`）：它进 `tasks.due_date`（timestamptz）会被
+   * Postgres 直接拒掉 —— `invalid input syntax for type timestamp with time zone: "10/8"`。
+   * 2026-10-05 在真库验收时当场撞到过。归一化由 `toTaskMatchInputs()` 负责，
+   * 与对话框那条路共用 `normalizeDueDate()`。
+   */
   dueDate: string | null
   notes: string | null
   /** 逐字原文摘录（与考试同款，进回执让用户核对）。 */
@@ -43,6 +53,51 @@ export type TaskMatchInput = {
    * - `string` = 指定这一条 → 强制走它（不可写就报原因，绝不退化成新增）。
    */
   targetTaskId?: string | null
+}
+
+/**
+ * 原始解析结果 → 可匹配的输入（P0-5-5 ②）。
+ *
+ * 模型给的 `dueDate` 是**给人看的**（`10/8`、`Oct 8`、有时干脆是 `next Friday`），
+ * 而写入目标是 timestamptz 列。这一步把它们统一成 ISO，并**把读不懂的挑出来**：
+ * 读不懂就如实说、不写，绝不吞掉（吞掉的表现是用户以为"老师说的没被处理"，
+ * 而其实公告里明明写了）。
+ *
+ * 两种情况**静默丢弃**，因为它们本来就不是"改期"：
+ * 没有标题（没有可匹配的字面）、没有截止日（那属于新建，本卡不做）。
+ */
+export function toTaskMatchInputs(
+  raw: unknown,
+  now: Date = new Date(),
+): { items: TaskMatchInput[]; skipped: { title: string; rawDueDate: string }[] } {
+  const items: TaskMatchInput[] = []
+  const skipped: { title: string; rawDueDate: string }[] = []
+
+  for (const entry of Array.isArray(raw) ? raw : []) {
+    if (!entry || typeof entry !== 'object') continue
+    const record = entry as Record<string, unknown>
+    const title = typeof record.title === 'string' ? record.title.trim() : ''
+    if (title === '') continue
+
+    const rawDueDate = typeof record.dueDate === 'string' ? record.dueDate.trim() : ''
+    if (rawDueDate === '') continue
+
+    // 与对话框建任务**同一套**归一化（含"缺年份 → 当前学年"推断）。
+    const due = normalizeDueDate(rawDueDate, now)
+    if (!due.ok || due.value === null) {
+      skipped.push({ title, rawDueDate })
+      continue
+    }
+
+    items.push({
+      title,
+      dueDate: due.value,
+      notes: typeof record.notes === 'string' ? record.notes : null,
+      sourceExcerpt: typeof record.sourceExcerpt === 'string' ? record.sourceExcerpt : '',
+    })
+  }
+
+  return { items, skipped }
 }
 
 /**
@@ -57,6 +112,7 @@ export type TaskMatchInput = {
  * | `blocked_canvas` | 只命中 Canvas 同步来的行 | 不写，如实说明去 Canvas 改 |
  * | `blocked_derived` | 只命中派生行（考试） | 不写，指向课程页 |
  * | `missing` | 指定了目标行但它不在 | 不写，回执点名 |
+ * | `unreadable_date` | 模型给的截止日期读不懂 | 不写，回执点名（**不吞**） |
  */
 export type TaskResolutionKind =
   | 'update'
@@ -66,6 +122,7 @@ export type TaskResolutionKind =
   | 'blocked_canvas'
   | 'blocked_derived'
   | 'missing'
+  | 'unreadable_date'
 
 export type TaskResolution = {
   task: TaskMatchInput
@@ -165,7 +222,11 @@ export function resolveTaskTargets(
 
     if (available.length === 1) {
       const row = available[0]!
-      if (row.dueDate === task.dueDate) {
+      // 🔴 比**时刻**，不比字符串：库回 `2026-09-28T23:59:59+00:00`，
+      // 归一化后的输入是 `2026-09-28T23:59:59Z` —— 同一个瞬间、不同写法。
+      // 用 `===` 会判成"变了"，于是把同一个日期重写一遍（总量看着没变，
+      // 但 `updated_at` 被无谓改动，且回执会说"改期成功"）。
+      if (sameInstant(row.dueDate, task.dueDate)) {
         results.push({
           task,
           kind: 'duplicate',

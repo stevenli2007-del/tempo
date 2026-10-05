@@ -353,6 +353,13 @@ export type TaskProposalKind =
   | 'blocked_canvas'
   | 'blocked_derived'
   | 'missing'
+  /**
+   * 模型给的截止日期读不懂（`next Friday` 之类）→ 不写，回执点名。
+   *
+   * 🔴 必须有这一档：把它归进 `unmatched` 会让用户以为"这门课里没有这条作业"，
+   * 而事实是"公告写了、只是日期没读懂"—— 两者的下一步动作完全不同。
+   */
+  | 'unreadable_date'
 
 /** 一条成绩构成提案（P0-3-29，与考试提案同批懒补 —— 省掉确认时那次解析）。 */
 export type MessageComponentProposal = {

@@ -120,6 +120,7 @@ const zh = {
   'task.missing': '你指定的那条任务已经不在了（可能被删），未写入',
   'task.claimed': '本批已有一条落到这一行，未重复写入',
   'task.unmatched': '这门课里没有对得上的任务，未写入（Tempo 不凭一条公告新建作业）',
+  'task.unreadableDate': '公告里写的截止日期没读懂（{value}），未写入',
   'task.sameDueDate': '这门课那条已经是这个截止日了，未重复写入',
   'task.ambiguous': '这门课有 {count} 条对得上的任务，Tempo 不替你猜是哪一条',
 
@@ -620,6 +621,7 @@ export const messages: Record<'zh' | 'en', Record<MessageKey, string>> = {
     'task.missing': 'The task you picked is gone (maybe deleted) — nothing was written',
     'task.claimed': 'This batch already wrote to that row — not written twice',
     'task.unmatched': 'No matching task in this course — nothing written (Tempo will not create an assignment from an announcement)',
+    'task.unreadableDate': "Couldn't read the due date in the announcement ({value}) — nothing written",
     'task.sameDueDate': 'That task already has this due date — nothing written',
     'task.ambiguous': 'There are {count} matching tasks in this course — Tempo will not guess which one you meant',
 

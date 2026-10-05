@@ -341,9 +341,21 @@ async function applyFromProposals(input: {
     }
     const beforeRow = before as { id: string; due_date: string | null }
 
+    // 🔴 写入前最后一道闸门。
+    // `due_date` 是 timestamptz：把模型给的展示串（`10/8`）直接塞进去，Postgres 会回
+    // `invalid input syntax for type timestamp with time zone`（2026-10-05 真库验收当场撞到）。
+    // 归一化已在提案层（`toTaskMatchInputs`）做过，这里再判一次是为了挡住
+    // **老 payload / 手工改库**那两条绕开提案层的路 —— 宁可少写一条，
+    // 也不要发一条注定被数据库拒掉的写请求（那会把失败原因埋进 Postgres 的报错文本里）。
+    if (item.dueDate === null || Number.isNaN(Date.parse(item.dueDate))) {
+      taskFailures.push(`${item.title}：截止日期不是合法时间（${item.dueDate ?? '空'}），未写入`)
+      continue
+    }
+    const nextDueDate = item.dueDate
+
     const { error: writeError } = await ctx.supabase
       .from('tasks')
-      .update({ due_date: item.dueDate })
+      .update({ due_date: nextDueDate })
       .eq('id', taskId)
       .eq('course_id', courseId)
       .eq('source', 'manual')
