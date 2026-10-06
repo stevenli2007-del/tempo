@@ -166,3 +166,29 @@
 
 ---
 
+---
+
+## 2026-10-06 蒸馏：由 `.workbuddy/memory/MEMORY.md` 迁入的逐卡细节
+
+> 目的：这些是「只有一处实现、写错就会静默出错」的唯一出处，原先只活在项目记忆里（`.workbuddy/` 被 gitignore，
+> Codex / Claude 等外部 agent 看不见）。蒸馏后落到 `docs/` 下 —— 进 git、谁都能搜到，同时给记忆索引腾出空间。
+
+### 唯一出处（改之前先 grep，别就地重写一份）
+
+| 卡 | 唯一实现点 | 容易踩错的地方 |
+|---|---|---|
+| `P0-3-34` 成绩 | `canvasTaskColumns()`（判定与写入同源） | `score_source='manual'` 时跳过两分数列；🔴 **卡面写的 `tasks.meta.scoreSource` 并不存在** |
+| `P0-3-33` 考试视觉 | `exam-mark.tsx`（走 `isExamTask()`）+ `COURSE_COLOR_CLASSES`（**静态字面量**）+ `build-signature.tsx` | Tailwind v4 扫不到运行时拼的类名，课程色必须静态字面量 |
+| 课程色分配 | `assignCourseColorKeys()` | **不是**逐课 `courseColorKey()` 哈希取模（4 门课撞色率 ≈81%）。按（哈希, id）全序发色：≤5 门互不相同、>5 循环；dashboard 与 /courses 从**全量非归档课程**算表下发四视图 → 跨页面同色 |
+| 总览三盒 | `task-list.tsx` 的 `CollapsibleBox`（待办 / 日期待定 / 最近已完成） | 🔴 **undated 判据 = `dueLabel === null`**，必须与行内渲染同源；「还有 N 条」只截 dated。「监控的外部课程链接」属**课程大纲** tab |
+| `P0-5-5` ② 作业改期 | `lib/course-update/task-match.ts` | 可写判据 = `manual + 非派生`（原先只在客户端 `use-course-update-flow.ts` 的 `isEditable` 里，已收进 lib 让两端同源）；**只改期不新增** |
+| `P0-5-5` ① 公告附件 | `lib/messages/announcement-attachments.ts` | 懒补时打**单条**公告端点（`discussion_topics/:id`）—— 批量端点窗口只有「当天+昨天」；原文**只在内存过一遍** |
+| `P0-5-5` ③ 提醒筛选 | `lib/reminders/select.ts` `selectReminderTasks()` | 🔴 顺序 = **先 `dropCanvasExamPlaceholders` 再 `isRemindable`** |
+
+### `P0-5-5` 验收结论（2026-10-05 Steven 通过，`f355c54` + `82bd5b5`）
+
+- ② 三轮实证：第 1 轮撞出真 bug（见 `CodingRules.md` §10.2 新增行）→ 修复后确认「行数不变、日期变」→ 撤销还原。
+- ③ 真库比对：pending 126 条 → 旧行为进邮件 48 / 新行为 45，挡掉的三条是 Chem 1A 的 canvas 空壳；
+  同课 `exam_dates` 权威源那三场考试**仍在列表里** → 去重了但没漏催。
+- ① **端到端无真数据**：5 门课带附件的公告只有 6 条、全是图片 → 判定层 8 条断言钉死，端到端等自然数据补验。
+- 播种脚本 `scripts/seed-p0552-acceptance.mjs` 一次性、已删；残留任务 / 公告 / 消息复核均为 0。
